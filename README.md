@@ -1,14 +1,14 @@
-# Fastest Empty Node Scheduler
+# Chronos Kubernetes Scheduler
 
-[![Tests](https://github.com/your-org/fastest-empty-node-scheduler/workflows/tests/badge.svg)](https://github.com/your-org/fastest-empty-node-scheduler/actions)
-[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen.svg)](https://github.com/your-org/fastest-empty-node-scheduler/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/your-org/fastest-empty-node-scheduler)](https://goreportcard.com/report/github.com/your-org/fastest-empty-node-scheduler)
+[![Tests](https://github.com/your-org/chronos-kubernetes-scheduler/workflows/tests/badge.svg)](https://github.com/your-org/chronos-kubernetes-scheduler/actions)
+[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen.svg)](https://github.com/your-org/chronos-kubernetes-scheduler/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/your-org/chronos-kubernetes-scheduler)](https://goreportcard.com/report/github.com/your-org/chronos-kubernetes-scheduler)
 
 A **production-ready** Kubernetes custom scheduler plugin that schedules pods on the node predicted to become empty the soonest, optimizing cluster resource utilization for workloads with predictable durations.
 
 ## 🎯 Overview
 
-The **FastestEmptyNode** scheduler plugin uses job duration annotations to predict when nodes will become available, then schedules new workloads on the node that will be free soonest. This approach:
+The **Chronos** scheduler plugin uses job duration annotations to predict when nodes will become available, then schedules new workloads on the node that will be free soonest. This approach:
 
 - **Reduces Wait Times**: New pods get scheduled on nodes that clear up quickly
 - **Balances Load**: Uses pod count as a tie-breaker for optimal distribution  
@@ -17,7 +17,7 @@ The **FastestEmptyNode** scheduler plugin uses job duration annotations to predi
 ## 🏗️ Architecture
 
 ```
-fastest-empty-node-scheduler/
+chronos-kubernetes-scheduler/
 ├── cmd/
 │   └── scheduler/
 │       └── main.go                    # Application entry point
@@ -65,7 +65,7 @@ make all
 make deploy
 
 # Check deployment status  
-kubectl get pods -n kube-system -l app=fastest-empty-node-scheduler
+kubectl get pods -n kube-system -l app=chronos-kubernetes-scheduler
 
 # View logs
 make logs
@@ -88,7 +88,7 @@ metadata:
   annotations:
     scheduling.workload.io/expected-duration-seconds: "300"  # Expected 5-minute runtime
 spec:
-  schedulerName: fastest-empty-node-scheduler
+  schedulerName: chronos-kubernetes-scheduler
   containers:
   - name: worker
     image: my-batch-job:latest
@@ -161,18 +161,18 @@ The scheduler uses a ConfigMap for configuration:
 apiVersion: kubescheduler.config.k8s.io/v1beta3
 kind: KubeSchedulerConfiguration
 profiles:
-- schedulerName: fastest-empty-node-scheduler
+- schedulerName: chronos-kubernetes-scheduler
   plugins:
     score:
       enabled:
-      - name: FastestEmptyNode
+      - name: Chronos
 ```
 
 ### Plugin Constants
 
 ```go
 const (
-    PluginName            = "FastestEmptyNode"
+    PluginName            = "Chronos"
     JobDurationAnnotation = "scheduling.workload.io/expected-duration-seconds"
     ScoreMultiplier       = 100  // Ensures time dominates capacity
 )

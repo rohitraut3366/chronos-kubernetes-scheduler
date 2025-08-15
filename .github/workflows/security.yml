@@ -127,10 +127,10 @@ jobs:
     - name: Run Trivy vulnerability scanner
       run: |
         # Scan for HIGH and CRITICAL vulnerabilities
-        trivy image --format sarif --output trivy-results.sarif fastest-empty-node-scheduler:latest
+        trivy image --format sarif --output trivy-results.sarif chronos-kubernetes-scheduler:latest
         
         # Also create a table format for human reading
-        trivy image --severity HIGH,CRITICAL fastest-empty-node-scheduler:latest
+        trivy image --severity HIGH,CRITICAL chronos-kubernetes-scheduler:latest
 
     - name: Upload Trivy SARIF results
       uses: github/codeql-action/upload-sarif@v2
@@ -300,8 +300,8 @@ jobs:
 
     - name: Generate SBOM for Docker image
       run: |
-        syft packages fastest-empty-node-scheduler:latest -o spdx-json=sbom-docker.spdx.json
-        syft packages fastest-empty-node-scheduler:latest -o table=sbom-docker.txt
+        syft packages chronos-kubernetes-scheduler:latest -o spdx-json=sbom-docker.spdx.json
+        syft packages chronos-kubernetes-scheduler:latest -o table=sbom-docker.txt
 
     - name: Upload SBOM artifacts
       uses: actions/upload-artifact@v3

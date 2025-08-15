@@ -19,7 +19,7 @@ package main
 import (
 	"os"
 
-	"fastest-empty-node-scheduler/internal/scheduler"
+	"chronos-kubernetes-scheduler/internal/scheduler"
 
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/cmd/kube-scheduler/app"

@@ -100,17 +100,17 @@ func calculateMockScore(newPodDuration, maxRemainingTime int64, currentPods int,
 
 func TestPluginBasics(t *testing.T) {
 	t.Run("PluginName", func(t *testing.T) {
-		plugin := &FastestEmptyNode{}
-		assert.Equal(t, "FastestEmptyNode", plugin.Name(), "Plugin should return the correct name")
+		plugin := &Chronos{}
+		assert.Equal(t, "Chronos", plugin.Name(), "Plugin should return the correct name")
 	})
 
 	t.Run("ScoreExtensions", func(t *testing.T) {
-		plugin := &FastestEmptyNode{}
+		plugin := &Chronos{}
 		assert.Nil(t, plugin.ScoreExtensions(), "ScoreExtensions should be nil for this plugin")
 	})
 
 	t.Run("Constants", func(t *testing.T) {
-		assert.Equal(t, "FastestEmptyNode", PluginName)
+		assert.Equal(t, "Chronos", PluginName)
 		assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation)
 		assert.Equal(t, 100, ScoreMultiplier, "ScoreMultiplier ensures time dominates balance")
 

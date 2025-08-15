@@ -19,7 +19,7 @@ metadata:
   annotations:
     # REQUIRED: Expected job duration in seconds (5 minutes)
     scheduling.workload.io/expected-duration-seconds: "300"
-    description: "Basic example demonstrating FastestEmptyNode scheduler"
+    description: "Basic example demonstrating Chronos scheduler"
 spec:
   # Job completes after one successful run
   completions: 1
@@ -35,7 +35,7 @@ spec:
         example: basic
     spec:
       # REQUIRED: Use our custom scheduler
-      schedulerName: fastest-empty-node-scheduler
+      schedulerName: chronos-kubernetes-scheduler
       
       restartPolicy: Never
       

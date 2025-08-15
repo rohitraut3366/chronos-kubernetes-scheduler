@@ -1,6 +1,6 @@
 # Web Service Example
 #
-# This example demonstrates using the FastestEmptyNode scheduler with a web service
+# This example demonstrates using the Chronos scheduler with a web service
 # that has predictable uptime patterns (8 hours). This could represent scheduled
 # services, development environments, or time-boxed applications.
 #
@@ -19,7 +19,7 @@ metadata:
     example: web-service
     service-type: time-bounded
   annotations:
-    description: "Time-bounded web service using FastestEmptyNode scheduler"
+    description: "Time-bounded web service using Chronos scheduler"
 spec:
   replicas: 2
   
@@ -38,7 +38,7 @@ spec:
         scheduling.workload.io/expected-duration-seconds: "28800"
     spec:
       # REQUIRED: Use our custom scheduler
-      schedulerName: fastest-empty-node-scheduler
+      schedulerName: chronos-kubernetes-scheduler
       
       containers:
       - name: web-server
@@ -61,7 +61,7 @@ spec:
               server_name localhost;
               
               location / {
-                  return 200 'Time-Bounded Web Service\nNode: $hostname\nStarted: $start_time\nUptime: $uptime_hours hours\nScheduler: fastest-empty-node-scheduler\n';
+                  return 200 'Time-Bounded Web Service\nNode: $hostname\nStarted: $start_time\nUptime: $uptime_hours hours\nScheduler: chronos-kubernetes-scheduler\n';
                   add_header Content-Type text/plain;
               }
               
@@ -238,7 +238,7 @@ data:
       health_check_path: /health
     
     scheduler:
-      name: fastest-empty-node-scheduler
+      name: chronos-kubernetes-scheduler
       expected_duration: 28800  # 8 hours
       workload_type: service
     

@@ -1,6 +1,6 @@
 # Variables
-BINARY_NAME=fastest-empty-node-scheduler
-IMAGE_NAME=fastest-empty-node-scheduler
+BINARY_NAME=chronos-kubernetes-scheduler
+IMAGE_NAME=chronos-kubernetes-scheduler
 VERSION?=latest
 LDFLAGS="-w -s"
 
@@ -134,7 +134,7 @@ undeploy:
 ## logs: View scheduler logs (requires kubectl)
 logs:
 	@echo "Fetching scheduler logs..."
-	kubectl logs -n kube-system -l app=fastest-empty-node-scheduler -f
+	kubectl logs -n kube-system -l app=chronos-kubernetes-scheduler -f
 
 ## install-tools: Install development tools
 install-tools:
@@ -155,7 +155,7 @@ ci: deps fmt vet lint test build
 helm-lint:
 	@echo "Linting Helm chart..."
 	@if command -v helm >/dev/null 2>&1; then \
-		helm lint charts/fastest-empty-node-scheduler; \
+		helm lint charts/chronos-kubernetes-scheduler; \
 		echo "✅ Helm chart linting completed"; \
 	else \
 		echo "⚠️  Helm not found. Skipping chart linting."; \
@@ -165,7 +165,7 @@ helm-lint:
 helm-template:
 	@echo "Templating Helm chart..."
 	@if command -v helm >/dev/null 2>&1; then \
-		helm template test-release charts/fastest-empty-node-scheduler; \
+		helm template test-release charts/chronos-kubernetes-scheduler; \
 		echo "✅ Helm chart templating completed"; \
 	else \
 		echo "⚠️  Helm not found. Skipping chart templating."; \
@@ -175,7 +175,7 @@ helm-template:
 helm-package:
 	@echo "Packaging Helm chart..."
 	@if command -v helm >/dev/null 2>&1; then \
-		helm package charts/fastest-empty-node-scheduler; \
+		helm package charts/chronos-kubernetes-scheduler; \
 		echo "✅ Helm chart packaged"; \
 	else \
 		echo "⚠️  Helm not found. Skipping chart packaging."; \
@@ -185,7 +185,7 @@ helm-package:
 helm-install:
 	@echo "Installing Helm chart..."
 	@if command -v helm >/dev/null 2>&1; then \
-		helm upgrade --install fastest-empty-node-scheduler charts/fastest-empty-node-scheduler \
+		helm upgrade --install chronos-kubernetes-scheduler charts/chronos-kubernetes-scheduler \
 			--namespace kube-system \
 			--set image.tag=latest; \
 		echo "✅ Helm chart installed"; \
@@ -197,7 +197,7 @@ helm-install:
 helm-uninstall:
 	@echo "Uninstalling Helm chart..."
 	@if command -v helm >/dev/null 2>&1; then \
-		helm uninstall fastest-empty-node-scheduler --namespace kube-system; \
+		helm uninstall chronos-kubernetes-scheduler --namespace kube-system; \
 		echo "✅ Helm chart uninstalled"; \
 	else \
 		echo "⚠️  Helm not found. Cannot uninstall chart."; \
@@ -207,7 +207,7 @@ helm-uninstall:
 helm-test:
 	@echo "Testing Helm chart..."
 	@if command -v helm >/dev/null 2>&1; then \
-		helm test fastest-empty-node-scheduler --namespace kube-system --logs; \
+		helm test chronos-kubernetes-scheduler --namespace kube-system --logs; \
 		echo "✅ Helm chart tests completed"; \
 	else \
 		echo "⚠️  Helm not found. Cannot run chart tests."; \
@@ -217,7 +217,7 @@ helm-test:
 helm-docs:
 	@echo "Generating Helm chart documentation..."
 	@if command -v helm-docs >/dev/null 2>&1; then \
-		helm-docs charts/fastest-empty-node-scheduler; \
+		helm-docs charts/chronos-kubernetes-scheduler; \
 		echo "✅ Helm documentation generated"; \
 	else \
 		echo "⚠️  helm-docs not found. Install with: go install github.com/norwoodj/helm-docs/cmd/helm-docs@latest"; \

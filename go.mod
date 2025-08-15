@@ -1,4 +1,4 @@
-module fastest-empty-node-scheduler
+module chronos-kubernetes-scheduler
 
 go 1.22.6
 

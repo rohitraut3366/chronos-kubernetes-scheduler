@@ -1,6 +1,6 @@
 # Fastest Empty Node Scheduler - Examples
 
-This directory contains example Kubernetes workloads that demonstrate how to use the **FastestEmptyNode** scheduler plugin effectively.
+This directory contains example Kubernetes workloads that demonstrate how to use the **Chronos** scheduler plugin effectively.
 
 ## 🎯 Prerequisites
 
@@ -11,7 +11,7 @@ This directory contains example Kubernetes workloads that demonstrate how to use
 
 2. **Verify the scheduler** is running:
    ```bash
-   kubectl get pods -n kube-system -l app=fastest-empty-node-scheduler
+   kubectl get pods -n kube-system -l app=chronos-kubernetes-scheduler
    ```
 
 3. **Check scheduler logs** (optional):
@@ -72,7 +72,7 @@ metadata:
 Specify our custom scheduler:
 ```yaml
 spec:
-  schedulerName: fastest-empty-node-scheduler
+  schedulerName: chronos-kubernetes-scheduler
 ```
 
 ### Scheduling Logic
@@ -151,7 +151,7 @@ metadata:
 spec:
   template:
     spec:
-      schedulerName: fastest-empty-node-scheduler
+      schedulerName: chronos-kubernetes-scheduler
       restartPolicy: Never
       containers:
       - name: worker

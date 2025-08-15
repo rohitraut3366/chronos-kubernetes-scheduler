@@ -30,35 +30,35 @@ import (
 
 const (
 	// PluginName is the name of the custom scheduler plugin.
-	PluginName = "FastestEmptyNode"
+	PluginName = "Chronos"
 	// JobDurationAnnotation is the annotation on a pod that specifies its expected runtime in seconds.
 	JobDurationAnnotation = "scheduling.workload.io/expected-duration-seconds"
 	// ScoreMultiplier is used to ensure the primary scoring factor (time) outweighs the tie-breaker (pod count).
 	ScoreMultiplier = 100
 )
 
-// FastestEmptyNode is a scheduler plugin that schedules pods on the node
+// Chronos is a scheduler plugin that schedules pods on the node
 // that is predicted to be empty the soonest. It uses pod count as a tie-breaker.
-type FastestEmptyNode struct {
+type Chronos struct {
 	handle framework.Handle
 }
 
 // New initializes a new plugin and returns it.
 func New(_ runtime.Object, h framework.Handle) (framework.Plugin, error) {
-	klog.Infof("Initializing FastestEmptyNode plugin")
-	return &FastestEmptyNode{
+	klog.Infof("Initializing Chronos plugin")
+	return &Chronos{
 		handle: h,
 	}, nil
 }
 
 // Name returns the name of the plugin.
-func (s *FastestEmptyNode) Name() string {
+func (s *Chronos) Name() string {
 	return PluginName
 }
 
 // Score is the core scheduling logic. It calculates a score for each node based on
 // when the node is expected to become idle.
-func (s *FastestEmptyNode) Score(ctx context.Context, state *framework.CycleState, p *v1.Pod, nodeName string) (int64, *framework.Status) {
+func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.Pod, nodeName string) (int64, *framework.Status) {
 	klog.Infof("Scoring pod %s/%s for node %s", p.Namespace, p.Name, nodeName)
 
 	// 1. Get the expected duration of the pod being scheduled.
@@ -145,6 +145,6 @@ func (s *FastestEmptyNode) Score(ctx context.Context, state *framework.CycleStat
 }
 
 // ScoreExtensions of the Score plugin.
-func (s *FastestEmptyNode) ScoreExtensions() framework.ScoreExtensions {
+func (s *Chronos) ScoreExtensions() framework.ScoreExtensions {
 	return nil
 }

@@ -1,13 +1,13 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: fastest-empty-node-scheduler
+  name: chronos-kubernetes-scheduler
   namespace: kube-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: fastest-empty-node-scheduler
+  name: chronos-kubernetes-scheduler
 rules:
 - apiGroups: [""]
   resources: ["pods"]
@@ -28,27 +28,27 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: fastest-empty-node-scheduler
+  name: chronos-kubernetes-scheduler
 subjects:
 - kind: ServiceAccount
-  name: fastest-empty-node-scheduler
+  name: chronos-kubernetes-scheduler
   namespace: kube-system
 roleRef:
   kind: ClusterRole
-  name: fastest-empty-node-scheduler
+  name: chronos-kubernetes-scheduler
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: fastest-empty-node-scheduler-config
+  name: chronos-kubernetes-scheduler-config
   namespace: kube-system
 data:
   config.yaml: |
     apiVersion: kubescheduler.config.k8s.io/v1beta3
     kind: KubeSchedulerConfiguration
     profiles:
-    - schedulerName: fastest-empty-node-scheduler
+    - schedulerName: chronos-kubernetes-scheduler
       plugins:
         score:
           enabled:
@@ -61,24 +61,24 @@ data:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: fastest-empty-node-scheduler
+  name: chronos-kubernetes-scheduler
   namespace: kube-system
   labels:
-    app: fastest-empty-node-scheduler
+    app: chronos-kubernetes-scheduler
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: fastest-empty-node-scheduler
+      app: chronos-kubernetes-scheduler
   template:
     metadata:
       labels:
-        app: fastest-empty-node-scheduler
+        app: chronos-kubernetes-scheduler
     spec:
-      serviceAccountName: fastest-empty-node-scheduler
+      serviceAccountName: chronos-kubernetes-scheduler
       containers:
       - name: scheduler
-        image: fastest-empty-node-scheduler:latest
+        image: chronos-kubernetes-scheduler:latest
         imagePullPolicy: IfNotPresent
         command:
         - /scheduler
@@ -109,7 +109,7 @@ spec:
       volumes:
       - name: config
         configMap:
-          name: fastest-empty-node-scheduler-config
+          name: chronos-kubernetes-scheduler-config
       tolerations:
       - key: node-role.kubernetes.io/control-plane
         operator: Exists

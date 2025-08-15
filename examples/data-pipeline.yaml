@@ -1,6 +1,6 @@
 # Data Pipeline Example
 #
-# This example demonstrates using the FastestEmptyNode scheduler for ETL
+# This example demonstrates using the Chronos scheduler for ETL
 # (Extract, Transform, Load) data processing pipelines. The job runs for
 # 30 minutes and shows how the scheduler optimizes placement for I/O and
 # compute-intensive data workflows.
@@ -21,7 +21,7 @@ metadata:
   annotations:
     # REQUIRED: Expected pipeline duration (30 minutes = 1800 seconds)
     scheduling.workload.io/expected-duration-seconds: "1800"
-    description: "ETL data pipeline using FastestEmptyNode scheduler"
+    description: "ETL data pipeline using Chronos scheduler"
     data-source: "s3://data-lake/raw/"
     data-destination: "s3://data-warehouse/processed/"
 spec:
@@ -46,7 +46,7 @@ spec:
         workload-type: data-processing
     spec:
       # REQUIRED: Use our custom scheduler
-      schedulerName: fastest-empty-node-scheduler
+      schedulerName: chronos-kubernetes-scheduler
       
       restartPolicy: Never
       
@@ -273,7 +273,7 @@ data:
         format: parquet
     
     scheduler:
-      name: fastest-empty-node-scheduler
+      name: chronos-kubernetes-scheduler
       expected_duration: 1800
       workload_type: data-processing
     

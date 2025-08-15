@@ -18,7 +18,7 @@ metadata:
     app: scheduler-example
     example: batch-job
   annotations:
-    description: "Recurring batch job using FastestEmptyNode scheduler"
+    description: "Recurring batch job using Chronos scheduler"
 spec:
   # Run every 15 minutes
   schedule: "*/15 * * * *"
@@ -55,7 +55,7 @@ spec:
             scheduling.workload.io/expected-duration-seconds: "600"
         spec:
           # REQUIRED: Use our custom scheduler
-          schedulerName: fastest-empty-node-scheduler
+          schedulerName: chronos-kubernetes-scheduler
           
           restartPolicy: Never
           
@@ -155,8 +155,8 @@ data:
       timeout: 600s
       retries: 3
     
-    scheduler:
-      name: fastest-empty-node-scheduler
+          scheduler:
+        name: chronos-kubernetes-scheduler
       expected_duration: 600
       
     logging:
