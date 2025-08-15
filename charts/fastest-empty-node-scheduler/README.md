@@ -108,7 +108,7 @@ scheduler:
 | `image.pullPolicy` | string | `"IfNotPresent"` | Image pull policy |
 | `scheduler.name` | string | `"fastest-empty-node-scheduler"` | Scheduler name |
 | `scheduler.plugin.name` | string | `"FastestEmptyNode"` | Plugin name |
-| `scheduler.plugin.jobDurationAnnotation` | string | `"job-duration.example.com/seconds"` | Duration annotation key |
+| `scheduler.plugin.jobDurationAnnotation` | string | `"scheduling.workload.io/expected-duration-seconds"` | Duration annotation key |
 | `scheduler.plugin.scoreMultiplier` | int | `100` | Score multiplier for time vs capacity |
 | `resources.requests.cpu` | string | `"100m"` | CPU request |
 | `resources.requests.memory` | string | `"128Mi"` | Memory request |
@@ -132,7 +132,7 @@ kind: Pod
 metadata:
   name: my-workload
   annotations:
-    job-duration.example.com/seconds: "300"  # 5 minutes
+    scheduling.workload.io/expected-duration-seconds: "300"  # 5 minutes
 spec:
   schedulerName: fastest-empty-node-scheduler  # Use your configured scheduler name
   containers:

@@ -86,7 +86,7 @@ kind: Pod
 metadata:
   name: my-batch-job
   annotations:
-    job-duration.example.com/seconds: "300"  # Expected 5-minute runtime
+    scheduling.workload.io/expected-duration-seconds: "300"  # Expected 5-minute runtime
 spec:
   schedulerName: fastest-empty-node-scheduler
   containers:
@@ -173,7 +173,7 @@ profiles:
 ```go
 const (
     PluginName            = "FastestEmptyNode"
-    JobDurationAnnotation = "job-duration.example.com/seconds"
+    JobDurationAnnotation = "scheduling.workload.io/expected-duration-seconds"
     ScoreMultiplier       = 100  // Ensures time dominates capacity
 )
 ```

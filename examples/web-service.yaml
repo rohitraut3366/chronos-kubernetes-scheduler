@@ -35,7 +35,7 @@ spec:
         service-type: time-bounded
       annotations:
         # REQUIRED: Expected service uptime (8 hours = 28800 seconds)
-        job-duration.example.com/seconds: "28800"
+        scheduling.workload.io/expected-duration-seconds: "28800"
     spec:
       # REQUIRED: Use our custom scheduler
       schedulerName: fastest-empty-node-scheduler

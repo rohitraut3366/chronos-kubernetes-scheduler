@@ -62,7 +62,7 @@ spec:
         name: scheduler-test-pod
         namespace: {{ .Release.Namespace }}
         annotations:
-          job-duration.example.com/seconds: "60"
+          scheduling.workload.io/expected-duration-seconds: "60"
       spec:
         schedulerName: {{ .Values.scheduler.name }}
         restartPolicy: Never

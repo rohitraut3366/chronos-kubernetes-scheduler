@@ -41,7 +41,7 @@ scheduler:
     # -- Plugin name
     name: FastestEmptyNode
     # -- Job duration annotation key
-    jobDurationAnnotation: "job-duration.example.com/seconds"
+    jobDurationAnnotation: "scheduling.workload.io/expected-duration-seconds"
     # -- Score multiplier for time vs capacity balance
     scoreMultiplier: 100
   

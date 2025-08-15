@@ -111,7 +111,7 @@ func TestPluginBasics(t *testing.T) {
 
 	t.Run("Constants", func(t *testing.T) {
 		assert.Equal(t, "FastestEmptyNode", PluginName)
-		assert.Equal(t, "job-duration.example.com/seconds", JobDurationAnnotation)
+		assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation)
 		assert.Equal(t, 100, ScoreMultiplier, "ScoreMultiplier ensures time dominates balance")
 
 		t.Logf("✅ Constants validated - framework.MaxNodeScore = %d", framework.MaxNodeScore)

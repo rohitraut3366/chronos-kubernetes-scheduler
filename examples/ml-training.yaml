@@ -19,7 +19,7 @@ metadata:
     workload-type: compute-intensive
   annotations:
     # REQUIRED: Expected training duration (2 hours = 7200 seconds)
-    job-duration.example.com/seconds: "7200"
+    scheduling.workload.io/expected-duration-seconds: "7200"
     description: "ML model training using FastestEmptyNode scheduler"
     model-type: "neural-network"
     dataset-size: "10GB"

@@ -18,7 +18,7 @@ metadata:
     example: basic
   annotations:
     # REQUIRED: Expected job duration in seconds (5 minutes)
-    job-duration.example.com/seconds: "300"
+    scheduling.workload.io/expected-duration-seconds: "300"
     description: "Basic example demonstrating FastestEmptyNode scheduler"
 spec:
   # Job completes after one successful run

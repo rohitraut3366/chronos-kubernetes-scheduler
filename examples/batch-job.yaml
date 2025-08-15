@@ -52,7 +52,7 @@ spec:
             example: batch-job
           annotations:
             # REQUIRED: Expected processing duration (10 minutes)
-            job-duration.example.com/seconds: "600"
+            scheduling.workload.io/expected-duration-seconds: "600"
         spec:
           # REQUIRED: Use our custom scheduler
           schedulerName: fastest-empty-node-scheduler

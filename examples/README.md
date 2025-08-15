@@ -65,7 +65,7 @@ All workloads must include the duration annotation:
 ```yaml
 metadata:
   annotations:
-    job-duration.example.com/seconds: "300"  # Expected runtime in seconds
+    scheduling.workload.io/expected-duration-seconds: "300"  # Expected runtime in seconds
 ```
 
 ### Scheduler Selection
@@ -147,7 +147,7 @@ kind: Job
 metadata:
   name: my-custom-job
   annotations:
-    job-duration.example.com/seconds: "900"  # 15 minutes
+    scheduling.workload.io/expected-duration-seconds: "900"  # 15 minutes
 spec:
   template:
     spec:

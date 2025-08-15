@@ -32,7 +32,7 @@ const (
 	// PluginName is the name of the custom scheduler plugin.
 	PluginName = "FastestEmptyNode"
 	// JobDurationAnnotation is the annotation on a pod that specifies its expected runtime in seconds.
-	JobDurationAnnotation = "job-duration.example.com/seconds"
+	JobDurationAnnotation = "scheduling.workload.io/expected-duration-seconds"
 	// ScoreMultiplier is used to ensure the primary scoring factor (time) outweighs the tie-breaker (pod count).
 	ScoreMultiplier = 100
 )

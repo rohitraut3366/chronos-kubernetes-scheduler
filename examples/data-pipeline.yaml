@@ -20,7 +20,7 @@ metadata:
     workload-type: data-processing
   annotations:
     # REQUIRED: Expected pipeline duration (30 minutes = 1800 seconds)
-    job-duration.example.com/seconds: "1800"
+    scheduling.workload.io/expected-duration-seconds: "1800"
     description: "ETL data pipeline using FastestEmptyNode scheduler"
     data-source: "s3://data-lake/raw/"
     data-destination: "s3://data-warehouse/processed/"
