@@ -1,0 +1,56 @@
+apiVersion: v2
+name: chronos-kubernetes-scheduler
+description: A time-aware Kubernetes scheduler that optimizes pod placement based on workload duration predictions
+type: application
+
+# Chart version - increment when making changes to the chart
+version: 0.1.0
+
+# Application version - should match the scheduler version
+appVersion: "v1.0.0"
+
+# Chart keywords for discoverability
+keywords:
+  - kubernetes
+  - scheduler
+  - plugin
+  - performance
+  - optimization
+  - load-balancing
+
+# Chart homepage and sources
+home: https://github.com/your-org/chronos-kubernetes-scheduler
+sources:
+  - https://github.com/your-org/chronos-kubernetes-scheduler
+
+# Chart maintainers
+maintainers:
+  - name: Your Name
+    email: your-email@example.com
+
+# Minimum Kubernetes version required
+kubeVersion: ">=1.28.0"
+
+# Chart annotations for additional metadata
+annotations:
+  category: Infrastructure
+  licenses: Apache-2.0
+  
+  # Changelog annotations (for release automation)
+  artifacthub.io/changes: |
+    - kind: added
+      description: Initial Helm chart for Chronos scheduler
+    - kind: added
+      description: Support for custom configuration values
+    - kind: added
+      description: RBAC and security configurations
+  
+  # Images annotations (for security scanning)
+  artifacthub.io/images: |
+    - name: chronos-kubernetes-scheduler
+      image: ghcr.io/your-org/chronos-kubernetes-scheduler:v1.0.0
+  
+  # Security and operational annotations
+  artifacthub.io/operator: "false"
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/containsSecurityUpdates: "false"

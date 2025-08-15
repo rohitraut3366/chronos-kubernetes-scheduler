@@ -1,0 +1,284 @@
+# Default values for chronos-kubernetes-scheduler
+# This is a YAML-formatted file that declares variables to be passed into templates
+
+# -- Global configuration
+global:
+  # -- Global image registry override
+  imageRegistry: ""
+  # -- Global image pull secrets
+  imagePullSecrets: []
+
+# -- Image configuration  
+image:
+  # -- Image registry
+  registry: ghcr.io
+  # -- Image repository
+  repository: your-org/chronos-kubernetes-scheduler
+  # -- Image tag (defaults to chart appVersion if not set)
+  tag: ""
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+
+# -- Override the name of the chart
+nameOverride: ""
+
+# -- Override the full name of the resources
+fullnameOverride: ""
+
+# -- Number of scheduler replicas (usually 1 for leader election)
+replicaCount: 1
+
+# -- Scheduler configuration
+scheduler:
+  # -- Scheduler name (must match the schedulerName in pods)
+  name: chronos-kubernetes-scheduler
+  
+  # -- Plugin configuration
+  plugin:
+    # -- Plugin name
+    name: Chronos
+    # -- Job duration annotation key
+    jobDurationAnnotation: "scheduling.workload.io/expected-duration-seconds"
+    # -- Score multiplier for time vs capacity balance
+    scoreMultiplier: 100
+  
+  # -- Leader election settings (for HA)
+  leaderElection:
+    enabled: false
+    # -- Lease duration
+    leaseDuration: 15s
+    # -- Renew deadline  
+    renewDeadline: 10s
+    # -- Retry period
+    retryPeriod: 2s
+
+# -- Service account configuration
+serviceAccount:
+  # -- Specifies whether a service account should be created
+  create: true
+  # -- Annotations to add to the service account
+  annotations: {}
+  # -- The name of the service account to use
+  name: ""
+
+# -- RBAC configuration
+rbac:
+  # -- Specifies whether RBAC resources should be created
+  create: true
+  # -- Additional rules to add to the cluster role
+  rules: []
+
+# -- Security context for pods
+podSecurityContext:
+  # -- Run as non-root user
+  runAsNonRoot: true
+  # -- User ID to run containers
+  runAsUser: 65532
+  # -- Group ID to run containers  
+  runAsGroup: 65532
+  # -- FSGroup for volume permissions
+  fsGroup: 65532
+
+# -- Security context for containers
+securityContext:
+  # -- Allow privilege escalation
+  allowPrivilegeEscalation: false
+  # -- Run as non-root
+  runAsNonRoot: true
+  # -- User ID
+  runAsUser: 65532
+  # -- Read-only root filesystem
+  readOnlyRootFilesystem: true
+  # -- Capabilities
+  capabilities:
+    drop:
+      - ALL
+
+# -- Resource limits and requests
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# -- Node selector for scheduler placement
+nodeSelector:
+  kubernetes.io/os: linux
+
+# -- Tolerations for scheduler pods
+tolerations:
+  # -- Tolerate master/control-plane taints
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+  - key: node-role.kubernetes.io/master
+    operator: Exists
+    effect: NoSchedule
+
+# -- Affinity rules for scheduler placement  
+affinity:
+  # Prefer to run on control plane nodes
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      preference:
+        matchExpressions:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+    - weight: 50
+      preference:
+        matchExpressions:
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+
+# -- Pod disruption budget
+podDisruptionBudget:
+  # -- Enable pod disruption budget
+  enabled: false
+  # -- Minimum available pods
+  minAvailable: 1
+  # -- Maximum unavailable pods (alternative to minAvailable)
+  maxUnavailable: ""
+
+# -- Horizontal Pod Autoscaler (not recommended for schedulers)
+autoscaling:
+  # -- Enable HPA
+  enabled: false
+  # -- Minimum replicas
+  minReplicas: 1
+  # -- Maximum replicas
+  maxReplicas: 3
+  # -- CPU utilization target
+  targetCPUUtilizationPercentage: 80
+
+# -- Probes configuration
+probes:
+  # -- Liveness probe settings
+  liveness:
+    # -- Enable liveness probe
+    enabled: true
+    # -- Initial delay before probing
+    initialDelaySeconds: 30
+    # -- Probe period
+    periodSeconds: 30
+    # -- Probe timeout
+    timeoutSeconds: 5
+    # -- Success threshold
+    successThreshold: 1
+    # -- Failure threshold
+    failureThreshold: 3
+  
+  # -- Readiness probe settings
+  readiness:
+    # -- Enable readiness probe
+    enabled: true
+    # -- Initial delay before probing
+    initialDelaySeconds: 15
+    # -- Probe period
+    periodSeconds: 10
+    # -- Probe timeout
+    timeoutSeconds: 3
+    # -- Success threshold
+    successThreshold: 1
+    # -- Failure threshold
+    failureThreshold: 2
+
+# -- Logging configuration
+logging:
+  # -- Log verbosity level (0-10)
+  level: 2
+  # -- Log format (text or json)
+  format: text
+
+# -- Metrics and monitoring
+metrics:
+  # -- Enable metrics endpoint
+  enabled: true
+  # -- Metrics port
+  port: 10259
+  # -- ServiceMonitor for Prometheus
+  serviceMonitor:
+    # -- Create ServiceMonitor
+    enabled: false
+    # -- Additional labels
+    labels: {}
+    # -- Scrape interval
+    interval: 30s
+    # -- Scrape timeout
+    scrapeTimeout: 10s
+
+# -- Pod annotations
+podAnnotations: {}
+
+# -- Pod labels
+podLabels: {}
+
+# -- Deployment strategy
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+# -- Additional environment variables
+extraEnv: []
+  # - name: CUSTOM_ENV_VAR
+  #   value: "custom-value"
+
+# -- Additional volumes
+extraVolumes: []
+  # - name: custom-config
+  #   configMap:
+  #     name: custom-config
+
+# -- Additional volume mounts
+extraVolumeMounts: []
+  # - name: custom-config
+  #   mountPath: /etc/custom
+  #   readOnly: true
+
+# -- Additional containers (sidecars)
+extraContainers: []
+  # - name: sidecar
+  #   image: sidecar:latest
+
+# -- Init containers
+initContainers: []
+  # - name: init-container
+  #   image: init:latest
+
+# -- Network policy
+networkPolicy:
+  # -- Enable network policy
+  enabled: false
+  # -- Ingress rules
+  ingress: []
+  # -- Egress rules  
+  egress: []
+
+# -- Priority class for scheduler pods
+priorityClassName: system-cluster-critical
+
+# -- DNS policy
+dnsPolicy: ClusterFirst
+
+# -- Restart policy
+restartPolicy: Always
+
+# -- Termination grace period
+terminationGracePeriodSeconds: 30
+
+# -- Test configuration (for helm test)
+tests:
+  # -- Enable tests
+  enabled: true
+  # -- Test image
+  image:
+    repository: busybox
+    tag: "1.36"
+    pullPolicy: IfNotPresent

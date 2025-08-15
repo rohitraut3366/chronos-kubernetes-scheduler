@@ -1,0 +1,44 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "chronos-kubernetes-scheduler.fullname" . }}
+  labels:
+    {{- include "chronos-kubernetes-scheduler.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch", "update"]
+{{- if .Values.scheduler.leaderElection.enabled }}
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+{{- end }}
+- apiGroups: ["events.k8s.io"]
+  resources: ["events"]
+  verbs: ["create", "patch", "update"]
+{{- with .Values.rbac.rules }}
+{{- toYaml . | nindent 0 }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "chronos-kubernetes-scheduler.fullname" . }}
+  labels:
+    {{- include "chronos-kubernetes-scheduler.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "chronos-kubernetes-scheduler.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace | quote }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "chronos-kubernetes-scheduler.fullname" . }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
