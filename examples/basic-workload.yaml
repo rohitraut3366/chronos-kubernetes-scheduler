@@ -1,0 +1,93 @@
+# Basic Workload Example
+# 
+# This is the simplest example of using the FastestEmptyNode scheduler.
+# It creates a job that runs for 5 minutes (300 seconds) and demonstrates
+# the basic scheduling annotation and scheduler selection.
+#
+# Usage:
+#   kubectl apply -f basic-workload.yaml
+#   kubectl get pods -o wide  # See where it was scheduled
+#   kubectl logs -f job/basic-workload  # Watch progress
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: basic-workload
+  labels:
+    app: scheduler-example
+    example: basic
+  annotations:
+    # REQUIRED: Expected job duration in seconds (5 minutes)
+    job-duration.example.com/seconds: "300"
+    description: "Basic example demonstrating FastestEmptyNode scheduler"
+spec:
+  # Job completes after one successful run
+  completions: 1
+  parallelism: 1
+  
+  # Clean up completed job after 10 minutes
+  ttlSecondsAfterFinished: 600
+  
+  template:
+    metadata:
+      labels:
+        app: scheduler-example
+        example: basic
+    spec:
+      # REQUIRED: Use our custom scheduler
+      schedulerName: fastest-empty-node-scheduler
+      
+      restartPolicy: Never
+      
+      containers:
+      - name: worker
+        image: busybox:1.36
+        
+        # Simulate 5 minutes of work
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          echo "Starting basic workload at $(date)"
+          echo "Expected duration: 300 seconds (5 minutes)"
+          echo "Node: $NODE_NAME"
+          echo "Pod: $POD_NAME"
+          
+          # Simulate work with periodic progress updates
+          for i in $(seq 1 30); do
+            echo "Progress: ${i}/30 ($(date))"
+            sleep 10
+          done
+          
+          echo "Basic workload completed successfully at $(date)"
+        
+        # Resource requests help scheduler make informed decisions
+        resources:
+          requests:
+            cpu: "100m"        # 0.1 CPU core
+            memory: "64Mi"     # 64 MB memory
+          limits:
+            cpu: "200m"        # Max 0.2 CPU core
+            memory: "128Mi"    # Max 128 MB memory
+        
+        # Environment variables for logging
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+      
+      # Prefer scheduling on general-purpose nodes
+      nodeSelector:
+        kubernetes.io/os: linux
+      
+      # Tolerate common node taints
+      tolerations:
+      - key: node.kubernetes.io/not-ready
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 300

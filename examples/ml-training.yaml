@@ -1,0 +1,227 @@
+# Machine Learning Training Example
+#
+# This example demonstrates using the FastestEmptyNode scheduler for long-running
+# ML training workloads. The job runs for 2 hours and shows how the scheduler 
+# can optimize placement for compute-intensive, time-predictable workloads.
+#
+# Usage:
+#   kubectl apply -f ml-training.yaml
+#   kubectl get jobs ml-training-job -o wide
+#   kubectl logs -f job/ml-training-job  # Monitor training progress
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ml-training-job
+  labels:
+    app: scheduler-example
+    example: ml-training
+    workload-type: compute-intensive
+  annotations:
+    # REQUIRED: Expected training duration (2 hours = 7200 seconds)
+    job-duration.example.com/seconds: "7200"
+    description: "ML model training using FastestEmptyNode scheduler"
+    model-type: "neural-network"
+    dataset-size: "10GB"
+spec:
+  # Single training run
+  completions: 1
+  parallelism: 1
+  
+  # Allow 2.5 hours total (buffer for initialization)
+  activeDeadlineSeconds: 9000
+  
+  # Keep job around for 30 minutes after completion for log review
+  ttlSecondsAfterFinished: 1800
+  
+  template:
+    metadata:
+      labels:
+        app: ml-training
+        example: ml-training
+        workload-type: compute-intensive
+    spec:
+      # REQUIRED: Use our custom scheduler
+      schedulerName: fastest-empty-node-scheduler
+      
+      restartPolicy: Never
+      
+      containers:
+      - name: trainer
+        image: python:3.11-slim
+        
+        command: ["/bin/bash"]
+        args:
+        - -c
+        - |
+          echo "========================================="
+          echo "ML Training Job Starting"
+          echo "Time: $(date)"
+          echo "Node: $NODE_NAME"
+          echo "Pod: $POD_NAME"
+          echo "Expected Duration: 7200 seconds (2 hours)"
+          echo "Model Type: $MODEL_TYPE"
+          echo "Dataset Size: $DATASET_SIZE"
+          echo "========================================="
+          
+          # Simulate ML training phases with realistic timing
+          
+          echo "Phase 1: Environment Setup (5 minutes)"
+          echo "Installing dependencies..."
+          sleep 60
+          echo "Loading training frameworks..."
+          sleep 120
+          echo "Initializing GPU context..." 
+          sleep 120
+          echo "Environment ready!"
+          
+          echo ""
+          echo "Phase 2: Data Loading & Preprocessing (15 minutes)"
+          for i in $(seq 1 15); do
+            echo "  Loading data batch $i/15 ($(date))"
+            sleep 60
+          done
+          echo "Data preprocessing completed!"
+          
+          echo ""
+          echo "Phase 3: Model Training (100 minutes)"
+          for epoch in $(seq 1 20); do
+            echo "  Epoch $epoch/20 ($(date))"
+            for batch in $(seq 1 5); do
+              echo "    Training batch $batch/5..."
+              sleep 60
+            done
+            
+            # Simulate validation every 5 epochs
+            if [ $((epoch % 5)) -eq 0 ]; then
+              echo "    Running validation..."
+              sleep 30
+              echo "    Validation accuracy: $((RANDOM % 20 + 75))%"
+            fi
+          done
+          echo "Training completed!"
+          
+          echo ""
+          echo "Phase 4: Model Evaluation & Export (10 minutes)"
+          echo "Running final evaluation..."
+          sleep 300
+          echo "Final accuracy: $((RANDOM % 10 + 88))%"
+          
+          echo "Exporting trained model..."
+          sleep 300
+          echo "Model saved to /models/trained_model.pth"
+          
+          echo "Generating training report..."
+          sleep 300
+          
+          echo "========================================="
+          echo "ML Training Completed Successfully"
+          echo "Time: $(date)"
+          echo "Total Duration: ~7200 seconds (2 hours)"
+          echo "Model ready for deployment!"
+          echo "========================================="
+        
+        # High resource requirements for ML training
+        resources:
+          requests:
+            cpu: "2000m"       # 2 CPU cores minimum
+            memory: "4Gi"      # 4 GB memory minimum
+          limits:
+            cpu: "4000m"       # Max 4 CPU cores
+            memory: "8Gi"      # Max 8 GB memory
+        
+        # Environment configuration
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: MODEL_TYPE
+          value: "neural-network"
+        - name: DATASET_SIZE
+          value: "10GB"
+        - name: BATCH_SIZE
+          value: "32"
+        - name: LEARNING_RATE
+          value: "0.001"
+        - name: EPOCHS
+          value: "20"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        
+        # Volume mounts for model storage (optional)
+        volumeMounts:
+        - name: model-storage
+          mountPath: /models
+        - name: tmp-storage
+          mountPath: /tmp/training
+      
+      # Prefer compute-optimized nodes for ML training
+      nodeSelector:
+        kubernetes.io/os: linux
+        # Uncomment if you have GPU nodes labeled
+        # accelerator: gpu
+        # node-type: compute-optimized
+      
+      # Tolerate ML workload taints
+      tolerations:
+      - key: ml-workloads
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      - key: gpu-workloads
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      - key: compute-intensive
+        operator: Exists
+        effect: NoSchedule
+      
+      volumes:
+      - name: model-storage
+        emptyDir:
+          sizeLimit: 2Gi
+      - name: tmp-storage
+        emptyDir:
+          sizeLimit: 5Gi
+
+---
+# Optional: HPA for similar training jobs (if using multiple parallel trainings)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ml-training-config
+  labels:
+    app: scheduler-example
+    example: ml-training
+data:
+  training-config.yaml: |
+    model:
+      type: neural-network
+      architecture: resnet50
+      layers: 50
+    
+    training:
+      batch_size: 32
+      learning_rate: 0.001
+      epochs: 20
+      optimizer: adam
+      loss_function: cross_entropy
+    
+    scheduler:
+      name: fastest-empty-node-scheduler
+      expected_duration: 7200  # 2 hours
+      resource_intensive: true
+    
+    resources:
+      cpu_cores: 2-4
+      memory_gb: 4-8
+      storage_gb: 10
+    
+    logging:
+      level: info
+      checkpoint_frequency: 5  # Save every 5 epochs

@@ -1,0 +1,266 @@
+# Web Service Example
+#
+# This example demonstrates using the FastestEmptyNode scheduler with a web service
+# that has predictable uptime patterns (8 hours). This could represent scheduled
+# services, development environments, or time-boxed applications.
+#
+# Usage:
+#   kubectl apply -f web-service.yaml
+#   kubectl get deployment web-service -o wide
+#   kubectl get pods -l app=web-service -o wide
+#   kubectl port-forward service/web-service 8080:80  # Access the service
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-service
+  labels:
+    app: scheduler-example
+    example: web-service
+    service-type: time-bounded
+  annotations:
+    description: "Time-bounded web service using FastestEmptyNode scheduler"
+spec:
+  replicas: 2
+  
+  selector:
+    matchLabels:
+      app: web-service
+  
+  template:
+    metadata:
+      labels:
+        app: web-service
+        example: web-service
+        service-type: time-bounded
+      annotations:
+        # REQUIRED: Expected service uptime (8 hours = 28800 seconds)
+        job-duration.example.com/seconds: "28800"
+    spec:
+      # REQUIRED: Use our custom scheduler
+      schedulerName: fastest-empty-node-scheduler
+      
+      containers:
+      - name: web-server
+        image: nginx:1.25-alpine
+        
+        ports:
+        - containerPort: 80
+          name: http
+          protocol: TCP
+        
+        # Custom startup script with timing
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          # Create custom nginx config
+          cat > /etc/nginx/conf.d/default.conf << 'EOF'
+          server {
+              listen 80;
+              server_name localhost;
+              
+              location / {
+                  return 200 'Time-Bounded Web Service\nNode: $hostname\nStarted: $start_time\nUptime: $uptime_hours hours\nScheduler: fastest-empty-node-scheduler\n';
+                  add_header Content-Type text/plain;
+              }
+              
+              location /health {
+                  return 200 'OK';
+                  add_header Content-Type text/plain;
+              }
+              
+              location /metrics {
+                  return 200 'uptime_hours $uptime_hours\nrequests_total $request_count\n';
+                  add_header Content-Type text/plain;
+              }
+          }
+          EOF
+          
+          echo "========================================="
+          echo "Time-Bounded Web Service Starting"
+          echo "Time: $(date)"
+          echo "Node: $NODE_NAME"
+          echo "Pod: $POD_NAME"
+          echo "Expected Runtime: 28800 seconds (8 hours)"
+          echo "========================================="
+          
+          # Start nginx in background
+          nginx -g 'daemon off;' &
+          NGINX_PID=$!
+          
+          # Service lifecycle management
+          START_TIME=$(date +%s)
+          UPTIME_HOURS=0
+          REQUEST_COUNT=0
+          
+          # Run for exactly 8 hours, then graceful shutdown
+          while [ $UPTIME_HOURS -lt 8 ]; do
+            sleep 300  # Check every 5 minutes
+            
+            CURRENT_TIME=$(date +%s)
+            UPTIME_SECONDS=$((CURRENT_TIME - START_TIME))
+            UPTIME_HOURS=$((UPTIME_SECONDS / 3600))
+            
+            echo "Service Status: $(date) - Uptime: ${UPTIME_HOURS}h ${UPTIME_MINUTES}m"
+            
+            # Simulate varying load patterns
+            if [ $UPTIME_HOURS -eq 2 ] || [ $UPTIME_HOURS -eq 6 ]; then
+              echo "Peak traffic period detected - scaling resources"
+            fi
+          done
+          
+          echo "========================================="
+          echo "Scheduled Service Lifetime Completed"
+          echo "Time: $(date)"
+          echo "Total Uptime: 8 hours (28800 seconds)"
+          echo "Initiating graceful shutdown..."
+          echo "========================================="
+          
+          # Graceful shutdown
+          kill -TERM $NGINX_PID
+          wait $NGINX_PID
+          echo "Service shutdown completed successfully"
+        
+        # Moderate resource requirements for web service
+        resources:
+          requests:
+            cpu: "250m"        # 0.25 CPU core
+            memory: "128Mi"    # 128 MB memory
+          limits:
+            cpu: "500m"        # Max 0.5 CPU core
+            memory: "256Mi"    # Max 256 MB memory
+        
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 2
+        
+        # Environment variables
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: SERVICE_TYPE
+          value: "time-bounded"
+        - name: MAX_UPTIME_HOURS
+          value: "8"
+      
+      # Prefer web-optimized nodes
+      nodeSelector:
+        kubernetes.io/os: linux
+      
+      # Tolerate web service taints
+      tolerations:
+      - key: web-workloads
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+
+---
+# Service to expose the web application
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-service
+  labels:
+    app: scheduler-example
+    example: web-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: web-service
+
+---
+# Optional: Ingress for external access (uncomment if needed)
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: web-service-ingress
+#   labels:
+#     app: scheduler-example
+#     example: web-service
+#   annotations:
+#     kubernetes.io/ingress.class: nginx
+#     nginx.ingress.kubernetes.io/rewrite-target: /
+# spec:
+#   rules:
+#   - host: web-service.example.com
+#     http:
+#       paths:
+#       - path: /
+#         pathType: Prefix
+#         backend:
+#           service:
+#             name: web-service
+#             port:
+#               number: 80
+
+---
+# ConfigMap for additional web service configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-service-config
+  labels:
+    app: scheduler-example
+    example: web-service
+data:
+  service-config.yaml: |
+    service:
+      type: time-bounded-web-service
+      max_uptime_hours: 8
+      port: 80
+      health_check_path: /health
+    
+    scheduler:
+      name: fastest-empty-node-scheduler
+      expected_duration: 28800  # 8 hours
+      workload_type: service
+    
+    scaling:
+      min_replicas: 2
+      max_replicas: 5
+      target_cpu_percent: 70
+    
+    monitoring:
+      metrics_path: /metrics
+      health_path: /health
+      log_level: info
+  
+  nginx-extra.conf: |
+    # Additional nginx configuration
+    worker_processes auto;
+    worker_connections 1024;
+    
+    # Optimize for time-bounded service
+    keepalive_timeout 65;
+    client_max_body_size 10M;
+    
+    # Enable gzip compression
+    gzip on;
+    gzip_types text/plain text/css application/json;

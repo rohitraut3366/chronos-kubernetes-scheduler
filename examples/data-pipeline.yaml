@@ -1,0 +1,290 @@
+# Data Pipeline Example
+#
+# This example demonstrates using the FastestEmptyNode scheduler for ETL
+# (Extract, Transform, Load) data processing pipelines. The job runs for
+# 30 minutes and shows how the scheduler optimizes placement for I/O and
+# compute-intensive data workflows.
+#
+# Usage:
+#   kubectl apply -f data-pipeline.yaml
+#   kubectl get jobs data-pipeline -o wide
+#   kubectl logs -f job/data-pipeline  # Monitor pipeline progress
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: data-pipeline
+  labels:
+    app: scheduler-example
+    example: data-pipeline
+    workload-type: data-processing
+  annotations:
+    # REQUIRED: Expected pipeline duration (30 minutes = 1800 seconds)
+    job-duration.example.com/seconds: "1800"
+    description: "ETL data pipeline using FastestEmptyNode scheduler"
+    data-source: "s3://data-lake/raw/"
+    data-destination: "s3://data-warehouse/processed/"
+spec:
+  # Single pipeline run
+  completions: 1
+  parallelism: 1
+  
+  # Allow 45 minutes total (buffer for retries)
+  activeDeadlineSeconds: 2700
+  
+  # Keep job around for 10 minutes after completion
+  ttlSecondsAfterFinished: 600
+  
+  # Retry up to 2 times on failure
+  backoffLimit: 2
+  
+  template:
+    metadata:
+      labels:
+        app: data-pipeline
+        example: data-pipeline
+        workload-type: data-processing
+    spec:
+      # REQUIRED: Use our custom scheduler
+      schedulerName: fastest-empty-node-scheduler
+      
+      restartPolicy: Never
+      
+      containers:
+      - name: pipeline-worker
+        image: python:3.11-slim
+        
+        command: ["/bin/bash"]
+        args:
+        - -c
+        - |
+          echo "========================================="
+          echo "Data Pipeline Starting"
+          echo "Time: $(date)"
+          echo "Node: $NODE_NAME"
+          echo "Pod: $POD_NAME"
+          echo "Expected Duration: 1800 seconds (30 minutes)"
+          echo "Source: $DATA_SOURCE"
+          echo "Destination: $DATA_DESTINATION"
+          echo "Pipeline ID: $PIPELINE_ID"
+          echo "========================================="
+          
+          # Install required tools (simulate)
+          echo "Installing pipeline dependencies..."
+          sleep 30
+          
+          # Phase 1: Extract (8 minutes)
+          echo ""
+          echo "Phase 1: Data Extraction (8 minutes)"
+          echo "Connecting to data sources..."
+          sleep 30
+          
+          for source in api database files s3; do
+            echo "  Extracting from $source..."
+            for batch in $(seq 1 10); do
+              echo "    Processing batch $batch/10 from $source"
+              sleep 12  # Total ~2 minutes per source
+            done
+            echo "  ✓ $source extraction completed"
+          done
+          echo "✓ Data extraction phase completed"
+          
+          # Phase 2: Transform (16 minutes) 
+          echo ""
+          echo "Phase 2: Data Transformation (16 minutes)"
+          
+          echo "  Step 1: Data Cleaning (4 minutes)"
+          for task in validation deduplication normalization formatting; do
+            echo "    Running $task..."
+            sleep 60
+          done
+          
+          echo "  Step 2: Data Enrichment (6 minutes)"
+          for enrichment in geocoding demographics categorization scoring validation audit; do
+            echo "    Applying $enrichment..."
+            sleep 72
+          done
+          
+          echo "  Step 3: Data Aggregation (6 minutes)"
+          for agg in daily weekly monthly quarterly yearly custom; do
+            echo "    Computing $agg aggregations..."
+            sleep 60
+          done
+          echo "✓ Data transformation phase completed"
+          
+          # Phase 3: Load (5 minutes)
+          echo ""
+          echo "Phase 3: Data Loading (5 minutes)"
+          echo "  Preparing target systems..."
+          sleep 30
+          
+          for target in warehouse analytics cache api; do
+            echo "    Loading to $target..."
+            for chunk in $(seq 1 5); do
+              echo "      Uploading chunk $chunk/5 to $target"
+              sleep 15
+            done
+            echo "    ✓ $target load completed"
+          done
+          
+          # Phase 4: Validation & Cleanup (1 minute)
+          echo ""
+          echo "Phase 4: Validation & Cleanup (1 minute)"
+          echo "  Running data quality checks..."
+          sleep 30
+          echo "  Cleaning temporary files..."
+          sleep 30
+          echo "✓ Pipeline validation completed"
+          
+          # Generate summary report
+          TOTAL_RECORDS=$((RANDOM % 50000 + 100000))
+          SUCCESS_RATE=$((RANDOM % 5 + 95))
+          
+          echo ""
+          echo "========================================="
+          echo "Data Pipeline Completed Successfully"
+          echo "Time: $(date)"
+          echo "Duration: 1800 seconds (30 minutes)"
+          echo ""
+          echo "Pipeline Summary:"
+          echo "  Records Processed: $TOTAL_RECORDS"
+          echo "  Success Rate: $SUCCESS_RATE%"
+          echo "  Data Quality Score: A+"
+          echo "  Throughput: $((TOTAL_RECORDS / 30)) records/minute"
+          echo ""
+          echo "Output Locations:"
+          echo "  Warehouse: $DATA_DESTINATION/processed/"
+          echo "  Analytics: $DATA_DESTINATION/analytics/"
+          echo "  Reports: $DATA_DESTINATION/reports/"
+          echo "========================================="
+        
+        # Balanced resources for data processing
+        resources:
+          requests:
+            cpu: "1000m"       # 1 CPU core
+            memory: "1Gi"      # 1 GB memory
+          limits:
+            cpu: "2000m"       # Max 2 CPU cores
+            memory: "2Gi"      # Max 2 GB memory
+        
+        # Environment configuration
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: PIPELINE_ID
+          value: "pipeline-$(date +%Y%m%d-%H%M%S)"
+        - name: DATA_SOURCE
+          value: "s3://data-lake/raw/"
+        - name: DATA_DESTINATION
+          value: "s3://data-warehouse/processed/"
+        - name: BATCH_SIZE
+          value: "10000"
+        - name: PARALLEL_WORKERS
+          value: "4"
+        - name: MAX_RETRIES
+          value: "3"
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        
+        # Volume mounts for temporary processing
+        volumeMounts:
+        - name: processing-temp
+          mountPath: /tmp/pipeline
+        - name: pipeline-cache
+          mountPath: /cache
+      
+      # Prefer data-optimized nodes
+      nodeSelector:
+        kubernetes.io/os: linux
+        # Uncomment for specialized data processing nodes
+        # node-type: memory-optimized
+        # workload: data-processing
+      
+      # Tolerate data processing taints
+      tolerations:
+      - key: data-workloads
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+      - key: memory-intensive
+        operator: Exists
+        effect: NoSchedule
+      - key: io-intensive
+        operator: Exists
+        effect: NoSchedule
+      
+      volumes:
+      - name: processing-temp
+        emptyDir:
+          sizeLimit: 5Gi
+      - name: pipeline-cache
+        emptyDir:
+          sizeLimit: 1Gi
+
+---
+# ConfigMap for pipeline configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: data-pipeline-config
+  labels:
+    app: scheduler-example
+    example: data-pipeline
+data:
+  pipeline-config.yaml: |
+    pipeline:
+      name: data-etl-pipeline
+      version: "1.0"
+      timeout: 1800  # 30 minutes
+    
+    sources:
+      - type: api
+        endpoint: "https://api.example.com/data"
+        format: json
+      - type: database
+        connection: "postgresql://db.example.com/data"
+        query: "SELECT * FROM raw_data WHERE created_at > NOW() - INTERVAL '1 day'"
+      - type: s3
+        bucket: "data-lake"
+        prefix: "raw/"
+        format: parquet
+    
+    transformations:
+      - name: data_cleaning
+        steps: ["validation", "deduplication", "normalization"]
+      - name: data_enrichment
+        steps: ["geocoding", "demographics", "categorization"]
+      - name: data_aggregation
+        steps: ["daily", "weekly", "monthly", "quarterly"]
+    
+    destinations:
+      - type: warehouse
+        connection: "postgresql://warehouse.example.com/analytics"
+        table: "processed_data"
+      - type: s3
+        bucket: "data-warehouse"
+        prefix: "processed/"
+        format: parquet
+    
+    scheduler:
+      name: fastest-empty-node-scheduler
+      expected_duration: 1800
+      workload_type: data-processing
+    
+    resources:
+      cpu_cores: 1-2
+      memory_gb: 1-2
+      temp_storage_gb: 5
+    
+    quality:
+      validation_rules:
+        - required_fields: ["id", "timestamp", "data"]
+        - data_types: {"id": "string", "timestamp": "datetime"}
+        - ranges: {"score": [0, 100]}
+      success_threshold: 95
