@@ -1,0 +1,46 @@
+# Quick Test - Single job to verify Chronos scheduler works
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: chronos-quick-test
+  labels:
+    test: chronos-quick
+spec:
+  template:
+    metadata:
+      annotations:
+        # 2 minutes = 120 seconds
+        scheduling.workload.io/expected-duration-seconds: "120"
+      labels:
+        test: chronos-quick
+    spec:
+      schedulerName: chronos-kubernetes-scheduler  # Use our custom scheduler
+      restartPolicy: Never
+      containers:
+      - name: test-workload
+        image: busybox:1.36
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "🎉 SUCCESS: Chronos Scheduler is working!"
+            echo "========================================="
+            echo "Job Name: chronos-quick-test"
+            echo "Start Time: $(date)"
+            echo "Expected Duration: 2 minutes (120 seconds)"
+            echo "Node: $(hostname)"
+            echo "Scheduler: chronos-kubernetes-scheduler"
+            echo ""
+            echo "✅ Our advanced bin-packing algorithm scheduled this job!"
+            echo ""
+            echo "Sleeping for 120 seconds..."
+            sleep 120
+            echo ""
+            echo "🏁 Job completed at: $(date)"
+            echo "✨ Chronos scheduler test PASSED!"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi

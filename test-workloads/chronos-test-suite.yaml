@@ -1,0 +1,243 @@
+# Chronos Scheduler Test Suite
+# This file contains various test workloads to demonstrate our intelligent scheduling
+
+---
+# Test 1: Short-duration job (5 minutes)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: short-job-1
+  labels:
+    test: chronos-scheduler
+    duration: short
+spec:
+  template:
+    metadata:
+      annotations:
+        # 5 minutes = 300 seconds
+        scheduling.workload.io/expected-duration-seconds: "300"
+      labels:
+        test: chronos-scheduler
+        duration: short
+    spec:
+      schedulerName: chronos-kubernetes-scheduler  # Use our custom scheduler
+      restartPolicy: Never
+      containers:
+      - name: workload
+        image: busybox:1.36
+        command: ["sh", "-c"]
+        args: 
+          - |
+            echo "🚀 Short Job Started: $(date)"
+            echo "Expected Duration: 5 minutes"
+            echo "Node: $HOSTNAME"
+            sleep 300  # 5 minutes
+            echo "✅ Short Job Completed: $(date)"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 200m  
+            memory: 128Mi
+
+---
+# Test 2: Medium-duration job (15 minutes)  
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: medium-job-1
+  labels:
+    test: chronos-scheduler
+    duration: medium
+spec:
+  template:
+    metadata:
+      annotations:
+        # 15 minutes = 900 seconds
+        scheduling.workload.io/expected-duration-seconds: "900"
+      labels:
+        test: chronos-scheduler
+        duration: medium
+    spec:
+      schedulerName: chronos-kubernetes-scheduler
+      restartPolicy: Never
+      containers:
+      - name: workload
+        image: busybox:1.36
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "🚀 Medium Job Started: $(date)"
+            echo "Expected Duration: 15 minutes"
+            echo "Node: $HOSTNAME"  
+            sleep 900  # 15 minutes
+            echo "✅ Medium Job Completed: $(date)"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+---
+# Test 3: Long-duration job (30 minutes)
+apiVersion: batch/v1  
+kind: Job
+metadata:
+  name: long-job-1
+  labels:
+    test: chronos-scheduler
+    duration: long
+spec:
+  template:
+    metadata:
+      annotations:
+        # 30 minutes = 1800 seconds
+        scheduling.workload.io/expected-duration-seconds: "1800"
+      labels:
+        test: chronos-scheduler
+        duration: long
+    spec:
+      schedulerName: chronos-kubernetes-scheduler
+      restartPolicy: Never
+      containers:
+      - name: workload
+        image: busybox:1.36
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "🚀 Long Job Started: $(date)"
+            echo "Expected Duration: 30 minutes"
+            echo "Node: $HOSTNAME"
+            sleep 1800  # 30 minutes
+            echo "✅ Long Job Completed: $(date)"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+---
+# Test 4: Multiple short jobs (for bin-packing test)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: short-job-2
+  labels:
+    test: chronos-scheduler
+    duration: short
+    batch: multi
+spec:
+  template:
+    metadata:
+      annotations:
+        # 3 minutes = 180 seconds
+        scheduling.workload.io/expected-duration-seconds: "180"
+      labels:
+        test: chronos-scheduler
+        duration: short
+        batch: multi
+    spec:
+      schedulerName: chronos-kubernetes-scheduler
+      restartPolicy: Never
+      containers:
+      - name: workload
+        image: busybox:1.36
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "🚀 Short Job 2 Started: $(date)"
+            echo "Expected Duration: 3 minutes"
+            echo "Node: $HOSTNAME"
+            sleep 180  # 3 minutes  
+            echo "✅ Short Job 2 Completed: $(date)"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+---
+# Test 5: Another short job (for bin-packing test)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: short-job-3
+  labels:
+    test: chronos-scheduler
+    duration: short
+    batch: multi
+spec:
+  template:
+    metadata:
+      annotations:
+        # 4 minutes = 240 seconds
+        scheduling.workload.io/expected-duration-seconds: "240"
+      labels:
+        test: chronos-scheduler
+        duration: short  
+        batch: multi
+    spec:
+      schedulerName: chronos-kubernetes-scheduler
+      restartPolicy: Never
+      containers:
+      - name: workload
+        image: busybox:1.36
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "🚀 Short Job 3 Started: $(date)"
+            echo "Expected Duration: 4 minutes"
+            echo "Node: $HOSTNAME"
+            sleep 240  # 4 minutes
+            echo "✅ Short Job 3 Completed: $(date)"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+---
+# Test 6: Job without duration annotation (should get default treatment)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: no-annotation-job
+  labels:
+    test: chronos-scheduler
+    duration: unknown
+spec:
+  template:
+    metadata:
+      labels:
+        test: chronos-scheduler
+        duration: unknown
+    spec:
+      schedulerName: chronos-kubernetes-scheduler
+      restartPolicy: Never
+      containers:
+      - name: workload
+        image: busybox:1.36
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "🚀 No-Annotation Job Started: $(date)"
+            echo "Duration: Unknown (no annotation)"
+            echo "Node: $HOSTNAME"
+            sleep 120  # 2 minutes
+            echo "✅ No-Annotation Job Completed: $(date)"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
