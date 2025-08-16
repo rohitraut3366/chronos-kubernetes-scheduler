@@ -2087,19 +2087,19 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 		// Test the specific edge case: remainingSeconds < 0 (overdue pods)
 		overdueHandle := createOverduePodMockHandle()
 		plugin := &Chronos{handle: overdueHandle}
-		
+
 		testPod := &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "new-job", Namespace: "test",
 				Annotations: map[string]string{JobDurationAnnotation: "600"}, // 10 min job
 			},
 		}
-		
+
 		score, status := plugin.Score(context.Background(), nil, testPod, "overdue-node")
-		
+
 		assert.True(t, status.IsSuccess(), "Score should succeed with overdue pods")
 		assert.Greater(t, score, int64(0), "Should still calculate positive score")
-		
+
 		t.Logf("✅ Overdue pod clamping test: Score=%d (overdue pods handled correctly)", score)
 	})
 }
@@ -2408,7 +2408,7 @@ func createNodeWithMixedPodStates(nodeName string) *framework.NodeInfo {
 				StartTime: &metav1.Time{Time: now.Add(-5 * time.Minute)}, // 10 min remaining
 			},
 		},
-		// OVERDUE POD - to test remainingSeconds < 0 clamping logic  
+		// OVERDUE POD - to test remainingSeconds < 0 clamping logic
 		{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        "overdue-pod",
@@ -2476,7 +2476,7 @@ func createNodeWithMixedPodStates(nodeName string) *framework.NodeInfo {
 	for _, pod := range pods {
 		nodeInfo.AddPod(pod)
 	}
-	
+
 	return nodeInfo
 }
 
@@ -2492,9 +2492,9 @@ func createNodeWithOverduePods(nodeName string) *framework.NodeInfo {
 	}
 	nodeInfo := framework.NewNodeInfo()
 	nodeInfo.SetNode(node)
-	
+
 	now := time.Now()
-	
+
 	// Create overdue pods to test remainingSeconds < 0 clamping
 	overduePods := []*v1.Pod{
 		{
@@ -2509,7 +2509,7 @@ func createNodeWithOverduePods(nodeName string) *framework.NodeInfo {
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:        "overdue-job-2", 
+				Name:        "overdue-job-2",
 				Annotations: map[string]string{JobDurationAnnotation: "600"}, // Expected 10 minutes
 			},
 			Status: v1.PodStatus{
@@ -2528,10 +2528,10 @@ func createNodeWithOverduePods(nodeName string) *framework.NodeInfo {
 			},
 		},
 	}
-	
+
 	for _, pod := range overduePods {
 		nodeInfo.AddPod(pod)
 	}
-	
+
 	return nodeInfo
 }
