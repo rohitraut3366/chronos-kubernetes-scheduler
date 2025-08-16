@@ -287,10 +287,24 @@ func TestRandomizedPropertyValidation(t *testing.T) {
 				score1 := calculateMockScore(newJobDuration, node1Remaining, node1Pods, capacity)
 				score2 := calculateMockScore(newJobDuration, node2Remaining, node2Pods, capacity)
 
-				// Test invariant: If node1 is strictly better in BOTH time AND capacity, it MUST win
-				if node1Remaining < node2Remaining && node1Pods < node2Pods {
+				// Test invariant: UPDATED for cost-optimization algorithm
+				// If node1 is strictly better AND neither is empty, it MUST win
+				// BUT: Empty nodes (rem=0) are penalized for cost optimization
+				if node1Remaining < node2Remaining && node1Pods < node2Pods && node1Remaining > 0 && node2Remaining > 0 {
 					assert.Greater(t, score1, score2,
-						"Strictly better node must win: node1(rem=%d,pods=%d,score=%d) vs node2(rem=%d,pods=%d,score=%d)",
+						"Strictly better non-empty node must win: node1(rem=%d,pods=%d,score=%d) vs node2(rem=%d,pods=%d,score=%d)",
+						node1Remaining, node1Pods, score1, node2Remaining, node2Pods, score2)
+					successfulTests++
+				} else if node1Remaining == 0 && node2Remaining > 0 {
+					// Empty node (node1) should lose to active node (node2) for cost optimization
+					assert.Greater(t, score2, score1,
+						"Active node should beat empty node for cost savings: empty(rem=%d,pods=%d,score=%d) vs active(rem=%d,pods=%d,score=%d)",
+						node1Remaining, node1Pods, score1, node2Remaining, node2Pods, score2)
+					successfulTests++
+				} else if node1Remaining > 0 && node2Remaining == 0 {
+					// Active node (node1) should beat empty node (node2) for cost optimization
+					assert.Greater(t, score1, score2,
+						"Active node should beat empty node for cost savings: active(rem=%d,pods=%d,score=%d) vs empty(rem=%d,pods=%d,score=%d)",
 						node1Remaining, node1Pods, score1, node2Remaining, node2Pods, score2)
 					successfulTests++
 				}
