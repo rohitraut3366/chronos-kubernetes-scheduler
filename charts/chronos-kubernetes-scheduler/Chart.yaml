@@ -4,7 +4,7 @@ description: A time-aware Kubernetes scheduler that optimizes pod placement base
 type: application
 
 # Chart version - increment when making changes to the chart
-version: 0.1.0
+version: 0.2.0
 
 # Application version - should match the scheduler version
 appVersion: "v1.0.0"
@@ -28,8 +28,8 @@ maintainers:
   - name: Your Name
     email: your-email@example.com
 
-# Minimum Kubernetes version required
-kubeVersion: ">=1.28.0"
+# Minimum Kubernetes version required  
+kubeVersion: ">=1.30.0"
 
 # Chart annotations for additional metadata
 annotations:
@@ -38,6 +38,12 @@ annotations:
   
   # Changelog annotations (for release automation)
   artifacthub.io/changes: |
+    - kind: changed
+      description: Updated to Kubernetes v1.30 compatibility
+    - kind: changed  
+      description: Updated scheduler configuration API to kubescheduler.config.k8s.io/v1
+    - kind: removed
+      description: Removed deprecated scoreMultiplier configuration
     - kind: added
       description: Initial Helm chart for Chronos scheduler
     - kind: added

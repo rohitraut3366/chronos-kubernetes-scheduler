@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"strconv"
@@ -615,7 +616,7 @@ func TestMainEntryPoints(t *testing.T) {
 
 	// Test plugin initialization
 	t.Run("PluginInitialization", func(t *testing.T) {
-		plugin, err := New(nil, nil)
+		plugin, err := New(context.Background(), nil, nil)
 		assert.NoError(t, err, "Plugin initialization should succeed")
 		assert.NotNil(t, plugin, "Plugin should not be nil")
 		assert.Equal(t, PluginName, plugin.Name(), "Plugin name should be correct")
@@ -1416,7 +1417,7 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 		// Test the New() function with different handle scenarios
 		t.Run("NewFunctionCoverage", func(t *testing.T) {
 			// Test New function with nil handle
-			plugin, err := New(nil, nil)
+			plugin, err := New(context.Background(), nil, nil)
 			assert.NoError(t, err, "New should not error with nil handle")
 			assert.NotNil(t, plugin, "Plugin should not be nil")
 

@@ -7,7 +7,7 @@ metadata:
     {{- include "chronos-kubernetes-scheduler.labels" . | nindent 4 }}
 data:
   scheduler-config.yaml: |
-    apiVersion: kubescheduler.config.k8s.io/v1beta3
+    apiVersion: kubescheduler.config.k8s.io/v1
     kind: KubeSchedulerConfiguration
     profiles:
     - schedulerName: {{ .Values.scheduler.name }}
@@ -19,7 +19,6 @@ data:
       - name: {{ .Values.scheduler.plugin.name }}
         args:
           jobDurationAnnotation: {{ .Values.scheduler.plugin.jobDurationAnnotation | quote }}
-          scoreMultiplier: {{ .Values.scheduler.plugin.scoreMultiplier }}
     {{- if .Values.scheduler.leaderElection.enabled }}
     leaderElection:
       leaderElect: true

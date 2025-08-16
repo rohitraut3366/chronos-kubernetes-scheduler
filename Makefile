@@ -100,7 +100,7 @@ lint:
 ## docker-build: Build Docker image
 docker-build:
 	@echo "Building Docker image $(IMAGE_NAME):$(VERSION)..."
-	docker build -f $(BUILD_DIR)/Dockerfile -t $(IMAGE_NAME):$(VERSION) .
+	docker build -f $(BUILD_DIR)/Dockerfile -t $(IMAGE_NAME):$(VERSION) . --load
 	@echo "✅ Docker image built: $(IMAGE_NAME):$(VERSION)"
 
 ## docker-push: Push Docker image (set REGISTRY variable for custom registry)

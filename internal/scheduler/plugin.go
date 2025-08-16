@@ -49,7 +49,7 @@ type Chronos struct {
 }
 
 // New initializes a new plugin and returns it.
-func New(_ runtime.Object, h framework.Handle) (framework.Plugin, error) {
+func New(ctx context.Context, _ runtime.Object, h framework.Handle) (framework.Plugin, error) {
 	klog.Infof("Initializing Chronos plugin with bin-packing + extension minimization + utilization optimization")
 	return &Chronos{
 		handle: h,
