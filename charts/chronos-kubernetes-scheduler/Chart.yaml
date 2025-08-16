@@ -4,7 +4,7 @@ description: A time-aware Kubernetes scheduler that optimizes pod placement base
 type: application
 
 # Chart version - increment when making changes to the chart
-version: 0.2.0
+version: 0.2.7
 
 # Application version - should match the scheduler version
 appVersion: "v1.0.0"
@@ -38,6 +38,24 @@ annotations:
   
   # Changelog annotations (for release automation)
   artifacthub.io/changes: |
+    - kind: fixed
+      description: Fixed readiness probe to use /healthz endpoint instead of missing /readyz endpoint
+    - kind: fixed
+      description: Removed invalid --port flag that was causing scheduler startup failure
+    - kind: changed
+      description: Reverted health checks to use HTTPS on secure port (10259) following standard Kubernetes scheduler pattern
+    - kind: fixed
+      description: Added automountServiceAccountToken for in-cluster Kubernetes API authentication
+    - kind: fixed
+      description: Removed conditional RBAC creation - RBAC is always required for schedulers
+    - kind: added
+      description: Added system:volume-scheduler ClusterRoleBinding for volume operations
+    - kind: fixed
+      description: Added comprehensive RBAC permissions for production scheduler deployment
+    - kind: fixed
+      description: Removed deprecated healthzBindAddress and metricsBindAddress fields
+    - kind: changed
+      description: Updated deployment to use command-line flags for metrics configuration
     - kind: changed
       description: Updated to Kubernetes v1.30 compatibility
     - kind: changed  

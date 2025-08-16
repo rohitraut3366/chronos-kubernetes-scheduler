@@ -31,10 +31,3 @@ data:
     leaderElection:
       leaderElect: false
     {{- end }}
-    {{- if .Values.metrics.enabled }}
-    metricsBindAddress: ":{{ .Values.metrics.port }}"
-    healthzBindAddress: ":{{ .Values.metrics.port }}"
-    {{- else }}
-    metricsBindAddress: ""
-    healthzBindAddress: ""
-    {{- end }}

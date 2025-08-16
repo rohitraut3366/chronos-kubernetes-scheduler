@@ -1,4 +1,4 @@
-{{- if .Values.rbac.create -}}
+
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -6,23 +6,174 @@ metadata:
   labels:
     {{- include "chronos-kubernetes-scheduler.labels" . | nindent 4 }}
 rules:
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: [""]
-  resources: ["nodes"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: [""]
-  resources: ["events"]
-  verbs: ["create", "patch", "update"]
-{{- if .Values.scheduler.leaderElection.enabled }}
-- apiGroups: ["coordination.k8s.io"]
-  resources: ["leases"]
-  verbs: ["get", "list", "watch", "create", "update", "patch"]
-{{- end }}
-- apiGroups: ["events.k8s.io"]
-  resources: ["events"]
-  verbs: ["create", "patch", "update"]
+- apiGroups:
+  - ""
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - get
+  - list
+  - update
+- apiGroups:
+  - coordination.k8s.io
+  resourceNames:
+  - kube-scheduler
+  resources:
+  - leases
+  verbs:
+  - get
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - endpoints
+  verbs:
+  - create
+- apiGroups:
+  - ""
+  resourceNames:
+  - kube-scheduler
+  resources:
+  - endpoints
+  verbs:
+  - get
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - bindings
+  - pods/binding
+  verbs:
+  - create
+- apiGroups:
+  - ""
+  resources:
+  - pods/status
+  verbs:
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - replicationcontrollers
+  - services
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - apps
+  - extensions
+  resources:
+  - replicasets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - statefulsets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  - persistentvolumes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - csinodes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - csidrivers
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - csistoragecapacities
+  verbs:
+  - get
+  - list
+  - watch
 {{- with .Values.rbac.rules }}
 {{- toYaml . | nindent 0 }}
 {{- end }}
@@ -30,7 +181,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: {{ include "chronos-kubernetes-scheduler.fullname" . }}
+  name: {{ include "chronos-kubernetes-scheduler.fullname" . }}-scheduler
   labels:
     {{- include "chronos-kubernetes-scheduler.labels" . | nindent 4 }}
 subjects:
@@ -38,7 +189,21 @@ subjects:
   name: {{ include "chronos-kubernetes-scheduler.serviceAccountName" . }}
   namespace: {{ .Release.Namespace | quote }}
 roleRef:
+  apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: {{ include "chronos-kubernetes-scheduler.fullname" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "chronos-kubernetes-scheduler.fullname" . }}-volume-scheduler
+  labels:
+    {{- include "chronos-kubernetes-scheduler.labels" . | nindent 4 }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "chronos-kubernetes-scheduler.serviceAccountName" . }}
+  namespace: {{ .Release.Namespace | quote }}
+roleRef:
   apiGroup: rbac.authorization.k8s.io
-{{- end }}
+  kind: ClusterRole
+  name: system:volume-scheduler
