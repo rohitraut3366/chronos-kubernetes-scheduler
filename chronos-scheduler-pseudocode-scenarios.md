@@ -517,3 +517,257 @@ Winner: Node A (much higher capacity: 500 >> 300)
    - Tie-breaking logic consistent and predictable
 
 **✅ Extension minimization working perfectly! All 30 scenarios demonstrate correct algorithm behavior! 🚀**
+
+---
+
+## 🏗️ **NODE SIZE AWARENESS SCENARIOS**
+*Enhanced scheduling based on node specifications*
+
+### **SCENARIO NS.1: CPU vs GPU Node Selection**
+```
+Node A: CPU-optimized (32 cores, 64GB RAM), 25min existing (15min left), 30 slots
+Node B: GPU-optimized (8 cores, 32GB RAM, 4x V100), 35min existing (20min left), 12 slots
+New Job: ML training (20 minutes, requires GPU)
+
+Analysis:
+- Node A: 20min ≤ 15min → NO (CPU-only, job needs GPU)
+- Node B: 20min ≤ 20min → BIN-PACKING + GPU_BONUS
+  Score = 1,000,000 + (20×60×100) + (12×10) + 50,000 = 1,170,120
+Winner: Node B (GPU requirement + bin-packing match)
+```
+
+### **SCENARIO NS.2: Memory-Intensive Workload**
+```
+Node A: Standard (4 cores, 16GB RAM), 30min existing (20min left), 20 slots
+Node B: Memory-optimized (4 cores, 128GB RAM), 45min existing (30min left), 15 slots  
+New Job: Big data processing (25 minutes, requires 64GB RAM)
+
+Analysis:
+- Node A: 25min > 20min → EXTENSION, but insufficient memory (16GB < 64GB)
+  Score = REJECTED (memory constraint)
+- Node B: 25min ≤ 30min → BIN-PACKING + MEMORY_BONUS
+  Score = 1,000,000 + (30×60×100) + (15×10) + 25,000 = 1,205,150
+Winner: Node B (memory requirement satisfied + consolidation)
+```
+
+### **SCENARIO NS.3: Node Tier Performance Optimization**
+```
+Node A: Burstable (t3.medium), 40min existing (25min left), 18 slots
+Node B: Compute-optimized (c5.2xlarge), 45min existing (30min left), 16 slots
+New Job: CPU-intensive compilation (20 minutes)
+
+Analysis:
+- Node A: 20min ≤ 25min → BIN-PACKING + BURSTABLE_PENALTY
+  Score = 1,000,000 + (25×60×100) + (18×10) - 15,000 = 1,135,180
+- Node B: 20min ≤ 30min → BIN-PACKING + COMPUTE_BONUS  
+  Score = 1,000,000 + (30×60×100) + (16×10) + 20,000 = 1,200,160
+Winner: Node B (better CPU performance for intensive workload)
+```
+
+### **SCENARIO NS.4: Storage Requirements**
+```
+Node A: Standard (500GB SSD), 20min existing (10min left), 25 slots
+Node B: Storage-optimized (2TB NVMe), 25min existing (15min left), 20 slots
+New Job: Data processing (12 minutes, requires 1TB temp storage)
+
+Analysis:
+- Node A: 12min > 10min → EXTENSION, but insufficient storage
+  Score = REJECTED (storage constraint)
+- Node B: 12min ≤ 15min → BIN-PACKING + STORAGE_BONUS
+  Score = 1,000,000 + (15×60×100) + (20×10) + 10,000 = 1,100,200
+Winner: Node B (storage requirement + bin-packing fit)
+```
+
+### **SCENARIO NS.5: Multi-Resource Balancing**
+```
+Node A: Balanced (8 cores, 32GB RAM, 1TB SSD), 60min existing (40min left), 22 slots
+Node B: High-CPU (16 cores, 16GB RAM, 500GB SSD), 50min existing (30min left), 28 slots
+New Job: Moderate workload (35 minutes, 4 cores, 8GB RAM, 200GB)
+
+Analysis:
+- Node A: 35min ≤ 40min → BIN-PACKING + BALANCED_BONUS
+  Score = 1,000,000 + (40×60×100) + (22×10) + 5,000 = 1,245,220
+- Node B: 35min > 30min → EXTENSION (5min) + HIGH_CPU_BONUS
+  Score = 100,000 - (5×60×100) + (28×10) + 15,000 = 85,280
+Winner: Node A (bin-packing + balanced resource fit)
+```
+
+---
+
+## 💰 **COST AWARENESS SCENARIOS**
+*Intelligent scheduling based on node pricing*
+
+### **SCENARIO C.1: Spot vs On-Demand Decision**
+```
+Node A: On-demand (c5.large, $0.096/hr), 30min existing (20min left), 15 slots
+Node B: Spot instance (c5.large, $0.029/hr), 25min existing (15min left), 15 slots
+New Job: Fault-tolerant batch job (18 minutes)
+
+Analysis:
+- Node A: 18min ≤ 20min → BIN-PACKING, Cost=$0.096/hr
+  Score = 1,000,000 + (20×60×100) + (15×10) × 1.0 = 1,120,150
+- Node B: 18min > 15min → EXTENSION (3min), Cost=$0.029/hr + SPOT_BONUS  
+  Score = (100,000 - (3×60×100) + (15×10)) × 1.3 + 20,000 = 122,346
+Winner: Node A (bin-packing beats extension despite cost)
+```
+
+### **SCENARIO C.2: Cost vs Performance Trade-off**
+```
+Node A: Expensive high-performance ($2.40/hr), 45min existing (30min left), 20 slots
+Node B: Cheaper standard instance ($0.48/hr), 60min existing (40min left), 18 slots  
+New Job: Standard workload (25 minutes)
+
+Analysis:
+- Node A: 25min ≤ 30min → BIN-PACKING, Cost=$2.40/hr
+  Score = (1,000,000 + (30×60×100) + (20×10)) × 0.4 = 652,080 (cost penalty)
+- Node B: 25min ≤ 40min → BIN-PACKING, Cost=$0.48/hr
+  Score = (1,000,000 + (40×60×100) + (18×10)) × 0.9 = 1,458,162 (cost bonus)
+Winner: Node B (better cost efficiency + longer consolidation)
+```
+
+### **SCENARIO C.3: Reserved Instance Optimization**
+```
+Node A: Reserved instance ($0.048/hr, pre-paid), 20min existing (10min left), 25 slots
+Node B: On-demand ($0.096/hr), Empty node, 30 slots
+New Job: 15 minutes
+
+Analysis:
+- Node A: 15min > 10min → EXTENSION (5min), Reserved bonus
+  Score = (100,000 - (5×60×100) + (25×10)) × 1.5 + 30,000 = 135,375
+- Node B: Empty → PENALTY, On-demand cost
+  Score = (1,000 + (30×1)) × 1.0 = 1,030
+Winner: Node A (reserved instance + small extension >> empty on-demand)
+```
+
+### **SCENARIO C.4: Regional Cost Differences**
+```
+Node A: us-east-1 ($0.096/hr), 35min existing (25min left), 20 slots
+Node B: us-west-2 ($0.108/hr), 40min existing (30min left), 18 slots
+New Job: 20 minutes (region-agnostic)
+
+Analysis:
+- Node A: 20min ≤ 25min → BIN-PACKING, Cheaper region
+  Score = (1,000,000 + (25×60×100) + (20×10)) × 1.1 = 1,320,220
+- Node B: 20min ≤ 30min → BIN-PACKING, More expensive region
+  Score = (1,000,000 + (30×60×100) + (18×10)) × 0.95 = 1,140,171
+Winner: Node A (cost efficiency + good consolidation)
+```
+
+### **SCENARIO C.5: Cost-Conscious Empty Node Avoidance**
+```
+Node A: Expensive GPU node ($3.60/hr), Empty, 16 slots
+Node B: Standard compute ($0.192/hr), 50min existing (35min left), 25 slots
+New Job: CPU-only task (30 minutes)
+
+Analysis:
+- Node A: Empty → PENALTY, Very expensive + GPU waste
+  Score = (1,000 + (16×1)) × 0.2 = 203 (heavy cost penalty)
+- Node B: 30min ≤ 35min → BIN-PACKING, Appropriate cost
+  Score = (1,000,000 + (35×60×100) + (25×10)) × 1.0 = 1,210,250
+Winner: Node B (massive cost savings + perfect consolidation)
+```
+
+---
+
+## 🎯 **COMBINED SIZE + COST SCENARIOS**
+*Advanced scheduling with both performance and cost optimization*
+
+### **SCENARIO SC.1: GPU vs CPU with Cost Consideration**
+```
+Node A: Cheap CPU cluster ($0.096/hr), 30min existing (20min left), 40 slots
+Node B: Expensive GPU node ($2.88/hr), 45min existing (35min left), 12 slots
+New Job: Optional GPU acceleration (25 minutes, benefits from GPU but not required)
+
+Analysis:
+- Node A: 25min > 20min → EXTENSION (5min), CPU-only
+  Score = (100,000 - (5×60×100) + (40×10)) × 1.1 + 0 = 77,440
+- Node B: 25min ≤ 35min → BIN-PACKING, GPU acceleration + cost penalty
+  Score = (1,000,000 + (35×60×100) + (12×10)) × 0.3 + 25,000 = 436,236
+Winner: Node B (GPU performance benefit offsets cost penalty)
+```
+
+### **SCENARIO SC.2: Memory vs Cost Trade-off**
+```
+Node A: Standard memory ($0.192/hr, 16GB), 25min existing (15min left), 30 slots
+Node B: High memory ($0.768/hr, 128GB), 35min existing (25min left), 20 slots
+New Job: Variable memory workload (20 minutes, 12GB typical, 80GB peak possible)
+
+Analysis:
+- Node A: 20min > 15min → EXTENSION (5min), Risk of OOM
+  Score = (100,000 - (5×60×100) + (30×10)) × 1.0 - 50,000 = 20,300 (OOM risk)
+- Node B: 20min ≤ 25min → BIN-PACKING, Memory safety + cost
+  Score = (1,000,000 + (25×60×100) + (20×10)) × 0.6 + 30,000 = 780,120
+Winner: Node B (memory safety + consolidation justifies cost)
+```
+
+### **SCENARIO SC.3: Spot Instance Risk Assessment**
+```
+Node A: On-demand guaranteed ($0.384/hr), 40min existing (30min left), 25 slots
+Node B: Spot instance cheap ($0.115/hr, 15% interruption risk), 35min existing (25min left), 22 slots
+New Job: Critical production job (22 minutes)
+
+Analysis:
+- Node A: 22min ≤ 30min → BIN-PACKING, Guaranteed completion
+  Score = (1,000,000 + (30×60×100) + (25×10)) × 0.8 + 100,000 = 1,224,200
+- Node B: 22min ≤ 25min → BIN-PACKING, Interruption risk penalty
+  Score = (1,000,000 + (25×60×100) + (22×10)) × 1.2 - 75,000 = 1,425,264
+Winner: Node B (cost savings + good fit, acceptable risk for this workload)
+```
+
+### **SCENARIO SC.4: Multi-Zone Cost + Performance**
+```
+Node A: us-east-1a ($0.096/hr, high network), 30min existing (20min left), 28 slots
+Node B: us-east-1c ($0.102/hr, standard network), 40min existing (30min left), 25 slots
+New Job: Network-intensive service (25 minutes)
+
+Analysis:
+- Node A: 25min > 20min → EXTENSION (5min), Network bonus + cost
+  Score = (100,000 - (5×60×100) + (28×10)) × 1.05 + 15,000 = 92,294
+- Node B: 25min ≤ 30min → BIN-PACKING, Standard network + cost
+  Score = (1,000,000 + (30×60×100) + (25×10)) × 0.98 + 0 = 1,180,245
+Winner: Node B (bin-packing + consolidation >> network + extension)
+```
+
+### **SCENARIO SC.5: Comprehensive Resource + Cost Optimization**
+```
+Node A: Balanced ($0.384/hr, 8 cores, 32GB, 1TB SSD), 50min existing (35min left), 20 slots
+Node B: Compute-optimized ($0.336/hr, 16 cores, 16GB, 500GB), 45min existing (30min left), 32 slots
+Node C: Memory-optimized ($0.672/hr, 4 cores, 128GB, 2TB), Empty, 16 slots
+New Job: Balanced workload (28 minutes, 6 cores, 24GB, 800GB)
+
+Analysis:
+- Node A: 28min ≤ 35min → BIN-PACKING, Perfect resource fit
+  Score = (1,000,000 + (35×60×100) + (20×10)) × 0.9 + 50,000 = 1,231,180
+- Node B: 28min ≤ 30min → BIN-PACKING, CPU excess, memory tight
+  Score = (1,000,000 + (30×60×100) + (32×10)) × 0.95 + 10,000 = 1,190,304
+- Node C: Empty → PENALTY, Memory overkill + expensive
+  Score = (1,000 + (16×1)) × 0.5 - 10,000 = -9,492
+Winner: Node A (optimal resource match + cost efficiency + consolidation)
+```
+
+---
+
+## 📊 **ENHANCED ALGORITHM SUMMARY**
+
+### **Updated Scoring Formula:**
+```pseudocode
+total_score = base_hierarchical_score × cost_multiplier + resource_bonus + risk_penalty
+```
+
+### **New Decision Matrix:**
+| **Factor** | **Weight** | **Impact** | **Example** |
+|------------|------------|------------|-------------|
+| **Hierarchical Priority** | 100% | Core algorithm unchanged | Bin-packing > Extension > Empty |
+| **Cost Efficiency** | 20-80% | Multiplier on base score | Spot instances get 1.2x bonus |
+| **Resource Fit** | Fixed bonus | +10K to +50K points | GPU match = +50K, Memory fit = +25K |
+| **Risk Assessment** | Fixed penalty | -10K to -100K points | Spot interruption risk = -75K |
+| **Performance Tier** | 5-20% | Bonus/penalty on base | Compute-optimized = +20K |
+
+### **Key Enhancements:**
+1. **🏗️ Resource Matching**: Jobs matched to appropriate node types (CPU/GPU/Memory/Storage)
+2. **💰 Cost Optimization**: Cheaper nodes preferred, spot instances get bonuses with risk assessment  
+3. **⚖️ Performance vs Cost**: Balanced scoring prevents inappropriate instance selection
+4. **🌍 Multi-Zone Awareness**: Regional pricing and network performance considered
+5. **🎯 Workload Classification**: Different job types get different optimization strategies
+
+**✅ Enhanced with 15 new scenarios covering node size and cost awareness! Total: 45 comprehensive scenarios! 🚀**
