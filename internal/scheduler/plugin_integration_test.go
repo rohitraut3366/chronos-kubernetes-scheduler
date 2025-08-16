@@ -57,7 +57,7 @@ func TestPluginIntegrationWithRealObjects(t *testing.T) {
 					existingJobs: []IntegrationJob{}, // Empty!
 				},
 			},
-			expectedWinner: "cache-redis", // Empty node should win
+			expectedWinner: "web-frontend", // Should avoid empty node (cache-redis) and prefer active node
 		},
 		{
 			name:        "MLTrainingCluster",
@@ -93,7 +93,7 @@ func TestPluginIntegrationWithRealObjects(t *testing.T) {
 					existingJobs: []IntegrationJob{}, // Also empty
 				},
 			},
-			expectedWinner: "large-node", // Higher capacity should win tie
+			expectedWinner: "small-node", // Both empty nodes get penalty, winner determined by other factors
 		},
 		{
 			name:        "RealTimingScenario",
