@@ -2082,6 +2082,26 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("OverduePodClampingLogic", func(t *testing.T) {
+		// Test the specific edge case: remainingSeconds < 0 (overdue pods)
+		overdueHandle := createOverduePodMockHandle()
+		plugin := &Chronos{handle: overdueHandle}
+		
+		testPod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "new-job", Namespace: "test",
+				Annotations: map[string]string{JobDurationAnnotation: "600"}, // 10 min job
+			},
+		}
+		
+		score, status := plugin.Score(context.Background(), nil, testPod, "overdue-node")
+		
+		assert.True(t, status.IsSuccess(), "Score should succeed with overdue pods")
+		assert.Greater(t, score, int64(0), "Should still calculate positive score")
+		
+		t.Logf("✅ Overdue pod clamping test: Score=%d (overdue pods handled correctly)", score)
+	})
 }
 
 // =================================================================
@@ -2133,6 +2153,18 @@ func createComplexStateMockHandle() *comprehensiveMockHandle {
 		nodes: map[string]*mockNodeData{
 			"complex-node": {
 				nodeInfo: createNodeWithMixedPodStates("complex-node"),
+			},
+		},
+		clientSet:     fake.NewSimpleClientset(),
+		eventRecorder: &mockEventRecorder{},
+	}
+}
+
+func createOverduePodMockHandle() *comprehensiveMockHandle {
+	return &comprehensiveMockHandle{
+		nodes: map[string]*mockNodeData{
+			"overdue-node": {
+				nodeInfo: createNodeWithOverduePods("overdue-node"),
 			},
 		},
 		clientSet:     fake.NewSimpleClientset(),
@@ -2376,6 +2408,17 @@ func createNodeWithMixedPodStates(nodeName string) *framework.NodeInfo {
 				StartTime: &metav1.Time{Time: now.Add(-5 * time.Minute)}, // 10 min remaining
 			},
 		},
+		// OVERDUE POD - to test remainingSeconds < 0 clamping logic  
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "overdue-pod",
+				Annotations: map[string]string{JobDurationAnnotation: "300"}, // 5 min expected
+			},
+			Status: v1.PodStatus{
+				Phase:     v1.PodRunning,
+				StartTime: &metav1.Time{Time: now.Add(-10 * time.Minute)}, // Started 10 min ago, overdue by 5 min
+			},
+		},
 		// Valid pending pod (should be included)
 		{
 			ObjectMeta: metav1.ObjectMeta{
@@ -2433,6 +2476,62 @@ func createNodeWithMixedPodStates(nodeName string) *framework.NodeInfo {
 	for _, pod := range pods {
 		nodeInfo.AddPod(pod)
 	}
+	
+	return nodeInfo
+}
 
+func createNodeWithOverduePods(nodeName string) *framework.NodeInfo {
+	node := &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+		Status: v1.NodeStatus{
+			Allocatable: v1.ResourceList{
+				v1.ResourcePods: *resource.NewQuantity(50, resource.DecimalSI),
+				v1.ResourceCPU:  *resource.NewMilliQuantity(4000, resource.DecimalSI), // 4 CPUs
+			},
+		},
+	}
+	nodeInfo := framework.NewNodeInfo()
+	nodeInfo.SetNode(node)
+	
+	now := time.Now()
+	
+	// Create overdue pods to test remainingSeconds < 0 clamping
+	overduePods := []*v1.Pod{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "overdue-job-1",
+				Annotations: map[string]string{JobDurationAnnotation: "300"}, // Expected 5 minutes
+			},
+			Status: v1.PodStatus{
+				Phase:     v1.PodRunning,
+				StartTime: &metav1.Time{Time: now.Add(-10 * time.Minute)}, // Started 10 min ago (5 min overdue)
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "overdue-job-2", 
+				Annotations: map[string]string{JobDurationAnnotation: "600"}, // Expected 10 minutes
+			},
+			Status: v1.PodStatus{
+				Phase:     v1.PodRunning,
+				StartTime: &metav1.Time{Time: now.Add(-20 * time.Minute)}, // Started 20 min ago (10 min overdue)
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "normal-job",
+				Annotations: map[string]string{JobDurationAnnotation: "1800"}, // Expected 30 minutes
+			},
+			Status: v1.PodStatus{
+				Phase:     v1.PodRunning,
+				StartTime: &metav1.Time{Time: now.Add(-5 * time.Minute)}, // Started 5 min ago (25 min remaining)
+			},
+		},
+	}
+	
+	for _, pod := range overduePods {
+		nodeInfo.AddPod(pod)
+	}
+	
 	return nodeInfo
 }

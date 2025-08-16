@@ -36,6 +36,12 @@ test:
 	$(GOTEST) -v -race -coverprofile=coverage.out ./...
 	@echo "✅ Tests completed"
 
+## test-no-main: Run tests excluding main.go from coverage
+test-no-main:
+	@echo "Running tests excluding main.go from coverage..."
+	$(GOTEST) -v -race -coverprofile=coverage.out ./internal/...
+	@echo "✅ Tests completed (main.go excluded)"
+
 ## test-unit: Run unit tests only
 test-unit:
 	@echo "Running unit tests..."
