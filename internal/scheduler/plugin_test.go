@@ -82,8 +82,8 @@ func calculateMockScore(newPodDuration, maxRemainingTime int64, currentPods int,
 	nodeInfo := mockNodeInfo("test-node", currentPods, capacity)
 
 	// Use the actual optimized algorithm
-	nodeCompletionTime := plugin.calculateBinPackingCompletionTime(maxRemainingTime, newPodDuration)
-	score := plugin.calculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration, nodeCompletionTime)
+	nodeCompletionTime := plugin.CalculateBinPackingCompletionTime(maxRemainingTime, newPodDuration)
+	score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration, nodeCompletionTime)
 
 	return score
 }
@@ -288,13 +288,23 @@ func TestRandomizedPropertyValidation(t *testing.T) {
 				score1 := calculateMockScore(newJobDuration, node1Remaining, node1Pods, capacity)
 				score2 := calculateMockScore(newJobDuration, node2Remaining, node2Pods, capacity)
 
-				// Test invariant: UPDATED for cost-optimization algorithm
-				// If node1 is strictly better AND neither is empty, it MUST win
-				// BUT: Empty nodes (rem=0) are penalized for cost optimization
-				if node1Remaining < node2Remaining && node1Pods < node2Pods && node1Remaining > 0 && node2Remaining > 0 {
+				// Test invariant: UPDATED for hierarchical bin-packing algorithm
+				// Priority 1: Jobs that FIT within existing work (bin-packing)
+				// Priority 2: Jobs that EXTEND existing work (extension)
+				// Priority 3: Empty nodes (cost optimization)
+				node1Fits := node1Remaining > 0 && newJobDuration <= node1Remaining
+				node2Fits := node2Remaining > 0 && newJobDuration <= node2Remaining
+
+				// Case 1: One node enables bin-packing, the other doesn't -> bin-packing ALWAYS wins
+				if node1Fits && !node2Fits {
 					assert.Greater(t, score1, score2,
-						"Strictly better non-empty node must win: node1(rem=%d,pods=%d,score=%d) vs node2(rem=%d,pods=%d,score=%d)",
-						node1Remaining, node1Pods, score1, node2Remaining, node2Pods, score2)
+						"Bin-packing must beat extension: node1(rem=%d,fits=true,score=%d) vs node2(rem=%d,fits=false,score=%d)",
+						node1Remaining, score1, node2Remaining, score2)
+					successfulTests++
+				} else if node2Fits && !node1Fits {
+					assert.Greater(t, score2, score1,
+						"Bin-packing must beat extension: node2(rem=%d,fits=true,score=%d) vs node1(rem=%d,fits=false,score=%d)",
+						node2Remaining, score2, node1Remaining, score1)
 					successfulTests++
 				} else if node1Remaining == 0 && node2Remaining > 0 {
 					// Empty node (node1) should lose to active node (node2) for cost optimization
@@ -487,15 +497,20 @@ func TestCorrectnessInvariants(t *testing.T) {
 	})
 
 	t.Run("ScoreMonotonicity", func(t *testing.T) {
-		// Scores should improve as conditions get better
-		baseScore := calculateMockScore(30, 40, 10, 100)     // Base case: completion=40
-		betterTime := calculateMockScore(30, 20, 10, 100)    // Better time: completion=30
-		betterCapacity := calculateMockScore(30, 40, 5, 100) // Better capacity: 5 vs 10 pods
+		// Test hierarchical monotonicity: bin-packing > extension > empty
+		binPackingScore := calculateMockScore(30, 40, 10, 100) // 30 <= 40: bin-packing (Priority 1)
+		extensionScore := calculateMockScore(50, 40, 10, 100)  // 50 > 40: extension (Priority 2)
+		emptyScore := calculateMockScore(30, 0, 0, 100)        // empty node (Priority 3)
 
-		assert.Greater(t, betterTime, baseScore, "Better time should improve score")
-		assert.Greater(t, betterCapacity, baseScore, "Better capacity should improve score")
+		assert.Greater(t, binPackingScore, extensionScore, "Bin-packing should beat extension")
+		assert.Greater(t, extensionScore, emptyScore, "Extension should beat empty node")
 
-		t.Log("✅ Score monotonicity verified")
+		// Within same priority tier, better utilization should win
+		higherUtilization := calculateMockScore(30, 40, 5, 100) // More available slots
+		lowerUtilization := calculateMockScore(30, 40, 15, 100) // Fewer available slots
+		assert.Greater(t, higherUtilization, lowerUtilization, "Better utilization should improve score within same tier")
+
+		t.Log("✅ Hierarchical score monotonicity verified")
 	})
 }
 
@@ -540,35 +555,43 @@ func TestEdgeCaseCoverage(t *testing.T) {
 
 	t.Run("BinPackingEdgeCases", func(t *testing.T) {
 		// Test exact match scenario
-		completionTime := plugin.calculateBinPackingCompletionTime(300, 300)
+		completionTime := plugin.CalculateBinPackingCompletionTime(300, 300)
 		assert.Equal(t, int64(300), completionTime, "Exact match should return existing time")
 
 		// Test zero remaining time
-		completionTimeZero := plugin.calculateBinPackingCompletionTime(0, 500)
+		completionTimeZero := plugin.CalculateBinPackingCompletionTime(0, 500)
 		assert.Equal(t, int64(500), completionTimeZero, "Zero remaining should return new job duration")
 
 		// Test zero new job
-		completionTimeZeroJob := plugin.calculateBinPackingCompletionTime(400, 0)
+		completionTimeZeroJob := plugin.CalculateBinPackingCompletionTime(400, 0)
 		assert.Equal(t, int64(400), completionTimeZeroJob, "Zero job should return existing work")
 
 		t.Logf("✅ Bin-packing edge cases covered")
 	})
 
 	t.Run("OptimizedScoreEdgeCases", func(t *testing.T) {
-		// Test edge case: node at exactly full capacity
+		// Test edge case: node at exactly full capacity (extension case: 600 > 300)
 		nodeInfo := mockNodeInfo("full-node", 20, 20) // Full capacity
-		score := plugin.calculateOptimizedScore(nodeInfo, 300, 600, 600)
-		assert.Equal(t, int64(0), score, "Full capacity should have zero available slots")
+		score := plugin.CalculateOptimizedScore(nodeInfo, 300, 600, 600)
+		// With new extension minimization priority: strong penalty for extension
+		const extensionPriority = 100000
+		expectedScore := int64(extensionPriority) - (600-300)*100 + 0*10 // 0 available slots, new penalty rate
+		assert.Equal(t, expectedScore, score, "Full capacity gets base extension score with no utilization bonus")
 
 		// Test edge case: node over capacity (shouldn't happen but test robustness)
 		nodeInfoOver := mockNodeInfo("over-node", 25, 20) // Over capacity
-		scoreOver := plugin.calculateOptimizedScore(nodeInfoOver, 300, 600, 600)
-		assert.Equal(t, int64(0), scoreOver, "Over capacity should be capped at zero available slots")
+		scoreOver := plugin.CalculateOptimizedScore(nodeInfoOver, 300, 600, 600)
+		// availableSlots is capped at 0, same calculation as above
+		assert.Equal(t, expectedScore, scoreOver, "Over capacity should have same score as full capacity")
 
-		// Test edge case: very large utilization numbers
-		nodeInfoLarge := mockNodeInfo("large-node", 5, 1000) // Very large capacity
-		scoreLarge := plugin.calculateOptimizedScore(nodeInfoLarge, 300, 600, 600)
-		assert.Greater(t, scoreLarge, int64(100000), "Large capacity should have high utilization score")
+		// Test edge case: very large utilization numbers (bin-packing case: 100 <= 300)
+		nodeInfoLarge := mockNodeInfo("large-node", 5, 1000) // Very large capacity (but capped at 50)
+		scoreLarge := plugin.CalculateOptimizedScore(nodeInfoLarge, 300, 100, 300)
+		// This is bin-packing case (100 <= 300), so Priority 1
+		// Capacity is capped at 50, so available slots = 50 - 5 = 45
+		const binPackingPriority = 1000000
+		expectedLarge := int64(binPackingPriority) + 300*100 + 45*10 // 45 available slots (50 - 5)
+		assert.Equal(t, expectedLarge, scoreLarge, "Large capacity should have high bin-packing score")
 
 		t.Logf("✅ Optimized score edge cases covered")
 	})
@@ -581,12 +604,12 @@ func TestBoundaryConditions(t *testing.T) {
 
 	t.Run("ZeroDurationBoundaries", func(t *testing.T) {
 		// Test bin-packing with zero durations
-		result1 := plugin.calculateBinPackingCompletionTime(0, 0)
+		result1 := plugin.CalculateBinPackingCompletionTime(0, 0)
 		assert.Equal(t, int64(0), result1, "Zero-zero should return zero")
 
 		// Test scoring with zero durations
 		nodeInfo := mockNodeInfo("test", 5, 10)
-		score1 := plugin.calculateOptimizedScore(nodeInfo, 0, 0, 0)
+		score1 := plugin.CalculateOptimizedScore(nodeInfo, 0, 0, 0)
 		assert.Greater(t, score1, int64(0), "Zero duration should still have positive score from utilization")
 
 		t.Logf("✅ Zero duration boundaries covered")
@@ -595,12 +618,12 @@ func TestBoundaryConditions(t *testing.T) {
 	t.Run("MaxValueBoundaries", func(t *testing.T) {
 		// Test with very large time values
 		largeTime := int64(999999999) // Very large but valid
-		result := plugin.calculateBinPackingCompletionTime(largeTime, 1000)
+		result := plugin.CalculateBinPackingCompletionTime(largeTime, 1000)
 		assert.Equal(t, largeTime, result, "Large existing time should be preserved when new job fits")
 
 		// Test scoring with large times
 		nodeInfo := mockNodeInfo("test", 1, 50)
-		score := plugin.calculateOptimizedScore(nodeInfo, largeTime, 1000, largeTime)
+		score := plugin.CalculateOptimizedScore(nodeInfo, largeTime, 1000, largeTime)
 		assert.Greater(t, score, int64(0), "Large times should still produce valid scores")
 
 		t.Logf("✅ Maximum value boundaries covered")
@@ -634,11 +657,11 @@ func TestMainEntryPoints(t *testing.T) {
 		nodeInfo := mockNodeInfo("test-node", 2, 20)
 
 		// Test bin-packing calculation
-		completionTime := plugin.calculateBinPackingCompletionTime(maxRemainingTime, newJobDuration)
+		completionTime := plugin.CalculateBinPackingCompletionTime(maxRemainingTime, newJobDuration)
 		assert.Equal(t, newJobDuration, completionTime, "Should extend completion time")
 
 		// Test optimized scoring
-		score := plugin.calculateOptimizedScore(nodeInfo, maxRemainingTime, newJobDuration, completionTime)
+		score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newJobDuration, completionTime)
 		assert.Greater(t, score, int64(0), "Score should be positive")
 
 		t.Logf("✅ Score calculation methods: completion=%ds, score=%d", completionTime, score)
@@ -853,7 +876,7 @@ func TestCalculateBinPackingCompletionTime(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := plugin.calculateBinPackingCompletionTime(tc.maxRemainingTime, tc.newPodDuration)
+			result := plugin.CalculateBinPackingCompletionTime(tc.maxRemainingTime, tc.newPodDuration)
 			assert.Equal(t, tc.expectedCompletion, result,
 				"Test %s: %s. Expected %ds, got %ds",
 				tc.name, tc.description, tc.expectedCompletion, result)
@@ -907,8 +930,8 @@ func TestCalculateOptimizedScore(t *testing.T) {
 			// Create mock node with specified capacity
 			nodeInfo := mockNodeInfo("test-node", tc.currentPods, int64(tc.nodeCapacity))
 
-			nodeCompletionTime := plugin.calculateBinPackingCompletionTime(tc.maxRemainingTime, tc.newPodDuration)
-			score := plugin.calculateOptimizedScore(nodeInfo, tc.maxRemainingTime, tc.newPodDuration, nodeCompletionTime)
+			nodeCompletionTime := plugin.CalculateBinPackingCompletionTime(tc.maxRemainingTime, tc.newPodDuration)
+			score := plugin.CalculateOptimizedScore(nodeInfo, tc.maxRemainingTime, tc.newPodDuration, nodeCompletionTime)
 
 			// Get actual capacity from the method for accurate calculations
 			actualCapacity := plugin.estimateNodeCapacity(nodeInfo)
@@ -916,22 +939,31 @@ func TestCalculateOptimizedScore(t *testing.T) {
 
 			switch tc.expectedStrategy {
 			case "extension-utilization":
-				expectedScore := int64(availableSlots) * utilizationBonus
-				assert.Equal(t, expectedScore, score, "Extension case should use utilization scoring")
-				assert.Greater(t, score, int64(0), "Extension case should have positive score")
+				// Updated for new extension minimization priority: strong penalty for extension
+				const extensionPriority = 100000
+				extensionPenalty := (tc.newPodDuration - tc.maxRemainingTime) * 100 // Extension minimization dominates
+				utilizationBonus := int64(availableSlots) * 10                      // Only tie-breaker
+				expectedScore := int64(extensionPriority) - extensionPenalty + utilizationBonus
+				assert.Equal(t, expectedScore, score, "Extension case should prioritize extension minimization")
+				assert.Greater(t, score, int64(1000), "Extension case should score higher than empty nodes")
 
 			case "consolidation":
-				expectedConsolidationScore := tc.maxRemainingTime
-				expectedUtilizationScore := int64(availableSlots) * (utilizationBonus / 10)
-				expectedTotal := expectedConsolidationScore + expectedUtilizationScore
-				assert.Equal(t, expectedTotal, score, "Consolidation case should combine consolidation + utilization")
-				assert.Greater(t, score, int64(0), "Consolidation case should have positive score")
+				// Updated for new hierarchical scoring: bin-packing case (renamed from consolidation)
+				const binPackingPriority = 1000000
+				baseScore := int64(binPackingPriority)
+				consolidationBonus := tc.maxRemainingTime * 100
+				utilizationBonus := int64(availableSlots) * 10
+				expectedTotal := baseScore + consolidationBonus + utilizationBonus
+				assert.Equal(t, expectedTotal, score, "Bin-packing case should use hierarchical scoring")
+				assert.Greater(t, score, int64(100000), "Bin-packing case should score highest")
 
 			case "empty-penalty":
-				expectedScore := int64(availableSlots) * (utilizationBonus / 100)
-				assert.Equal(t, expectedScore, score, "Empty node should have penalty score")
+				// Updated for new hierarchical scoring: empty node case
+				const emptyNodePriority = 1000
+				expectedScore := int64(emptyNodePriority) + int64(availableSlots)*1
+				assert.Equal(t, expectedScore, score, "Empty node should have lowest priority score")
 				// Empty nodes should have much lower scores than active nodes
-				assert.Less(t, score, int64(availableSlots)*utilizationBonus/10, "Empty penalty should be significantly lower")
+				assert.Less(t, score, int64(10000), "Empty penalty should be significantly lower")
 			}
 
 			t.Logf("✅ %s: Strategy=%s, Score=%d, Available=%d/%d",
@@ -1092,8 +1124,8 @@ func TestTwoPhaseDecisionLogic(t *testing.T) {
 			for i, nodeSpec := range tc.nodes {
 				nodeInfo := mockNodeInfo(nodeSpec.name, nodeSpec.currentPods, int64(nodeSpec.capacity))
 
-				nodeCompletionTime := plugin.calculateBinPackingCompletionTime(nodeSpec.maxRemaining, tc.newJobDuration)
-				score := plugin.calculateOptimizedScore(nodeInfo, nodeSpec.maxRemaining, tc.newJobDuration, nodeCompletionTime)
+				nodeCompletionTime := plugin.CalculateBinPackingCompletionTime(nodeSpec.maxRemaining, tc.newJobDuration)
+				score := plugin.CalculateOptimizedScore(nodeInfo, nodeSpec.maxRemaining, tc.newJobDuration, nodeCompletionTime)
 				scores[i] = score
 
 				t.Logf("Node %s: Existing=%ds, Score=%d", nodeSpec.name, nodeSpec.maxRemaining, score)
@@ -1260,8 +1292,8 @@ func TestMaximumCoveragePush(t *testing.T) {
 
 		for _, tc := range testCases {
 			nodeInfo := mockNodeInfo(tc.name, tc.currentPods, tc.capacity)
-			completionTime := plugin.calculateBinPackingCompletionTime(tc.maxRemaining, tc.newJobDuration)
-			score := plugin.calculateOptimizedScore(nodeInfo, tc.maxRemaining, tc.newJobDuration, completionTime)
+			completionTime := plugin.CalculateBinPackingCompletionTime(tc.maxRemaining, tc.newJobDuration)
+			score := plugin.CalculateOptimizedScore(nodeInfo, tc.maxRemaining, tc.newJobDuration, completionTime)
 
 			switch tc.expectedPattern {
 			case "empty-penalty":
@@ -1271,7 +1303,11 @@ func TestMaximumCoveragePush(t *testing.T) {
 			case "extension":
 				assert.Greater(t, score, int64(30000), "%s should have extension score", tc.name)
 			case "zero-slots":
-				assert.Less(t, score, int64(1000), "%s should have very low score due to no available slots", tc.name)
+				// With hierarchical scoring, even zero-slot nodes get base priority score
+				// This is bin-packing case (300 <= 400), so gets Priority 1 base score
+				const binPackingPriority = 1000000
+				expectedZeroSlot := int64(binPackingPriority) + 400*100 + 0*10 // 0 available slots
+				assert.Equal(t, expectedZeroSlot, score, "%s should get base bin-packing score with no utilization bonus", tc.name)
 			}
 
 			t.Logf("✅ %s: Score=%d, Pattern=%s", tc.name, score, tc.expectedPattern)
@@ -1432,8 +1468,8 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 		t.Run("ConstantsAndPackageLevel", func(t *testing.T) {
 			assert.Equal(t, "Chronos", PluginName, "Plugin name constant")
 			assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation, "Annotation constant")
-			assert.Equal(t, int(100000000), maxPossibleScore, "Max possible score constant")
-			assert.Equal(t, int(10000), utilizationBonus, "Utilization bonus constant")
+			assert.Equal(t, int64(100000000), int64(maxPossibleScore), "Max possible score constant")
+			// Removed utilizationBonus constant - now using hierarchical scoring with priority levels
 
 			t.Logf("✅ All package constants covered")
 		})

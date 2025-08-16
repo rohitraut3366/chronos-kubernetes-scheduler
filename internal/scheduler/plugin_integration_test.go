@@ -620,8 +620,8 @@ func TestOptimizedSchedulingIntegration(t *testing.T) {
 				}
 
 				// Calculate completion time and score
-				nodeCompletionTime := plugin.calculateBinPackingCompletionTime(maxRemainingTime, tc.newJobDuration)
-				score := plugin.calculateOptimizedScore(nodeInfo, maxRemainingTime, tc.newJobDuration, nodeCompletionTime)
+				nodeCompletionTime := plugin.CalculateBinPackingCompletionTime(maxRemainingTime, tc.newJobDuration)
+				score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, tc.newJobDuration, nodeCompletionTime)
 				scores[i] = score
 
 				t.Logf("   Node %s: ExistingWork=%ds, NewJob=%ds, Completion=%ds, Score=%d",
@@ -664,12 +664,12 @@ func TestCostOptimizationScenarios(t *testing.T) {
 
 		for _, jobDuration := range jobDurations {
 			// Score active node
-			activeCompletion := plugin.calculateBinPackingCompletionTime(600, jobDuration)
-			activeScore := plugin.calculateOptimizedScore(activeNode, 600, jobDuration, activeCompletion)
+			activeCompletion := plugin.CalculateBinPackingCompletionTime(600, jobDuration)
+			activeScore := plugin.CalculateOptimizedScore(activeNode, 600, jobDuration, activeCompletion)
 
 			// Score empty node
-			emptyCompletion := plugin.calculateBinPackingCompletionTime(0, jobDuration)
-			emptyScore := plugin.calculateOptimizedScore(emptyNode, 0, jobDuration, emptyCompletion)
+			emptyCompletion := plugin.CalculateBinPackingCompletionTime(0, jobDuration)
+			emptyScore := plugin.CalculateOptimizedScore(emptyNode, 0, jobDuration, emptyCompletion)
 
 			// Active node should win for consolidation
 			assert.Greater(t, activeScore, emptyScore,
@@ -700,8 +700,8 @@ func TestCostOptimizationScenarios(t *testing.T) {
 		for i, node := range nodes {
 			nodeInfo := simpleMockNodeInfo(node.name, node.utilization, 20)
 
-			completion := plugin.calculateBinPackingCompletionTime(node.existing, newJobDuration)
-			score := plugin.calculateOptimizedScore(nodeInfo, node.existing, newJobDuration, completion)
+			completion := plugin.CalculateBinPackingCompletionTime(node.existing, newJobDuration)
+			score := plugin.CalculateOptimizedScore(nodeInfo, node.existing, newJobDuration, completion)
 			scores[i] = score
 		}
 

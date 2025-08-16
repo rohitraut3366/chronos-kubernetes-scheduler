@@ -37,9 +37,6 @@ const (
 	// maxPossibleScore - A large constant to invert the score. A lower completion time will result in a higher raw score.
 	// Set to ~3.17 years (100,000,000 seconds ≈ 1,157 days) to provide excellent granularity for virtually all workloads.
 	maxPossibleScore = 100000000
-
-	// Utilization bonus - higher value gives stronger preference to less utilized nodes
-	utilizationBonus = 10000 // Points per available slot
 )
 
 // Chronos is a scheduler plugin that uses bin-packing logic with extension minimization
@@ -117,10 +114,10 @@ func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.
 	}
 
 	// 4. Calculate completion time using bin-packing logic
-	nodeCompletionTime := s.calculateBinPackingCompletionTime(maxRemainingTime, newPodDuration)
+	nodeCompletionTime := s.CalculateBinPackingCompletionTime(maxRemainingTime, newPodDuration)
 
 	// 5. Apply two-phase optimization strategy
-	score := s.calculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration, nodeCompletionTime)
+	score := s.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration, nodeCompletionTime)
 
 	klog.Infof("Pod: %s/%s, Node: %s, Existing: %ds, NewJob: %ds, Completion: %ds, Score: %d (optimized)",
 		p.Namespace, p.Name, nodeName, maxRemainingTime, newPodDuration, nodeCompletionTime, score)
@@ -130,7 +127,7 @@ func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.
 
 // calculateBinPackingCompletionTime implements true bin-packing logic:
 // If new job fits within existing work window, completion time doesn't change
-func (s *Chronos) calculateBinPackingCompletionTime(maxRemainingTime, newPodDuration int64) int64 {
+func (s *Chronos) CalculateBinPackingCompletionTime(maxRemainingTime, newPodDuration int64) int64 {
 	if newPodDuration <= maxRemainingTime {
 		// Job fits within existing work window - completion time stays the same
 		// This is the key insight: jobs can run concurrently within the window!
@@ -141,14 +138,13 @@ func (s *Chronos) calculateBinPackingCompletionTime(maxRemainingTime, newPodDura
 	return newPodDuration
 }
 
-// calculateOptimizedScore implements the two-phase optimization strategy:
-// Phase 1: If job extends beyond existing work → Choose best utilization (excluding empty nodes)
-// Phase 2: If job fits within existing work → Choose node with longest existing work (consolidation)
-func (s *Chronos) calculateOptimizedScore(nodeInfo *framework.NodeInfo, maxRemainingTime int64, newPodDuration int64, nodeCompletionTime int64) int64 {
-	// Get current pod count
+// calculateOptimizedScore implements hierarchical bin-packing optimization:
+// PRIORITY 1: Jobs that FIT within existing work windows (perfect bin-packing)
+// PRIORITY 2: Jobs that EXTEND existing commitments (extension minimization)
+// PRIORITY 3: Empty nodes (heavily penalized for cost optimization)
+func (s *Chronos) CalculateOptimizedScore(nodeInfo *framework.NodeInfo, maxRemainingTime int64, newPodDuration int64, nodeCompletionTime int64) int64 {
+	// Get current pod count and capacity
 	currentPods := len(nodeInfo.Pods)
-
-	// Calculate utilization metrics
 	estimatedCapacity := s.estimateNodeCapacity(nodeInfo)
 	availableSlots := estimatedCapacity - currentPods
 	if availableSlots < 0 {
@@ -158,36 +154,53 @@ func (s *Chronos) calculateOptimizedScore(nodeInfo *framework.NodeInfo, maxRemai
 	var finalScore int64
 	var strategy string
 
-	if maxRemainingTime > 0 && newPodDuration > maxRemainingTime {
-		// CASE 1: Job extends beyond existing work
-		// Choose based on utilization bonus, excluding empty nodes
+	// Hierarchical scoring with clear priority levels
+	const (
+		binPackingPriority = 1000000 // Highest priority: jobs that fit within existing windows
+		extensionPriority  = 100000  // Medium priority: jobs that extend commitments
+		emptyNodePriority  = 1000    // Lowest priority: empty nodes
+	)
 
-		utilizationScore := int64(availableSlots) * utilizationBonus
-		finalScore = utilizationScore
-		strategy = "extension-utilization"
+	if maxRemainingTime > 0 && newPodDuration <= maxRemainingTime {
+		// PRIORITY 1: Job fits within existing work - ALWAYS PREFERRED
+		// This is true bin-packing: no extension of node commitment needed
 
-		klog.V(4).Infof("Node %s: EXTENSION case - NewJob=%ds > Existing=%ds, UtilScore=%d",
-			nodeInfo.Node().Name, newPodDuration, maxRemainingTime, utilizationScore)
+		baseScore := int64(binPackingPriority)
+		consolidationBonus := maxRemainingTime * 100   // Prefer longer existing work for better consolidation
+		utilizationBonus := int64(availableSlots) * 10 // Tie-breaker: prefer nodes with more capacity
+
+		finalScore = baseScore + consolidationBonus + utilizationBonus
+		strategy = "bin-packing-fit"
+
+		klog.V(4).Infof("Node %s: BIN-PACKING case - NewJob=%ds FITS in Existing=%ds, Base=%d, Consol=%d, Util=%d",
+			nodeInfo.Node().Name, newPodDuration, maxRemainingTime, baseScore, consolidationBonus, utilizationBonus)
 
 	} else if maxRemainingTime > 0 {
-		// CASE 2: Job fits within existing work
-		// Choose node with longest existing work (consolidation) + utilization tie-breaker
+		// PRIORITY 2: Job extends beyond existing work
+		// CRITICAL: Extension minimization takes priority over utilization
 
-		consolidationScore := maxRemainingTime
-		utilizationScore := int64(availableSlots) * (utilizationBonus / 10) // Lower weight for tie-breaking
-		finalScore = consolidationScore + utilizationScore
-		strategy = "consolidation"
+		baseScore := int64(extensionPriority)
+		extensionPenalty := (newPodDuration - maxRemainingTime) * 100 // Strong penalty - extension minimization dominates
+		utilizationBonus := int64(availableSlots) * 10                // Smaller bonus - only for tie-breaking
 
-		klog.V(4).Infof("Node %s: CONSOLIDATION case - NewJob=%ds fits in Existing=%ds, ConsolScore=%d, UtilScore=%d",
-			nodeInfo.Node().Name, newPodDuration, maxRemainingTime, consolidationScore, utilizationScore)
+		finalScore = baseScore - extensionPenalty + utilizationBonus
+		strategy = "extension-minimization"
+
+		klog.V(4).Infof("Node %s: EXTENSION case - NewJob=%ds > Existing=%ds, Extension=%ds, Base=%d, Penalty=%d, Util=%d",
+			nodeInfo.Node().Name, newPodDuration, maxRemainingTime, newPodDuration-maxRemainingTime, baseScore, extensionPenalty, utilizationBonus)
 
 	} else {
-		// CASE 3: Empty node - heavily penalized
-		finalScore = int64(availableSlots) * (utilizationBonus / 100) // Very low score
-		strategy = "empty-penalty"
+		// PRIORITY 3: Empty node - lowest priority for cost optimization
+		// Heavily penalized to encourage consolidation and enable node termination
 
-		klog.V(4).Infof("Node %s: EMPTY node penalty, Score=%d",
-			nodeInfo.Node().Name, finalScore)
+		baseScore := int64(emptyNodePriority)
+		utilizationBonus := int64(availableSlots) * 1 // Minimal utilization consideration
+
+		finalScore = baseScore + utilizationBonus
+		strategy = "empty-node-penalty"
+
+		klog.V(4).Infof("Node %s: EMPTY node - heavily penalized, Base=%d, Util=%d",
+			nodeInfo.Node().Name, baseScore, utilizationBonus)
 	}
 
 	klog.V(4).Infof("Node %s: Strategy=%s, Pods=%d/%d, Available=%d, Final=%d",
