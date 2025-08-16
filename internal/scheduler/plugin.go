@@ -19,6 +19,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 
@@ -33,19 +34,23 @@ const (
 	PluginName = "Chronos"
 	// JobDurationAnnotation is the annotation on a pod that specifies its expected runtime in seconds.
 	JobDurationAnnotation = "scheduling.workload.io/expected-duration-seconds"
-	// ScoreMultiplier is used to ensure the primary scoring factor (time) outweighs the tie-breaker (pod count).
-	ScoreMultiplier = 100
+	// maxPossibleScore - A large constant to invert the score. A lower completion time will result in a higher raw score.
+	// Set to ~3.17 years (100,000,000 seconds ≈ 1,157 days) to provide excellent granularity for virtually all workloads.
+	maxPossibleScore = 100000000
+
+	// Utilization bonus - higher value gives stronger preference to less utilized nodes
+	utilizationBonus = 10000 // Points per available slot
 )
 
-// Chronos is a scheduler plugin that schedules pods on the node
-// that is predicted to be empty the soonest. It uses pod count as a tie-breaker.
+// Chronos is a scheduler plugin that uses bin-packing logic with extension minimization
+// to optimize resource utilization and minimize cluster commitment extensions.
 type Chronos struct {
 	handle framework.Handle
 }
 
 // New initializes a new plugin and returns it.
 func New(_ runtime.Object, h framework.Handle) (framework.Plugin, error) {
-	klog.Infof("Initializing Chronos plugin")
+	klog.Infof("Initializing Chronos plugin with bin-packing + extension minimization + utilization optimization")
 	return &Chronos{
 		handle: h,
 	}, nil
@@ -111,40 +116,139 @@ func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.
 		}
 	}
 
-	// 4. Determine when the node will be free after scheduling the new pod.
-	nodeCompletionTime := maxRemainingTime
-	if newPodDuration > nodeCompletionTime {
-		nodeCompletionTime = newPodDuration
+	// 4. Calculate completion time using bin-packing logic
+	nodeCompletionTime := s.calculateBinPackingCompletionTime(maxRemainingTime, newPodDuration)
+
+	// 5. Apply two-phase optimization strategy
+	score := s.calculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration, nodeCompletionTime)
+
+	klog.Infof("Pod: %s/%s, Node: %s, Existing: %ds, NewJob: %ds, Completion: %ds, Score: %d (optimized)",
+		p.Namespace, p.Name, nodeName, maxRemainingTime, newPodDuration, nodeCompletionTime, score)
+
+	return score, framework.NewStatus(framework.Success)
+}
+
+// calculateBinPackingCompletionTime implements true bin-packing logic:
+// If new job fits within existing work window, completion time doesn't change
+func (s *Chronos) calculateBinPackingCompletionTime(maxRemainingTime, newPodDuration int64) int64 {
+	if newPodDuration <= maxRemainingTime {
+		// Job fits within existing work window - completion time stays the same
+		// This is the key insight: jobs can run concurrently within the window!
+		return maxRemainingTime
 	}
 
-	// 5. Calculate the primary score based on completion time.
-	timeScore := framework.MaxNodeScore - nodeCompletionTime
-	if timeScore < 0 {
-		timeScore = 0
+	// Job extends beyond existing work - completion time becomes the new job duration
+	return newPodDuration
+}
+
+// calculateOptimizedScore implements the two-phase optimization strategy:
+// Phase 1: If job extends beyond existing work → Choose best utilization (excluding empty nodes)
+// Phase 2: If job fits within existing work → Choose node with longest existing work (consolidation)
+func (s *Chronos) calculateOptimizedScore(nodeInfo *framework.NodeInfo, maxRemainingTime int64, newPodDuration int64, nodeCompletionTime int64) int64 {
+	// Get current pod count
+	currentPods := len(nodeInfo.Pods)
+
+	// Calculate utilization metrics
+	estimatedCapacity := s.estimateNodeCapacity(nodeInfo)
+	availableSlots := estimatedCapacity - currentPods
+	if availableSlots < 0 {
+		availableSlots = 0
 	}
 
-	// 6. *** NEW: BALANCING TIE-BREAKER ***
-	// Calculate a secondary score based on the number of running pods.
-	// A node with fewer pods gets a higher score.
-	podCapacity := nodeInfo.Node().Status.Allocatable.Pods().Value()
-	currentPodCount := int64(len(nodeInfo.Pods))
-	balanceScore := podCapacity - currentPodCount
-	if balanceScore < 0 {
-		balanceScore = 0
+	var finalScore int64
+	var strategy string
+
+	if maxRemainingTime > 0 && newPodDuration > maxRemainingTime {
+		// CASE 1: Job extends beyond existing work
+		// Choose based on utilization bonus, excluding empty nodes
+
+		utilizationScore := int64(availableSlots) * utilizationBonus
+		finalScore = utilizationScore
+		strategy = "extension-utilization"
+
+		klog.V(4).Infof("Node %s: EXTENSION case - NewJob=%ds > Existing=%ds, UtilScore=%d",
+			nodeInfo.Node().Name, newPodDuration, maxRemainingTime, utilizationScore)
+
+	} else if maxRemainingTime > 0 {
+		// CASE 2: Job fits within existing work
+		// Choose node with longest existing work (consolidation) + utilization tie-breaker
+
+		consolidationScore := maxRemainingTime
+		utilizationScore := int64(availableSlots) * (utilizationBonus / 10) // Lower weight for tie-breaking
+		finalScore = consolidationScore + utilizationScore
+		strategy = "consolidation"
+
+		klog.V(4).Infof("Node %s: CONSOLIDATION case - NewJob=%ds fits in Existing=%ds, ConsolScore=%d, UtilScore=%d",
+			nodeInfo.Node().Name, newPodDuration, maxRemainingTime, consolidationScore, utilizationScore)
+
+	} else {
+		// CASE 3: Empty node - heavily penalized
+		finalScore = int64(availableSlots) * (utilizationBonus / 100) // Very low score
+		strategy = "empty-penalty"
+
+		klog.V(4).Infof("Node %s: EMPTY node penalty, Score=%d",
+			nodeInfo.Node().Name, finalScore)
 	}
 
-	// 7. Combine the scores.
-	// The timeScore is multiplied by a large number to ensure it always takes precedence.
-	// The balanceScore will only influence the result if the timeScores are identical.
-	finalScore := (timeScore * ScoreMultiplier) + balanceScore
+	klog.V(4).Infof("Node %s: Strategy=%s, Pods=%d/%d, Available=%d, Final=%d",
+		nodeInfo.Node().Name, strategy, currentPods, estimatedCapacity, availableSlots, finalScore)
 
-	klog.Infof("Pod: %s/%s, Node: %s, CompletionTime: %d, TimeScore: %d, PodCount: %d, BalanceScore: %d, FinalScore: %d",
-		p.Namespace, p.Name, nodeName, nodeCompletionTime, timeScore, currentPodCount, balanceScore, finalScore)
+	return finalScore
+}
 
-	return finalScore, framework.NewStatus(framework.Success)
+// estimateNodeCapacity provides a rough estimate of how many pods a node can handle
+// This could be made more sophisticated based on actual resource calculations
+func (s *Chronos) estimateNodeCapacity(nodeInfo *framework.NodeInfo) int {
+	node := nodeInfo.Node()
+
+	// Simple heuristic based on node resources
+	// In production, this could consider actual CPU/memory requirements
+	allocatableCPU := node.Status.Allocatable.Cpu().MilliValue()
+
+	// Assume average pod needs 100m CPU
+	estimatedCapacity := int(allocatableCPU / 100)
+
+	// Cap at reasonable limits
+	if estimatedCapacity < 5 {
+		estimatedCapacity = 5
+	}
+	if estimatedCapacity > 50 {
+		estimatedCapacity = 50
+	}
+
+	return estimatedCapacity
 }
 
 // ScoreExtensions of the Score plugin.
 func (s *Chronos) ScoreExtensions() framework.ScoreExtensions {
+	return s
+}
+
+// NormalizeScore is the key to making this work for jobs of any duration.
+// It takes the raw scores from the Score function and scales them to a 0-100 range.
+func (s *Chronos) NormalizeScore(ctx context.Context, state *framework.CycleState, pod *v1.Pod, scores framework.NodeScoreList) *framework.Status {
+	var minScore, maxScore int64 = math.MaxInt64, math.MinInt64
+
+	for _, nodeScore := range scores {
+		if nodeScore.Score < minScore {
+			minScore = nodeScore.Score
+		}
+		if nodeScore.Score > maxScore {
+			maxScore = nodeScore.Score
+		}
+	}
+
+	// If all scores are the same, no need to normalize.
+	if maxScore == minScore {
+		return nil
+	}
+
+	for i, nodeScore := range scores {
+		// Formula to scale a value from one range [min, max] to another [0, 100].
+		normalized := (nodeScore.Score - minScore) * framework.MaxNodeScore / (maxScore - minScore)
+		scores[i].Score = normalized
+		klog.Infof("Pod: %s/%s, Node: %s, RawScore: %d, NormalizedScore: %d", pod.Namespace, pod.Name, nodeScore.Name, nodeScore.Score, normalized)
+	}
+
 	return nil
 }

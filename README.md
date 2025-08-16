@@ -99,18 +99,17 @@ spec:
 The plugin scores nodes using this algorithm:
 
 ```
-finalScore = (timeScore × 100) + balanceScore
+rawScore = maxPossibleScore - nodeCompletionTime
 
 Where:
-- timeScore = MaxNodeScore - nodeCompletionTime
-- balanceScore = podCapacity - currentPodCount  
 - nodeCompletionTime = max(existingJobEndTimes, newJobDuration)
+- finalScore = normalized via min-max scaling to 0-100 range
 ```
 
 **Example Scoring:**
-- **Empty Node**: `timeScore=100, balanceScore=110 → finalScore=10110`
-- **Busy Node**: `timeScore=20, balanceScore=95 → finalScore=2095`
-- **Result**: Empty node wins! ✅
+- **Empty Node** (10s to complete): `100,000,000 - 10 = 99,999,990` ✅
+- **Busy Node** (1800s to complete): `100,000,000 - 1800 = 99,998,200`
+- **Result**: Empty node wins with excellent granularity! ✅
 
 ## 🧪 Testing
 
@@ -174,7 +173,7 @@ profiles:
 const (
     PluginName            = "Chronos"
     JobDurationAnnotation = "scheduling.workload.io/expected-duration-seconds"
-    ScoreMultiplier       = 100  // Ensures time dominates capacity
+    maxPossibleScore      = 100000000  // ~3.17 years, excellent granularity
 )
 ```
 

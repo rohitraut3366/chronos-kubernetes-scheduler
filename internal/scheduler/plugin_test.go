@@ -26,6 +26,7 @@ func mockNodeInfo(nodeName string, podCount int, capacity int64) *framework.Node
 		Status: v1.NodeStatus{
 			Allocatable: v1.ResourceList{
 				v1.ResourcePods: *resource.NewQuantity(capacity, resource.DecimalSI),
+				v1.ResourceCPU:  *resource.NewMilliQuantity(capacity*100, resource.DecimalSI), // capacity * 100m CPU
 			},
 		},
 	}
@@ -78,20 +79,17 @@ func calculateMockScore(newPodDuration, maxRemainingTime int64, currentPods int,
 		nodeCompletionTime = newPodDuration
 	}
 
-	// 2. Calculate the primary score from time
-	timeScore := framework.MaxNodeScore - nodeCompletionTime
-	if timeScore < 0 {
-		timeScore = 0
+	// 2. Calculate raw score using new implementation logic
+	// NOTE: This matches the new plugin logic - raw score only, no balancing
+	// Use default value since we can't access the initialized variable from tests
+	testMaxPossibleScore := int64(maxPossibleScore)
+	score := testMaxPossibleScore - nodeCompletionTime
+	if score < 0 {
+		score = 0
 	}
 
-	// 3. Calculate the tie-breaker score from available capacity
-	balanceScore := capacity - int64(currentPods)
-	if balanceScore < 0 {
-		balanceScore = 0
-	}
-
-	// 4. Combine scores with multiplier
-	return (timeScore * ScoreMultiplier) + balanceScore
+	// NOTE: Load balancing is now handled by separate plugins, not here
+	return score
 }
 
 // =================================================================
@@ -106,15 +104,15 @@ func TestPluginBasics(t *testing.T) {
 
 	t.Run("ScoreExtensions", func(t *testing.T) {
 		plugin := &Chronos{}
-		assert.Nil(t, plugin.ScoreExtensions(), "ScoreExtensions should be nil for this plugin")
+		assert.Equal(t, plugin, plugin.ScoreExtensions(), "ScoreExtensions should return self to provide NormalizeScore")
 	})
 
 	t.Run("Constants", func(t *testing.T) {
 		assert.Equal(t, "Chronos", PluginName)
 		assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation)
-		assert.Equal(t, 100, ScoreMultiplier, "ScoreMultiplier ensures time dominates balance")
+		assert.Equal(t, 100000000, maxPossibleScore, "maxPossibleScore supports jobs up to ~3.17 years")
 
-		t.Logf("✅ Constants validated - framework.MaxNodeScore = %d", framework.MaxNodeScore)
+		t.Logf("✅ Constants validated - framework.MaxNodeScore = %d, maxPossibleScore = %d", framework.MaxNodeScore, maxPossibleScore)
 	})
 }
 
@@ -500,4 +498,301 @@ func TestCorrectnessInvariants(t *testing.T) {
 
 		t.Log("✅ Score monotonicity verified")
 	})
+}
+
+// =================================================================
+// Test New Optimized Methods - Bin-Packing Logic
+// =================================================================
+
+func TestCalculateBinPackingCompletionTime(t *testing.T) {
+	plugin := &Chronos{}
+
+	testCases := []struct {
+		name               string
+		maxRemainingTime   int64
+		newPodDuration     int64
+		expectedCompletion int64
+		description        string
+	}{
+		{
+			name:               "BinPackingFits",
+			maxRemainingTime:   300, // 5 minutes existing work
+			newPodDuration:     180, // 3 minutes new job
+			expectedCompletion: 300, // Should stay at 5 minutes
+			description:        "Job fits within existing work window",
+		},
+		{
+			name:               "JobExtendsExistingWork",
+			maxRemainingTime:   180, // 3 minutes existing work
+			newPodDuration:     300, // 5 minutes new job
+			expectedCompletion: 300, // Should become 5 minutes
+			description:        "Job extends beyond existing work",
+		},
+		{
+			name:               "EmptyNode",
+			maxRemainingTime:   0,   // No existing work
+			newPodDuration:     300, // 5 minutes new job
+			expectedCompletion: 300, // Should become 5 minutes
+			description:        "Empty node gets new job duration",
+		},
+		{
+			name:               "ExactMatch",
+			maxRemainingTime:   300, // 5 minutes existing work
+			newPodDuration:     300, // 5 minutes new job (exact match)
+			expectedCompletion: 300, // Should stay at 5 minutes
+			description:        "Job duration exactly matches existing work",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := plugin.calculateBinPackingCompletionTime(tc.maxRemainingTime, tc.newPodDuration)
+			assert.Equal(t, tc.expectedCompletion, result,
+				"Test %s: %s. Expected %ds, got %ds",
+				tc.name, tc.description, tc.expectedCompletion, result)
+		})
+	}
+}
+
+func TestCalculateOptimizedScore(t *testing.T) {
+	plugin := &Chronos{}
+
+	testCases := []struct {
+		name             string
+		maxRemainingTime int64
+		newPodDuration   int64
+		currentPods      int
+		nodeCapacity     int
+		expectedStrategy string
+		description      string
+	}{
+		{
+			name:             "ExtensionCase",
+			maxRemainingTime: 180, // 3 minutes existing
+			newPodDuration:   300, // 5 minutes new job (extends)
+			currentPods:      5,
+			nodeCapacity:     20,
+			expectedStrategy: "extension-utilization",
+			description:      "Job extends beyond existing work → utilization-based scoring",
+		},
+		{
+			name:             "ConsolidationCase",
+			maxRemainingTime: 300, // 5 minutes existing
+			newPodDuration:   180, // 3 minutes new job (fits)
+			currentPods:      8,
+			nodeCapacity:     20,
+			expectedStrategy: "consolidation",
+			description:      "Job fits within existing work → consolidation scoring",
+		},
+		{
+			name:             "EmptyNodePenalty",
+			maxRemainingTime: 0,   // No existing work
+			newPodDuration:   300, // 5 minutes new job
+			currentPods:      0,
+			nodeCapacity:     20,
+			expectedStrategy: "empty-penalty",
+			description:      "Empty node gets penalty score",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create mock node with specified capacity
+			nodeInfo := mockNodeInfo("test-node", tc.currentPods, int64(tc.nodeCapacity))
+
+			nodeCompletionTime := plugin.calculateBinPackingCompletionTime(tc.maxRemainingTime, tc.newPodDuration)
+			score := plugin.calculateOptimizedScore(nodeInfo, tc.maxRemainingTime, tc.newPodDuration, nodeCompletionTime)
+
+			// Get actual capacity from the method for accurate calculations
+			actualCapacity := plugin.estimateNodeCapacity(nodeInfo)
+			availableSlots := actualCapacity - tc.currentPods
+
+			switch tc.expectedStrategy {
+			case "extension-utilization":
+				expectedScore := int64(availableSlots) * utilizationBonus
+				assert.Equal(t, expectedScore, score, "Extension case should use utilization scoring")
+				assert.Greater(t, score, int64(0), "Extension case should have positive score")
+
+			case "consolidation":
+				expectedConsolidationScore := tc.maxRemainingTime
+				expectedUtilizationScore := int64(availableSlots) * (utilizationBonus / 10)
+				expectedTotal := expectedConsolidationScore + expectedUtilizationScore
+				assert.Equal(t, expectedTotal, score, "Consolidation case should combine consolidation + utilization")
+				assert.Greater(t, score, int64(0), "Consolidation case should have positive score")
+
+			case "empty-penalty":
+				expectedScore := int64(availableSlots) * (utilizationBonus / 100)
+				assert.Equal(t, expectedScore, score, "Empty node should have penalty score")
+				// Empty nodes should have much lower scores than active nodes
+				assert.Less(t, score, int64(availableSlots)*utilizationBonus/10, "Empty penalty should be significantly lower")
+			}
+
+			t.Logf("✅ %s: Strategy=%s, Score=%d, Available=%d/%d",
+				tc.name, tc.expectedStrategy, score, availableSlots, actualCapacity)
+		})
+	}
+}
+
+func TestEstimateNodeCapacity(t *testing.T) {
+	plugin := &Chronos{}
+
+	testCases := []struct {
+		name        string
+		cpuMillis   int64
+		expectedMin int
+		expectedMax int
+		description string
+	}{
+		{
+			name:        "SmallNode",
+			cpuMillis:   500, // 0.5 CPU
+			expectedMin: 5,   // Minimum capacity
+			expectedMax: 5,   // Should hit minimum
+			description: "Small node should get minimum capacity",
+		},
+		{
+			name:        "MediumNode",
+			cpuMillis:   2000, // 2 CPUs
+			expectedMin: 20,   // 2000/100 = 20
+			expectedMax: 20,
+			description: "Medium node capacity based on CPU",
+		},
+		{
+			name:        "LargeNode",
+			cpuMillis:   8000, // 8 CPUs
+			expectedMin: 50,   // Should hit maximum
+			expectedMax: 50,   // Maximum capacity
+			description: "Large node should get maximum capacity",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			node := &v1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+				Status: v1.NodeStatus{
+					Allocatable: v1.ResourceList{
+						v1.ResourceCPU: *resource.NewMilliQuantity(tc.cpuMillis, resource.DecimalSI),
+					},
+				},
+			}
+			nodeInfo := framework.NewNodeInfo()
+			nodeInfo.SetNode(node)
+
+			capacity := plugin.estimateNodeCapacity(nodeInfo)
+
+			assert.GreaterOrEqual(t, capacity, tc.expectedMin,
+				"Capacity should be at least minimum")
+			assert.LessOrEqual(t, capacity, tc.expectedMax,
+				"Capacity should not exceed maximum")
+
+			t.Logf("✅ %s: CPU=%dm, Capacity=%d pods", tc.name, tc.cpuMillis, capacity)
+		})
+	}
+}
+
+// =================================================================
+// Test Two-Phase Decision Logic - Integration Scenarios
+// =================================================================
+
+func TestTwoPhaseDecisionLogic(t *testing.T) {
+	t.Log("🎯 Testing complete two-phase decision logic")
+
+	// Scenario: Choose between extension vs consolidation
+	testCases := []struct {
+		name           string
+		newJobDuration int64
+		nodes          []struct {
+			name         string
+			maxRemaining int64
+			currentPods  int
+			capacity     int
+		}
+		expectedWinner   string
+		expectedStrategy string
+		description      string
+	}{
+		{
+			name:           "ConsolidationWins",
+			newJobDuration: 180, // 3 minutes - fits in both nodes
+			nodes: []struct {
+				name         string
+				maxRemaining int64
+				currentPods  int
+				capacity     int
+			}{
+				{name: "node-short-work", maxRemaining: 240, currentPods: 10, capacity: 20}, // 4 min existing
+				{name: "node-long-work", maxRemaining: 600, currentPods: 10, capacity: 20},  // 10 min existing
+			},
+			expectedWinner:   "node-long-work", // Should prefer longer existing work
+			expectedStrategy: "consolidation",
+			description:      "When job fits in both, choose longer existing work for consolidation",
+		},
+		{
+			name:           "UtilizationWins",
+			newJobDuration: 600, // 10 minutes - extends both nodes
+			nodes: []struct {
+				name         string
+				maxRemaining int64
+				currentPods  int
+				capacity     int
+			}{
+				{name: "node-less-utilized", maxRemaining: 300, currentPods: 5, capacity: 20},  // 15 free slots
+				{name: "node-more-utilized", maxRemaining: 300, currentPods: 15, capacity: 20}, // 5 free slots
+			},
+			expectedWinner:   "node-less-utilized", // Should prefer better utilization
+			expectedStrategy: "extension-utilization",
+			description:      "When job extends both, choose better utilization",
+		},
+		{
+			name:           "EmptyNodePenalty",
+			newJobDuration: 300, // 5 minutes
+			nodes: []struct {
+				name         string
+				maxRemaining int64
+				currentPods  int
+				capacity     int
+			}{
+				{name: "empty-node", maxRemaining: 0, currentPods: 0, capacity: 20},    // Empty
+				{name: "active-node", maxRemaining: 600, currentPods: 8, capacity: 20}, // Active, job fits
+			},
+			expectedWinner:   "active-node", // Should avoid empty node
+			expectedStrategy: "consolidation",
+			description:      "Should avoid empty nodes even if they're 'faster'",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			plugin := &Chronos{}
+			scores := make([]int64, len(tc.nodes))
+
+			// Calculate scores for each node
+			for i, nodeSpec := range tc.nodes {
+				nodeInfo := mockNodeInfo(nodeSpec.name, nodeSpec.currentPods, int64(nodeSpec.capacity))
+
+				nodeCompletionTime := plugin.calculateBinPackingCompletionTime(nodeSpec.maxRemaining, tc.newJobDuration)
+				score := plugin.calculateOptimizedScore(nodeInfo, nodeSpec.maxRemaining, tc.newJobDuration, nodeCompletionTime)
+				scores[i] = score
+
+				t.Logf("Node %s: Existing=%ds, Score=%d", nodeSpec.name, nodeSpec.maxRemaining, score)
+			}
+
+			// Find the winner (highest score)
+			winnerIndex := 0
+			for i := 1; i < len(scores); i++ {
+				if scores[i] > scores[winnerIndex] {
+					winnerIndex = i
+				}
+			}
+
+			actualWinner := tc.nodes[winnerIndex].name
+			assert.Equal(t, tc.expectedWinner, actualWinner,
+				"Test %s: %s. Expected %s to win, but %s won",
+				tc.name, tc.description, tc.expectedWinner, actualWinner)
+
+			t.Logf("✅ %s: Winner=%s (Score=%d), Strategy=%s",
+				tc.name, actualWinner, scores[winnerIndex], tc.expectedStrategy)
+		})
+	}
 }

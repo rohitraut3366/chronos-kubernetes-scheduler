@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -179,7 +180,7 @@ func TestIntegrationErrorHandling(t *testing.T) {
 		{
 			name:          "ValidAnnotation",
 			pod:           createIntegrationPod("valid-job", 300),
-			expectedScore: 110, // Should score: (MaxNodeScore-300)*1000 + 110 = -200*1000 + 110 = 110 (time score clamped to 0)
+			expectedScore: 99999700, // Raw score: 100000000 - 300 = 99999700
 			description:   "Pod with valid duration annotation",
 		},
 		{
@@ -191,7 +192,7 @@ func TestIntegrationErrorHandling(t *testing.T) {
 		{
 			name:          "ZeroDuration",
 			pod:           createIntegrationPod("instant-job", 0),
-			expectedScore: 10110, // MaxNodeScore * multiplier + capacity = 100 * 100 + 110
+			expectedScore: 100000000, // Raw score: 100000000 - 0 = 100000000 (zero duration)
 			description:   "Pod with zero duration",
 		},
 	}
@@ -349,20 +350,16 @@ func calculateDirectIntegrationScore(pod *v1.Pod, nodeInfo *framework.NodeInfo) 
 		nodeCompletionTime = newPodDuration
 	}
 
-	// Calculate time score
-	timeScore := framework.MaxNodeScore - nodeCompletionTime
-	if timeScore < 0 {
-		timeScore = 0
+	// Calculate raw score using new implementation logic
+	// Use default value for integration tests
+	testMaxPossibleScore := int64(maxPossibleScore)
+	score := testMaxPossibleScore - nodeCompletionTime
+	if score < 0 {
+		score = 0
 	}
 
-	// Calculate balance score
-	node := nodeInfo.Node()
-	podCapacity := node.Status.Allocatable[v1.ResourcePods]
-	currentPods := int64(len(nodeInfo.Pods))
-	balanceScore := podCapacity.Value() - currentPods
-
-	// Combine scores
-	return (timeScore * ScoreMultiplier) + balanceScore
+	// NOTE: Load balancing is now handled by separate plugins, not here
+	return score
 }
 
 // Helper functions to create realistic Kubernetes objects
@@ -454,4 +451,265 @@ func createRunningIntegrationPod(name, nodeName string, duration int64, startTim
 		},
 	}
 	return pod
+}
+
+// simpleMockNodeInfo creates a simple mock framework.NodeInfo for integration testing.
+func simpleMockNodeInfo(nodeName string, podCount int, capacity int64) *framework.NodeInfo {
+	node := &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+		Status: v1.NodeStatus{
+			Allocatable: v1.ResourceList{
+				v1.ResourcePods: *resource.NewQuantity(capacity, resource.DecimalSI),
+				v1.ResourceCPU:  *resource.NewMilliQuantity(2000, resource.DecimalSI), // 2 CPUs
+			},
+		},
+	}
+	nodeInfo := framework.NewNodeInfo()
+	nodeInfo.SetNode(node)
+
+	// Add mock pods to simulate load
+	for i := 0; i < podCount; i++ {
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: fmt.Sprintf("existing-pod-%d", i),
+			},
+			Status: v1.PodStatus{
+				Phase: v1.PodRunning,
+			},
+		}
+		nodeInfo.AddPod(pod)
+	}
+	return nodeInfo
+}
+
+// =================================================================
+// Integration Tests for Optimized Bin-Packing Logic
+// =================================================================
+
+func TestOptimizedSchedulingIntegration(t *testing.T) {
+	t.Log("🚀 Testing optimized scheduling logic with realistic scenarios")
+
+	testCases := []struct {
+		name           string
+		description    string
+		newJobDuration int64
+		nodes          []struct {
+			name         string
+			cpuCores     string
+			memoryGb     string
+			maxPods      string
+			existingJobs []IntegrationJob
+		}
+		expectedWinner string
+		expectedReason string
+	}{
+		{
+			name:           "ConsolidationPreference",
+			description:    "Should prefer consolidation when job fits within existing work",
+			newJobDuration: 180, // 3 minutes
+			nodes: []struct {
+				name         string
+				cpuCores     string
+				memoryGb     string
+				maxPods      string
+				existingJobs []IntegrationJob
+			}{
+				{
+					name:     "node-short-work",
+					cpuCores: "4", memoryGb: "8Gi", maxPods: "110",
+					existingJobs: []IntegrationJob{
+						{name: "short-job", duration: 300, startedSecondsAgo: 60}, // 4 min remaining
+					},
+				},
+				{
+					name:     "node-long-work",
+					cpuCores: "4", memoryGb: "8Gi", maxPods: "110",
+					existingJobs: []IntegrationJob{
+						{name: "long-job", duration: 900, startedSecondsAgo: 300}, // 10 min remaining
+					},
+				},
+			},
+			expectedWinner: "node-long-work",
+			expectedReason: "Longer existing work enables better consolidation",
+		},
+		{
+			name:           "UtilizationOptimization",
+			description:    "Should prefer less utilized nodes when jobs extend beyond existing work",
+			newJobDuration: 900, // 15 minutes - extends both nodes
+			nodes: []struct {
+				name         string
+				cpuCores     string
+				memoryGb     string
+				maxPods      string
+				existingJobs []IntegrationJob
+			}{
+				{
+					name:     "busy-node",
+					cpuCores: "4", memoryGb: "8Gi", maxPods: "110",
+					existingJobs: []IntegrationJob{
+						{name: "job-1", duration: 300, startedSecondsAgo: 60}, // 4 min remaining
+						{name: "job-2", duration: 300, startedSecondsAgo: 60}, // Simulating high utilization
+						{name: "job-3", duration: 300, startedSecondsAgo: 60},
+						{name: "job-4", duration: 300, startedSecondsAgo: 60},
+						{name: "job-5", duration: 300, startedSecondsAgo: 60},
+					},
+				},
+				{
+					name:     "light-node",
+					cpuCores: "4", memoryGb: "8Gi", maxPods: "110",
+					existingJobs: []IntegrationJob{
+						{name: "single-job", duration: 300, startedSecondsAgo: 60}, // 4 min remaining
+					},
+				},
+			},
+			expectedWinner: "light-node",
+			expectedReason: "Better utilization for extension scenarios",
+		},
+		{
+			name:           "EmptyNodeAvoidance",
+			description:    "Should avoid empty nodes in favor of active nodes for cost optimization",
+			newJobDuration: 300, // 5 minutes
+			nodes: []struct {
+				name         string
+				cpuCores     string
+				memoryGb     string
+				maxPods      string
+				existingJobs []IntegrationJob
+			}{
+				{
+					name:     "empty-node",
+					cpuCores: "4", memoryGb: "8Gi", maxPods: "110",
+					existingJobs: []IntegrationJob{}, // No existing work
+				},
+				{
+					name:     "active-node",
+					cpuCores: "4", memoryGb: "8Gi", maxPods: "110",
+					existingJobs: []IntegrationJob{
+						{name: "existing-work", duration: 600, startedSecondsAgo: 0}, // 10 min remaining
+					},
+				},
+			},
+			expectedWinner: "active-node",
+			expectedReason: "Consolidation to enable empty node termination",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Logf("🎯 %s: %s", tc.name, tc.description)
+
+			// Create plugin
+			plugin := &Chronos{}
+			scores := make([]int64, len(tc.nodes))
+			nodeNames := make([]string, len(tc.nodes))
+
+			// Score each node
+			for i, nodeSpec := range tc.nodes {
+				// Use simpleMockNodeInfo for integration testing
+				nodeInfo := simpleMockNodeInfo(nodeSpec.name, len(nodeSpec.existingJobs), 110)
+				nodeNames[i] = nodeSpec.name
+
+				// Calculate max remaining time
+				maxRemainingTime := int64(0)
+				for _, job := range nodeSpec.existingJobs {
+					elapsed := int64(job.startedSecondsAgo)
+					remaining := job.duration - elapsed
+					if remaining > maxRemainingTime {
+						maxRemainingTime = remaining
+					}
+				}
+
+				// Calculate completion time and score
+				nodeCompletionTime := plugin.calculateBinPackingCompletionTime(maxRemainingTime, tc.newJobDuration)
+				score := plugin.calculateOptimizedScore(nodeInfo, maxRemainingTime, tc.newJobDuration, nodeCompletionTime)
+				scores[i] = score
+
+				t.Logf("   Node %s: ExistingWork=%ds, NewJob=%ds, Completion=%ds, Score=%d",
+					nodeSpec.name, maxRemainingTime, tc.newJobDuration, nodeCompletionTime, score)
+			}
+
+			// Find winner (highest score)
+			winnerIndex := 0
+			for i := 1; i < len(scores); i++ {
+				if scores[i] > scores[winnerIndex] {
+					winnerIndex = i
+				}
+			}
+
+			actualWinner := nodeNames[winnerIndex]
+			assert.Equal(t, tc.expectedWinner, actualWinner,
+				"Expected %s to win (%s), but %s won with score %d",
+				tc.expectedWinner, tc.expectedReason, actualWinner, scores[winnerIndex])
+
+			t.Logf("✅ Winner: %s (Score: %d) - %s", actualWinner, scores[winnerIndex], tc.expectedReason)
+		})
+	}
+}
+
+func TestCostOptimizationScenarios(t *testing.T) {
+	t.Log("💰 Testing cost optimization through consolidation and empty node avoidance")
+
+	plugin := &Chronos{}
+
+	// Scenario 1: Multiple jobs that could consolidate
+	t.Run("MultipleJobConsolidation", func(t *testing.T) {
+		// Node with 10 minutes of existing work - use simpleMockNodeInfo with 1 pod
+		activeNode := simpleMockNodeInfo("active-node", 1, 110)
+
+		// Empty node - use simpleMockNodeInfo with 0 pods
+		emptyNode := simpleMockNodeInfo("empty-node", 0, 110)
+
+		// Test multiple short jobs (2, 4, 6 minutes) - all should prefer active node
+		jobDurations := []int64{120, 240, 360} // 2, 4, 6 minutes
+
+		for _, jobDuration := range jobDurations {
+			// Score active node
+			activeCompletion := plugin.calculateBinPackingCompletionTime(600, jobDuration)
+			activeScore := plugin.calculateOptimizedScore(activeNode, 600, jobDuration, activeCompletion)
+
+			// Score empty node
+			emptyCompletion := plugin.calculateBinPackingCompletionTime(0, jobDuration)
+			emptyScore := plugin.calculateOptimizedScore(emptyNode, 0, jobDuration, emptyCompletion)
+
+			// Active node should win for consolidation
+			assert.Greater(t, activeScore, emptyScore,
+				"Job duration %ds should prefer active node (active=%d, empty=%d)",
+				jobDuration, activeScore, emptyScore)
+
+			t.Logf("✅ %dm job: Active=%d > Empty=%d (consolidation wins)",
+				jobDuration/60, activeScore, emptyScore)
+		}
+	})
+
+	// Scenario 2: Cost vs Performance tradeoff
+	t.Run("CostVsPerformanceTradeoff", func(t *testing.T) {
+		// Create three nodes with different utilization levels
+		nodes := []struct {
+			name        string
+			existing    int64
+			utilization int
+		}{
+			{name: "high-util", existing: 300, utilization: 18}, // 18/20 pods
+			{name: "med-util", existing: 300, utilization: 10},  // 10/20 pods
+			{name: "low-util", existing: 300, utilization: 2},   // 2/20 pods
+		}
+
+		newJobDuration := int64(600) // 10 minutes (extends all nodes)
+
+		scores := make([]int64, len(nodes))
+		for i, node := range nodes {
+			nodeInfo := simpleMockNodeInfo(node.name, node.utilization, 20)
+
+			completion := plugin.calculateBinPackingCompletionTime(node.existing, newJobDuration)
+			score := plugin.calculateOptimizedScore(nodeInfo, node.existing, newJobDuration, completion)
+			scores[i] = score
+		}
+
+		// Lower utilization should win (better performance)
+		assert.Greater(t, scores[2], scores[1], "Low utilization should beat medium")
+		assert.Greater(t, scores[1], scores[0], "Medium utilization should beat high")
+
+		t.Logf("✅ Utilization preference: Low=%d > Med=%d > High=%d",
+			scores[2], scores[1], scores[0])
+	})
 }

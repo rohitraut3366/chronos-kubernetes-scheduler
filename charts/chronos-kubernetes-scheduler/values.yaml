@@ -42,8 +42,6 @@ scheduler:
     name: Chronos
     # -- Job duration annotation key
     jobDurationAnnotation: "scheduling.workload.io/expected-duration-seconds"
-    # -- Score multiplier for time vs capacity balance
-    scoreMultiplier: 100
   
   # -- Leader election settings (for HA)
   leaderElection:
