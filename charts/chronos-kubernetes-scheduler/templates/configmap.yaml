@@ -29,7 +29,6 @@ data:
           - name: PodTopologySpread
           - name: TaintToleration
           - name: NodePorts
-          - name: PodOverhead
           - name: NodeVolumeLimits
           - name: VolumeBinding
       pluginConfig:
