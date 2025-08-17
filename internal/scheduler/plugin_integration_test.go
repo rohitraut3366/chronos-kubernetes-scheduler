@@ -467,11 +467,25 @@ func simpleMockNodeInfo(nodeName string, podCount int, capacity int64) *framewor
 	nodeInfo := framework.NewNodeInfo()
 	nodeInfo.SetNode(node)
 
-	// Add mock pods to simulate load
+	// Add mock pods to simulate realistic resource load
 	for i := 0; i < podCount; i++ {
 		pod := &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: fmt.Sprintf("existing-pod-%d", i),
+			},
+			Spec: v1.PodSpec{
+				Containers: []v1.Container{
+					{
+						Name:  "app",
+						Image: "nginx",
+						Resources: v1.ResourceRequirements{
+							Requests: v1.ResourceList{
+								v1.ResourceCPU:    *resource.NewMilliQuantity(100, resource.DecimalSI),     // 100m per pod
+								v1.ResourceMemory: *resource.NewQuantity(128*1024*1024, resource.BinarySI), // 128Mi per pod
+							},
+						},
+					},
+				},
 			},
 			Status: v1.PodStatus{
 				Phase: v1.PodRunning,

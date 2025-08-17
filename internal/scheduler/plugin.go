@@ -143,13 +143,8 @@ func (s *Chronos) CalculateBinPackingCompletionTime(maxRemainingTime, newPodDura
 // PRIORITY 2: Jobs that EXTEND existing commitments (extension minimization)
 // PRIORITY 3: Empty nodes (heavily penalized for cost optimization)
 func (s *Chronos) CalculateOptimizedScore(nodeInfo *framework.NodeInfo, maxRemainingTime int64, newPodDuration int64, nodeCompletionTime int64) int64 {
-	// Get current pod count and capacity
-	currentPods := len(nodeInfo.Pods)
-	estimatedCapacity := s.estimateNodeCapacity(nodeInfo)
-	availableSlots := estimatedCapacity - currentPods
-	if availableSlots < 0 {
-		availableSlots = 0
-	}
+	// Get accurate resource utilization (like default scheduler)
+	resourceUtil := s.calculateResourceUtilization(nodeInfo)
 
 	var finalScore int64
 	var strategy string
@@ -166,14 +161,14 @@ func (s *Chronos) CalculateOptimizedScore(nodeInfo *framework.NodeInfo, maxRemai
 		// This is true bin-packing: no extension of node commitment needed
 
 		baseScore := int64(binPackingPriority)
-		consolidationBonus := maxRemainingTime * 100   // Prefer longer existing work for better consolidation
-		utilizationBonus := int64(availableSlots) * 10 // Tie-breaker: prefer nodes with more capacity
+		consolidationBonus := maxRemainingTime * 100            // Prefer longer existing work for better consolidation
+		resourceBonus := int64(resourceUtil.ResourceScore) * 10 // Tie-breaker: prefer nodes with more available resources
 
-		finalScore = baseScore + consolidationBonus + utilizationBonus
+		finalScore = baseScore + consolidationBonus + resourceBonus
 		strategy = "bin-packing-fit"
 
-		klog.V(4).Infof("Node %s: BIN-PACKING case - NewJob=%ds FITS in Existing=%ds, Base=%d, Consol=%d, Util=%d",
-			nodeInfo.Node().Name, newPodDuration, maxRemainingTime, baseScore, consolidationBonus, utilizationBonus)
+		klog.V(4).Infof("Node %s: BIN-PACKING case - NewJob=%ds FITS in Existing=%ds, Base=%d, Consol=%d, Resource=%d",
+			nodeInfo.Node().Name, newPodDuration, maxRemainingTime, baseScore, consolidationBonus, resourceBonus)
 
 	} else if maxRemainingTime > 0 {
 		// PRIORITY 2: Job extends beyond existing work
@@ -181,55 +176,117 @@ func (s *Chronos) CalculateOptimizedScore(nodeInfo *framework.NodeInfo, maxRemai
 
 		baseScore := int64(extensionPriority)
 		extensionPenalty := (newPodDuration - maxRemainingTime) * 100 // Strong penalty - extension minimization dominates
-		utilizationBonus := int64(availableSlots) * 10                // Smaller bonus - only for tie-breaking
+		resourceBonus := int64(resourceUtil.ResourceScore) * 5        // Smaller bonus - only for tie-breaking
 
-		finalScore = baseScore - extensionPenalty + utilizationBonus
+		finalScore = baseScore - extensionPenalty + resourceBonus
 		strategy = "extension-minimization"
 
-		klog.V(4).Infof("Node %s: EXTENSION case - NewJob=%ds > Existing=%ds, Extension=%ds, Base=%d, Penalty=%d, Util=%d",
-			nodeInfo.Node().Name, newPodDuration, maxRemainingTime, newPodDuration-maxRemainingTime, baseScore, extensionPenalty, utilizationBonus)
+		klog.V(4).Infof("Node %s: EXTENSION case - NewJob=%ds > Existing=%ds, Extension=%ds, Base=%d, Penalty=%d, Resource=%d",
+			nodeInfo.Node().Name, newPodDuration, maxRemainingTime, newPodDuration-maxRemainingTime, baseScore, extensionPenalty, resourceBonus)
 
 	} else {
 		// PRIORITY 3: Empty node - lowest priority for cost optimization
 		// Heavily penalized to encourage consolidation and enable node termination
 
 		baseScore := int64(emptyNodePriority)
-		utilizationBonus := int64(availableSlots) * 1 // Minimal utilization consideration
+		resourceBonus := int64(resourceUtil.ResourceScore) * 1 // Minimal resource consideration
 
-		finalScore = baseScore + utilizationBonus
+		finalScore = baseScore + resourceBonus
 		strategy = "empty-node-penalty"
 
-		klog.V(4).Infof("Node %s: EMPTY node - heavily penalized, Base=%d, Util=%d",
-			nodeInfo.Node().Name, baseScore, utilizationBonus)
+		klog.V(4).Infof("Node %s: EMPTY node - heavily penalized, Base=%d, Resource=%d",
+			nodeInfo.Node().Name, baseScore, resourceBonus)
 	}
 
-	klog.V(4).Infof("Node %s: Strategy=%s, Pods=%d/%d, Available=%d, Final=%d",
-		nodeInfo.Node().Name, strategy, currentPods, estimatedCapacity, availableSlots, finalScore)
+	klog.V(4).Infof("Node %s: Strategy=%s, CPU=%.1f%%, Memory=%.1f%%, ResourceScore=%d, Final=%d",
+		nodeInfo.Node().Name, strategy, resourceUtil.CPUUtilizationPercent*100,
+		resourceUtil.MemoryUtilizationPercent*100, resourceUtil.ResourceScore, finalScore)
 
 	return finalScore
 }
 
-// estimateNodeCapacity provides a rough estimate of how many pods a node can handle
-// This could be made more sophisticated based on actual resource calculations
-func (s *Chronos) estimateNodeCapacity(nodeInfo *framework.NodeInfo) int {
+// ResourceUtilization represents the current resource usage on a node
+type ResourceUtilization struct {
+	CPUUtilizationPercent    float64 // 0.0 to 1.0
+	MemoryUtilizationPercent float64 // 0.0 to 1.0
+	AvailableCPUMillis       int64
+	AvailableMemoryBytes     int64
+	ResourceScore            int // 0-100, higher = more available resources
+}
+
+func (s *Chronos) calculateResourceUtilization(nodeInfo *framework.NodeInfo) ResourceUtilization {
 	node := nodeInfo.Node()
 
-	// Simple heuristic based on node resources
-	// In production, this could consider actual CPU/memory requirements
+	// Get total allocatable resources (same as default scheduler)
 	allocatableCPU := node.Status.Allocatable.Cpu().MilliValue()
+	allocatableMemory := node.Status.Allocatable.Memory().Value()
 
-	// Assume average pod needs 100m CPU
-	estimatedCapacity := int(allocatableCPU / 100)
+	// Calculate currently used resources by summing all pod requests
+	var usedCPU, usedMemory int64
+	for _, podInfo := range nodeInfo.Pods {
+		pod := podInfo.Pod
 
-	// Cap at reasonable limits
-	if estimatedCapacity < 5 {
-		estimatedCapacity = 5
+		// Skip terminated pods (same logic as NodeResourcesFit)
+		if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
+			continue
+		}
+
+		// Sum resource requests from all containers
+		for _, container := range pod.Spec.Containers {
+			if container.Resources.Requests != nil {
+				usedCPU += container.Resources.Requests.Cpu().MilliValue()
+				usedMemory += container.Resources.Requests.Memory().Value()
+			}
+		}
 	}
-	if estimatedCapacity > 50 {
-		estimatedCapacity = 50
+
+	// Calculate utilization percentages (same as Kubernetes)
+	cpuUtilization := 0.0
+	memoryUtilization := 0.0
+	if allocatableCPU > 0 {
+		cpuUtilization = float64(usedCPU) / float64(allocatableCPU)
+	}
+	if allocatableMemory > 0 {
+		memoryUtilization = float64(usedMemory) / float64(allocatableMemory)
 	}
 
-	return estimatedCapacity
+	// Available resources
+	availableCPU := allocatableCPU - usedCPU
+	availableMemory := allocatableMemory - usedMemory
+	if availableCPU < 0 {
+		availableCPU = 0
+	}
+	if availableMemory < 0 {
+		availableMemory = 0
+	}
+
+	// Calculate resource score (higher = better)
+	// Use the limiting resource (CPU or Memory) - same principle as default scheduler
+	limitingUtilization := cpuUtilization
+	if memoryUtilization > cpuUtilization {
+		limitingUtilization = memoryUtilization
+	}
+
+	// Score: 100 = empty node, 0 = fully utilized node
+	resourceScore := int((1.0 - limitingUtilization) * 100)
+	if resourceScore < 0 {
+		resourceScore = 0
+	}
+	if resourceScore > 100 {
+		resourceScore = 100
+	}
+
+	klog.V(4).Infof("Node %s: CPU=%dm/%dm (%.1f%%), Memory=%d/%d (%.1f%%), Score=%d",
+		node.Name, usedCPU, allocatableCPU, cpuUtilization*100,
+		usedMemory, allocatableMemory, memoryUtilization*100, resourceScore)
+
+	return ResourceUtilization{
+		CPUUtilizationPercent:    cpuUtilization,
+		MemoryUtilizationPercent: memoryUtilization,
+		AvailableCPUMillis:       availableCPU,
+		AvailableMemoryBytes:     availableMemory,
+		ResourceScore:            resourceScore,
+	}
 }
 
 // ScoreExtensions of the Score plugin.

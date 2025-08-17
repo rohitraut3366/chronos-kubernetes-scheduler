@@ -43,13 +43,27 @@ func mockNodeInfo(nodeName string, podCount int, capacity int64) *framework.Node
 	nodeInfo := framework.NewNodeInfo()
 	nodeInfo.SetNode(node)
 
-	// Add mock pods to simulate load
+	// Add mock pods to simulate load with realistic resource requests
 	for i := 0; i < podCount; i++ {
 		pod := &v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: fmt.Sprintf("existing-pod-%d", i),
 				Annotations: map[string]string{
 					JobDurationAnnotation: "300", // Default 5 minutes
+				},
+			},
+			Spec: v1.PodSpec{
+				Containers: []v1.Container{
+					{
+						Name:  "app",
+						Image: "nginx",
+						Resources: v1.ResourceRequirements{
+							Requests: v1.ResourceList{
+								v1.ResourceCPU:    *resource.NewMilliQuantity(100, resource.DecimalSI),     // 100m per pod
+								v1.ResourceMemory: *resource.NewQuantity(128*1024*1024, resource.BinarySI), // 128Mi per pod
+							},
+						},
+					},
 				},
 			},
 			Status: v1.PodStatus{
@@ -543,8 +557,8 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		}
 		nodeInfoZero := framework.NewNodeInfo()
 		nodeInfoZero.SetNode(nodeZero)
-		capacity := plugin.estimateNodeCapacity(nodeInfoZero)
-		assert.Equal(t, 5, capacity, "Zero CPU should get minimum capacity")
+		resourceUtil := plugin.calculateResourceUtilization(nodeInfoZero)
+		assert.Equal(t, 100, resourceUtil.ResourceScore, "Zero utilized node should have maximum resource score")
 
 		// Test very high CPU (above maximum)
 		nodeHuge := &v1.Node{
@@ -556,10 +570,10 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		}
 		nodeInfoHuge := framework.NewNodeInfo()
 		nodeInfoHuge.SetNode(nodeHuge)
-		capacityHuge := plugin.estimateNodeCapacity(nodeInfoHuge)
-		assert.Equal(t, 50, capacityHuge, "Very high CPU should be capped at maximum")
+		resourceUtilHuge := plugin.calculateResourceUtilization(nodeInfoHuge)
+		assert.Equal(t, 100, resourceUtilHuge.ResourceScore, "Empty node should have maximum resource score regardless of capacity")
 
-		t.Logf("✅ Capacity edge cases: zero=%d, huge=%d", capacity, capacityHuge)
+		t.Logf("✅ Resource utilization edge cases: zero score=%d, huge score=%d", resourceUtil.ResourceScore, resourceUtilHuge.ResourceScore)
 	})
 
 	t.Run("BinPackingEdgeCases", func(t *testing.T) {
@@ -579,28 +593,28 @@ func TestEdgeCaseCoverage(t *testing.T) {
 	})
 
 	t.Run("OptimizedScoreEdgeCases", func(t *testing.T) {
-		// Test edge case: node at exactly full capacity (extension case: 600 > 300)
-		nodeInfo := mockNodeInfo("full-node", 20, 20) // Full capacity
+		// Test edge case: node at full resource utilization (extension case: 600 > 300)
+		nodeInfo := mockNodeInfo("full-node", 20, 20) // 20 pods, each using 100m CPU = 2000m total
 		score := plugin.CalculateOptimizedScore(nodeInfo, 300, 600, 600)
-		// With new extension minimization priority: strong penalty for extension
-		const extensionPriority = 100000
-		expectedScore := int64(extensionPriority) - (600-300)*100 + 0*10 // 0 available slots, new penalty rate
-		assert.Equal(t, expectedScore, score, "Full capacity gets base extension score with no utilization bonus")
+		// Node has 2000m CPU allocated, 20 pods * 100m = 2000m used = 100% utilized, ResourceScore = 0
+		// Extension: 100000 - (600-300)*100 + 0*5 = 100000 - 30000 + 0 = 70000
+		expectedScore := int64(70000)
+		assert.Equal(t, expectedScore, score, "Full resource utilization gets base extension score with no resource bonus")
 
 		// Test edge case: node over capacity (shouldn't happen but test robustness)
-		nodeInfoOver := mockNodeInfo("over-node", 25, 20) // Over capacity
+		nodeInfoOver := mockNodeInfo("over-node", 25, 20) // Over capacity: 25 pods * 100m = 2500m used on 2000m node
 		scoreOver := plugin.CalculateOptimizedScore(nodeInfoOver, 300, 600, 600)
-		// availableSlots is capped at 0, same calculation as above
+		// Over 100% utilized, ResourceScore clamped to 0, same calculation as above
 		assert.Equal(t, expectedScore, scoreOver, "Over capacity should have same score as full capacity")
 
-		// Test edge case: very large utilization numbers (bin-packing case: 100 <= 300)
-		nodeInfoLarge := mockNodeInfo("large-node", 5, 1000) // Very large capacity (but capped at 50)
+		// Test edge case: very large capacity with low utilization (bin-packing case: 100 <= 300)
+		nodeInfoLarge := mockNodeInfo("large-node", 5, 1000) // 5 pods on huge capacity: 500m used / 100,000m total = 0.5% utilized
 		scoreLarge := plugin.CalculateOptimizedScore(nodeInfoLarge, 300, 100, 300)
 		// This is bin-packing case (100 <= 300), so Priority 1
-		// Capacity is capped at 50, so available slots = 50 - 5 = 45
+		// ResourceScore = (1.0 - 0.005) * 100 = 99 (rounded down from 99.5%)
 		const binPackingPriority = 1000000
-		expectedLarge := int64(binPackingPriority) + 300*100 + 45*10 // 45 available slots (50 - 5)
-		assert.Equal(t, expectedLarge, scoreLarge, "Large capacity should have high bin-packing score")
+		expectedLarge := int64(binPackingPriority) + 300*100 + 99*10 // ~99% resources available
+		assert.Equal(t, expectedLarge, scoreLarge, "Large capacity with low utilization should have high bin-packing score")
 
 		t.Logf("✅ Optimized score edge cases covered")
 	})
@@ -1182,17 +1196,17 @@ func TestCalculateOptimizedScore(t *testing.T) {
 			nodeCompletionTime := plugin.CalculateBinPackingCompletionTime(tc.maxRemainingTime, tc.newPodDuration)
 			score := plugin.CalculateOptimizedScore(nodeInfo, tc.maxRemainingTime, tc.newPodDuration, nodeCompletionTime)
 
-			// Get actual capacity from the method for accurate calculations
-			actualCapacity := plugin.estimateNodeCapacity(nodeInfo)
-			availableSlots := actualCapacity - tc.currentPods
+			// Get actual resource utilization for accurate calculations
+			resourceUtil := plugin.calculateResourceUtilization(nodeInfo)
+			resourceScore := resourceUtil.ResourceScore // 0-100 percentage
 
 			switch tc.expectedStrategy {
 			case "extension-utilization":
 				// Updated for new extension minimization priority: strong penalty for extension
 				const extensionPriority = 100000
 				extensionPenalty := (tc.newPodDuration - tc.maxRemainingTime) * 100 // Extension minimization dominates
-				utilizationBonus := int64(availableSlots) * 10                      // Only tie-breaker
-				expectedScore := int64(extensionPriority) - extensionPenalty + utilizationBonus
+				resourceBonus := int64(resourceScore) * 5                           // Resource-based bonus (reduced factor for extensions)
+				expectedScore := int64(extensionPriority) - extensionPenalty + resourceBonus
 				assert.Equal(t, expectedScore, score, "Extension case should prioritize extension minimization")
 				assert.Greater(t, score, int64(1000), "Extension case should score higher than empty nodes")
 
@@ -1201,22 +1215,22 @@ func TestCalculateOptimizedScore(t *testing.T) {
 				const binPackingPriority = 1000000
 				baseScore := int64(binPackingPriority)
 				consolidationBonus := tc.maxRemainingTime * 100
-				utilizationBonus := int64(availableSlots) * 10
-				expectedTotal := baseScore + consolidationBonus + utilizationBonus
+				resourceBonus := int64(resourceScore) * 10 // Resource-based bonus (full factor for bin-packing)
+				expectedTotal := baseScore + consolidationBonus + resourceBonus
 				assert.Equal(t, expectedTotal, score, "Bin-packing case should use hierarchical scoring")
 				assert.Greater(t, score, int64(100000), "Bin-packing case should score highest")
 
 			case "empty-penalty":
 				// Updated for new hierarchical scoring: empty node case
 				const emptyNodePriority = 1000
-				expectedScore := int64(emptyNodePriority) + int64(availableSlots)*1
+				expectedScore := int64(emptyNodePriority) + int64(resourceScore)*1 // Minimal resource bonus for empty nodes
 				assert.Equal(t, expectedScore, score, "Empty node should have lowest priority score")
 				// Empty nodes should have much lower scores than active nodes
 				assert.Less(t, score, int64(10000), "Empty penalty should be significantly lower")
 			}
 
-			t.Logf("✅ %s: Strategy=%s, Score=%d, Available=%d/%d",
-				tc.name, tc.expectedStrategy, score, availableSlots, actualCapacity)
+			t.Logf("✅ %s: Strategy=%s, Score=%d, ResourceScore=%d%%",
+				tc.name, tc.expectedStrategy, score, resourceScore)
 		})
 	}
 }
@@ -1234,37 +1248,37 @@ func TestEstimateNodeCapacity(t *testing.T) {
 		{
 			name:        "SmallNode",
 			cpuMillis:   500, // 0.5 CPU
-			expectedMin: 5,   // Minimum capacity
-			expectedMax: 5,   // Should hit minimum
-			description: "Small node should get minimum capacity",
+			expectedMin: 100, // Empty node = 100% resources available
+			expectedMax: 100, // All empty nodes have 100% available
+			description: "Small empty node should have 100% resources available",
 		},
 		{
 			name:        "MediumNode",
 			cpuMillis:   2000, // 2 CPUs
-			expectedMin: 20,   // 2000/100 = 20
-			expectedMax: 20,
-			description: "Medium node capacity based on CPU",
+			expectedMin: 100,  // Empty node = 100% resources available
+			expectedMax: 100,
+			description: "Medium empty node should have 100% resources available",
 		},
 		{
 			name:        "LargeNode",
 			cpuMillis:   8000, // 8 CPUs
-			expectedMin: 50,   // Should hit maximum
-			expectedMax: 50,   // Maximum capacity
-			description: "Large node should get maximum capacity",
+			expectedMin: 100,  // Empty node = 100% resources available
+			expectedMax: 100,  // All empty nodes have 100% available
+			description: "Large empty node should have 100% resources available",
 		},
 		{
 			name:        "ExtraLargeNode",
 			cpuMillis:   20000, // 20 CPUs (above cap)
-			expectedMin: 50,    // Should hit maximum cap
-			expectedMax: 50,    // Maximum capacity
-			description: "Extra large node should be capped at maximum",
+			expectedMin: 100,   // Empty node = 100% resources available
+			expectedMax: 100,   // All empty nodes have 100% available
+			description: "Extra large empty node should have 100% resources available",
 		},
 		{
 			name:        "TinyNode",
 			cpuMillis:   200, // 0.2 CPUs (below minimum)
-			expectedMin: 5,   // Should hit minimum
-			expectedMax: 5,   // Minimum capacity
-			description: "Tiny node should get minimum capacity",
+			expectedMin: 100, // Empty node = 100% resources available
+			expectedMax: 100, // All empty nodes have 100% available
+			description: "Tiny empty node should have 100% resources available",
 		},
 	}
 
@@ -1281,14 +1295,15 @@ func TestEstimateNodeCapacity(t *testing.T) {
 			nodeInfo := framework.NewNodeInfo()
 			nodeInfo.SetNode(node)
 
-			capacity := plugin.estimateNodeCapacity(nodeInfo)
+			resourceUtil := plugin.calculateResourceUtilization(nodeInfo)
+			capacity := resourceUtil.ResourceScore
 
 			assert.GreaterOrEqual(t, capacity, tc.expectedMin,
-				"Capacity should be at least minimum")
+				"ResourceScore should be at least minimum")
 			assert.LessOrEqual(t, capacity, tc.expectedMax,
-				"Capacity should not exceed maximum")
+				"ResourceScore should not exceed maximum")
 
-			t.Logf("✅ %s: CPU=%dm, Capacity=%d pods", tc.name, tc.cpuMillis, capacity)
+			t.Logf("✅ %s: CPU=%dm, ResourceScore=%d%%", tc.name, tc.cpuMillis, capacity)
 		})
 	}
 }
@@ -1462,8 +1477,9 @@ func TestMaximumCoveragePush(t *testing.T) {
 		}
 		nodeInfoMin := framework.NewNodeInfo()
 		nodeInfoMin.SetNode(exactMin)
-		capacityMin := plugin.estimateNodeCapacity(nodeInfoMin)
-		assert.Equal(t, 5, capacityMin, "500m CPU should give exactly 5 pods")
+		resourceUtilMin := plugin.calculateResourceUtilization(nodeInfoMin)
+		capacityMin := resourceUtilMin.ResourceScore
+		assert.Equal(t, 100, capacityMin, "Empty node should have 100% resource score")
 
 		// Test exactly at max boundary
 		exactMax := &v1.Node{
@@ -1475,8 +1491,9 @@ func TestMaximumCoveragePush(t *testing.T) {
 		}
 		nodeInfoMax := framework.NewNodeInfo()
 		nodeInfoMax.SetNode(exactMax)
-		capacityMax := plugin.estimateNodeCapacity(nodeInfoMax)
-		assert.Equal(t, 50, capacityMax, "5000m CPU should give exactly 50 pods")
+		resourceUtilMax := plugin.calculateResourceUtilization(nodeInfoMax)
+		capacityMax := resourceUtilMax.ResourceScore
+		assert.Equal(t, 100, capacityMax, "Empty node should have 100% resource score")
 
 		// Test fractional CPU values
 		fractional := &v1.Node{
@@ -1488,10 +1505,11 @@ func TestMaximumCoveragePush(t *testing.T) {
 		}
 		nodeInfoFrac := framework.NewNodeInfo()
 		nodeInfoFrac.SetNode(fractional)
-		capacityFrac := plugin.estimateNodeCapacity(nodeInfoFrac)
-		assert.Equal(t, 17, capacityFrac, "1750m CPU should give 17 pods (truncated)")
+		resourceUtilFrac := plugin.calculateResourceUtilization(nodeInfoFrac)
+		capacityFrac := resourceUtilFrac.ResourceScore
+		assert.Equal(t, 100, capacityFrac, "Empty node should have 100% resource score")
 
-		t.Logf("✅ All estimateNodeCapacity boundaries covered")
+		t.Logf("✅ All resource utilization boundaries covered")
 	})
 
 	t.Run("OptimizedScoreCompleteMatrix", func(t *testing.T) {
@@ -1554,9 +1572,10 @@ func TestMaximumCoveragePush(t *testing.T) {
 			case "zero-slots":
 				// With hierarchical scoring, even zero-slot nodes get base priority score
 				// This is bin-packing case (300 <= 400), so gets Priority 1 base score
+				// Node is 100% utilized (15 pods * 100m = 1500m used / 1500m total), ResourceScore = 0
 				const binPackingPriority = 1000000
-				expectedZeroSlot := int64(binPackingPriority) + 400*100 + 0*10 // 0 available slots
-				assert.Equal(t, expectedZeroSlot, score, "%s should get base bin-packing score with no utilization bonus", tc.name)
+				expectedZeroSlot := int64(binPackingPriority) + 400*100 + 0*10 // ResourceScore = 0, so bonus = 0
+				assert.Equal(t, expectedZeroSlot, score, "%s should get base bin-packing score with no resource bonus", tc.name)
 			}
 
 			t.Logf("✅ %s: Score=%d, Pattern=%s", tc.name, score, tc.expectedPattern)
@@ -1858,15 +1877,15 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 			expected    int
 			description string
 		}{
-			{"VeryLowCPU", 50, 5, "Minimum capacity (50m CPU)"},
-			{"LowCPU", 200, 5, "Low CPU clamped to minimum (200m CPU)"},
-			{"MediumCPU", 1000, 10, "Medium CPU (1 core)"},
-			{"HighCPU", 4000, 40, "High CPU (4 cores)"},
-			{"VeryHighCPU", 8000, 50, "Maximum capacity (8+ cores)"},
-			{"ExtremeHighCPU", 20000, 50, "Extreme CPU clamped to maximum (20 cores)"},
-			{"EdgeCase", 99, 5, "Just under 1 pod per core"},
-			{"ExactBoundary", 500, 5, "Exactly at boundary"},
-			{"OverBoundary", 5001, 50, "Just over maximum boundary"},
+			{"VeryLowCPU", 50, 100, "Empty node with 50m CPU (100% resources available)"},
+			{"LowCPU", 200, 100, "Empty node with 200m CPU (100% resources available)"},
+			{"MediumCPU", 1000, 100, "Empty node with 1 core (100% resources available)"},
+			{"HighCPU", 4000, 100, "Empty node with 4 cores (100% resources available)"},
+			{"VeryHighCPU", 8000, 100, "Empty node with 8+ cores (100% resources available)"},
+			{"ExtremeHighCPU", 20000, 100, "Empty node with 20 cores (100% resources available)"},
+			{"EdgeCase", 99, 100, "Empty node with 99m CPU (100% resources available)"},
+			{"ExactBoundary", 500, 100, "Empty node at boundary (100% resources available)"},
+			{"OverBoundary", 5001, 100, "Empty node over boundary (100% resources available)"},
 		}
 
 		for _, tc := range capacityTests {
@@ -1881,10 +1900,11 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 				}
 				nodeInfo.SetNode(node)
 
-				capacity := plugin.estimateNodeCapacity(nodeInfo)
-				assert.Equal(t, tc.expected, capacity, "Node capacity estimation: %s", tc.description)
+				resourceUtil := plugin.calculateResourceUtilization(nodeInfo)
+				capacity := resourceUtil.ResourceScore
+				assert.Equal(t, tc.expected, capacity, "Node resource utilization: %s", tc.description)
 
-				t.Logf("✅ %s (%dm CPU): Capacity=%d pods", tc.description, tc.cpuMillis, capacity)
+				t.Logf("✅ %s (%dm CPU): ResourceScore=%d%%", tc.description, tc.cpuMillis, capacity)
 			})
 		}
 	})
