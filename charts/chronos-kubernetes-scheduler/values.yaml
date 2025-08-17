@@ -40,8 +40,50 @@ scheduler:
   plugin:
     # -- Plugin name
     name: Chronos
+    # -- Plugin weight (higher = more influence)
+    weight: 100
     # -- Job duration annotation key
     jobDurationAnnotation: "scheduling.workload.io/expected-duration-seconds"
+
+  # -- NodeResourcesFit plugin configuration for resource-aware tie-breaking
+  nodeResourcesFit:
+    # -- Plugin weight (should be lower than Chronos for tie-breaking)
+    weight: 1
+    # -- Scoring strategy: "MostAllocated" (consolidation), "LeastAllocated" (spreading), or "RequestedToCapacityRatio" (custom)
+    scoringStrategy: "MostAllocated"
+    
+    # -- Resource-specific configuration
+    resources:
+      # -- CPU resource configuration  
+      cpu:
+        # -- CPU resource weight
+        weight: 1
+      
+      # -- Memory resource configuration
+      memory:
+        # -- Memory resource weight  
+        weight: 1
+      
+      # -- GPU resource configuration
+      gpu:
+        # -- Enable GPU resource scoring
+        enabled: true
+        # -- GPU resource weight (higher priority for GPU workloads)
+        weight: 3
+        
+      # -- Ephemeral storage resource configuration  
+      ephemeralStorage:
+        # -- Enable ephemeral storage resource scoring
+        enabled: true
+        # -- Ephemeral storage resource weight
+        weight: 1
+        
+      # -- Custom resource configuration (e.g., custom.io/special-device)
+      custom: []
+        # - name: "custom.io/special-device"
+        #   weight: 2
+        # - name: "example.com/fpga" 
+        #   weight: 4
   
   # -- Leader election settings (for HA)
   leaderElection:

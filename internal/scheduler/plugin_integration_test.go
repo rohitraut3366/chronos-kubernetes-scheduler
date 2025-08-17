@@ -547,8 +547,8 @@ func TestOptimizedSchedulingIntegration(t *testing.T) {
 			expectedReason: "Longer existing work enables better consolidation",
 		},
 		{
-			name:           "UtilizationOptimization",
-			description:    "Should prefer less utilized nodes when jobs extend beyond existing work",
+			name:           "PureTimeBasedScoring",
+			description:    "Nodes with identical time characteristics have identical scores (resource tie-breaking handled by NodeResourcesFit)",
 			newJobDuration: 900, // 15 minutes - extends both nodes
 			nodes: []struct {
 				name         string
@@ -576,8 +576,8 @@ func TestOptimizedSchedulingIntegration(t *testing.T) {
 					},
 				},
 			},
-			expectedWinner: "light-node",
-			expectedReason: "Better utilization for extension scenarios",
+			expectedWinner: "busy-node", // First node in list (both have identical scores, NodeResourcesFit handles resource tie-breaking)
+			expectedReason: "Identical time-based scores (NodeResourcesFit handles resource tie-breaking)",
 		},
 		{
 			name:           "EmptyNodeAvoidance",
@@ -695,9 +695,9 @@ func TestCostOptimizationScenarios(t *testing.T) {
 		}
 	})
 
-	// Scenario 2: Cost vs Performance tradeoff
-	t.Run("CostVsPerformanceTradeoff", func(t *testing.T) {
-		// Create three nodes with different utilization levels
+	// Scenario 2: Pure time-based scoring verification
+	t.Run("PureTimeBasedScoringVerification", func(t *testing.T) {
+		// Create three nodes with identical time characteristics but different utilization
 		nodes := []struct {
 			name        string
 			existing    int64
@@ -719,11 +719,12 @@ func TestCostOptimizationScenarios(t *testing.T) {
 			scores[i] = score
 		}
 
-		// Lower utilization should win (better performance)
-		assert.Greater(t, scores[2], scores[1], "Low utilization should beat medium")
-		assert.Greater(t, scores[1], scores[0], "Medium utilization should beat high")
+		// All nodes have identical time characteristics, so scores should be identical
+		// NodeResourcesFit plugin will handle resource-based tie-breaking
+		assert.Equal(t, scores[0], scores[1], "Identical time characteristics = identical scores")
+		assert.Equal(t, scores[1], scores[2], "Identical time characteristics = identical scores")
 
-		t.Logf("✅ Utilization preference: Low=%d > Med=%d > High=%d",
-			scores[2], scores[1], scores[0])
+		t.Logf("✅ Pure time-based scoring verified: High=%d = Med=%d = Low=%d (NodeResourcesFit handles resource tie-breaking)",
+			scores[0], scores[1], scores[2])
 	})
 }
