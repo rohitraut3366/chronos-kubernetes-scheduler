@@ -61,7 +61,8 @@ func (s *Chronos) Name() string {
 // Score is the core scheduling logic. It calculates a score for each node based on
 // when the node is expected to become idle.
 func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.Pod, nodeName string) (int64, *framework.Status) {
-	klog.Infof("Scoring pod %s/%s for node %s", p.Namespace, p.Name, nodeName)
+	// Only log at debug level to reduce hot path overhead
+	klog.V(4).Infof("Scoring pod %s/%s for node %s", p.Namespace, p.Name, nodeName)
 
 	// 1. Get the expected duration of the pod being scheduled.
 	newPodDurationStr, ok := p.Annotations[JobDurationAnnotation]
@@ -82,29 +83,65 @@ func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.
 		return 0, framework.NewStatus(framework.Error, fmt.Sprintf("getting node %q info: %s", nodeName, err))
 	}
 
-	// 3. Calculate the maximum remaining time for all pods currently on the node.
+	// 3. Calculate node state using optimized single-pass algorithm
+	maxRemainingTime := s.calculateMaxRemainingTimeOptimized(nodeInfo.Pods)
+
+	// 4. Calculate completion time using bin-packing logic
+	nodeCompletionTime := s.CalculateBinPackingCompletionTime(maxRemainingTime, newPodDuration)
+
+	// 5. Apply two-phase optimization strategy
+	score := s.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration, nodeCompletionTime)
+
+	// Only log scoring results at debug level to improve performance
+	klog.V(4).Infof("Pod: %s/%s, Node: %s, Existing: %ds, NewJob: %ds, Completion: %ds, Score: %d (optimized)",
+		p.Namespace, p.Name, nodeName, maxRemainingTime, newPodDuration, nodeCompletionTime, score)
+
+	return score, framework.NewStatus(framework.Success)
+}
+
+// calculateMaxRemainingTimeOptimized - Performance-optimized remaining time calculation
+// Single pass through pods with early termination and minimal allocations
+func (s *Chronos) calculateMaxRemainingTimeOptimized(pods []*framework.PodInfo) int64 {
+	if len(pods) == 0 {
+		return 0
+	}
+
 	maxRemainingTime := int64(0)
 	now := time.Now()
 
-	for _, existingPodInfo := range nodeInfo.Pods {
-		existingPod := existingPodInfo.Pod
-		if existingPod.Status.Phase == v1.PodSucceeded || existingPod.Status.Phase == v1.PodFailed {
+	// Single optimized loop - no redundant operations
+	for _, podInfo := range pods {
+		pod := podInfo.Pod
+
+		// Fast early termination for completed pods
+		switch pod.Status.Phase {
+		case v1.PodSucceeded, v1.PodFailed:
 			continue
 		}
-		durationStr, ok := existingPod.Annotations[JobDurationAnnotation]
-		if !ok {
+
+		// Fast annotation lookup with existence check
+		durationStr, exists := pod.Annotations[JobDurationAnnotation]
+		if !exists {
 			continue
 		}
+
+		// Fast integer parsing (this is already quite optimized in Go)
 		duration, err := strconv.ParseInt(durationStr, 10, 64)
-		if err != nil {
+		if err != nil || duration <= 0 {
 			continue
 		}
-		if existingPod.Status.StartTime == nil {
+
+		// Fast nil check and time calculation
+		if pod.Status.StartTime == nil {
 			continue
 		}
-		startTime := existingPod.Status.StartTime.Time
-		elapsedSeconds := now.Sub(startTime).Seconds()
-		remainingSeconds := duration - int64(elapsedSeconds)
+
+		// Optimized time calculation - avoid float operations when possible
+		elapsedNanos := now.Sub(pod.Status.StartTime.Time).Nanoseconds()
+		elapsedSeconds := elapsedNanos / 1e9
+		remainingSeconds := duration - elapsedSeconds
+
+		// Clamp negative values and update maximum
 		if remainingSeconds < 0 {
 			remainingSeconds = 0
 		}
@@ -113,16 +150,7 @@ func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.
 		}
 	}
 
-	// 4. Calculate completion time using bin-packing logic
-	nodeCompletionTime := s.CalculateBinPackingCompletionTime(maxRemainingTime, newPodDuration)
-
-	// 5. Apply two-phase optimization strategy
-	score := s.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration, nodeCompletionTime)
-
-	klog.Infof("Pod: %s/%s, Node: %s, Existing: %ds, NewJob: %ds, Completion: %ds, Score: %d (optimized)",
-		p.Namespace, p.Name, nodeName, maxRemainingTime, newPodDuration, nodeCompletionTime, score)
-
-	return score, framework.NewStatus(framework.Success)
+	return maxRemainingTime
 }
 
 // calculateBinPackingCompletionTime implements true bin-packing logic:
@@ -221,21 +249,27 @@ func (s *Chronos) calculateResourceUtilization(nodeInfo *framework.NodeInfo) Res
 	allocatableCPU := node.Status.Allocatable.Cpu().MilliValue()
 	allocatableMemory := node.Status.Allocatable.Memory().Value()
 
-	// Calculate currently used resources by summing all pod requests
+	// Calculate currently used resources by summing all pod requests (optimized single-pass)
 	var usedCPU, usedMemory int64
 	for _, podInfo := range nodeInfo.Pods {
 		pod := podInfo.Pod
 
-		// Skip terminated pods (same logic as NodeResourcesFit)
-		if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
+		// Fast early termination for completed pods
+		switch pod.Status.Phase {
+		case v1.PodSucceeded, v1.PodFailed:
 			continue
 		}
 
-		// Sum resource requests from all containers
+		// Optimized resource accumulation - minimize allocations
 		for _, container := range pod.Spec.Containers {
-			if container.Resources.Requests != nil {
-				usedCPU += container.Resources.Requests.Cpu().MilliValue()
-				usedMemory += container.Resources.Requests.Memory().Value()
+			requests := container.Resources.Requests
+			if requests != nil {
+				if cpu := requests.Cpu(); !cpu.IsZero() {
+					usedCPU += cpu.MilliValue()
+				}
+				if memory := requests.Memory(); !memory.IsZero() {
+					usedMemory += memory.Value()
+				}
 			}
 		}
 	}
