@@ -460,6 +460,7 @@ func TestPerformanceScaling(t *testing.T) {
 		{"SmallCluster", 5, 10},
 		{"MediumCluster", 20, 25},
 		{"LargeCluster", 50, 50},
+		{"ExtraLargeCluster", 1000, 10}, // 1000 nodes + 10k pods simulation
 	}
 
 	for _, load := range loadTests {
@@ -482,9 +483,13 @@ func TestPerformanceScaling(t *testing.T) {
 			t.Logf("✅ %s: %d nodes scored in %v (avg: %v per node)",
 				load.name, load.nodeCount, duration, avgPerNode)
 
-			// Performance assertion: should be very fast
-			assert.Less(t, duration, time.Millisecond*100,
-				"Scoring %d nodes should complete within 100ms", load.nodeCount)
+			// Performance assertion: should scale linearly
+			expectedMaxDuration := time.Duration(load.nodeCount) * 500 * time.Microsecond // 500µs per node max
+			if load.nodeCount >= 1000 {
+				expectedMaxDuration = time.Second * 2 // Allow 2 seconds for 1000+ node tests
+			}
+			assert.Less(t, duration, expectedMaxDuration,
+				"Scoring %d nodes should complete within reasonable time", load.nodeCount)
 		})
 	}
 }
