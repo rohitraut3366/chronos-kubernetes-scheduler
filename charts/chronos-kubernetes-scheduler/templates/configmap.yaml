@@ -49,20 +49,6 @@ data:
               weight: {{ .Values.scheduler.nodeResourcesFit.resources.cpu.weight | default 1 }}
             - name: memory  
               weight: {{ .Values.scheduler.nodeResourcesFit.resources.memory.weight | default 1 }}
-            {{- if .Values.scheduler.nodeResourcesFit.resources.gpu.enabled }}
-            - name: "nvidia.com/gpu"
-              weight: {{ .Values.scheduler.nodeResourcesFit.resources.gpu.weight | default 3 }}
-            - name: "amd.com/gpu"
-              weight: {{ .Values.scheduler.nodeResourcesFit.resources.gpu.weight | default 3 }}
-            {{- end }}
-            {{- if .Values.scheduler.nodeResourcesFit.resources.ephemeralStorage.enabled }}
-            - name: "ephemeral-storage"
-              weight: {{ .Values.scheduler.nodeResourcesFit.resources.ephemeralStorage.weight | default 1 }}
-            {{- end }}
-            {{- range .Values.scheduler.nodeResourcesFit.resources.custom }}
-            - name: {{ .name | quote }}
-              weight: {{ .weight | default 1 }}
-            {{- end }}
     {{- if .Values.scheduler.leaderElection.enabled }}
     leaderElection:
       leaderElect: true

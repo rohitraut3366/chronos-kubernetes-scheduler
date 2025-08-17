@@ -63,27 +63,6 @@ scheduler:
       memory:
         # -- Memory resource weight  
         weight: 1
-      
-      # -- GPU resource configuration
-      gpu:
-        # -- Enable GPU resource scoring
-        enabled: true
-        # -- GPU resource weight (higher priority for GPU workloads)
-        weight: 3
-        
-      # -- Ephemeral storage resource configuration  
-      ephemeralStorage:
-        # -- Enable ephemeral storage resource scoring
-        enabled: true
-        # -- Ephemeral storage resource weight
-        weight: 1
-        
-      # -- Custom resource configuration (e.g., custom.io/special-device)
-      custom: []
-        # - name: "custom.io/special-device"
-        #   weight: 2
-        # - name: "example.com/fpga" 
-        #   weight: 4
   
   # -- Leader election settings (for HA)
   leaderElection:
