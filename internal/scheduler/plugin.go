@@ -34,9 +34,6 @@ const (
 	PluginName = "Chronos"
 	// JobDurationAnnotation is the annotation on a pod that specifies its expected runtime in seconds.
 	JobDurationAnnotation = "scheduling.workload.io/expected-duration-seconds"
-	// maxPossibleScore - A large constant to invert the score. A lower completion time will result in a higher raw score.
-	// Set to ~3.17 years (100,000,000 seconds ≈ 1,157 days) to provide excellent granularity for virtually all workloads.
-	maxPossibleScore = 100000000
 )
 
 // Chronos is a scheduler plugin that uses bin-packing logic with extension minimization
@@ -153,17 +150,14 @@ func (s *Chronos) calculateMaxRemainingTimeOptimized(pods []*framework.PodInfo) 
 	return maxRemainingTime
 }
 
-// calculateBinPackingCompletionTime implements true bin-packing logic:
-// If new job fits within existing work window, completion time doesn't change
+// CalculateBinPackingCompletionTime determines the completion time for bin-packing logic.
+// The completion time is simply the maximum of the existing window and the new job's duration.
+// This concisely represents both the "fit" (concurrent execution) and "extend" scenarios.
 func (s *Chronos) CalculateBinPackingCompletionTime(maxRemainingTime, newPodDuration int64) int64 {
-	if newPodDuration <= maxRemainingTime {
-		// Job fits within existing work window - completion time stays the same
-		// This is the key insight: jobs can run concurrently within the window!
-		return maxRemainingTime
+	if newPodDuration > maxRemainingTime {
+		return newPodDuration
 	}
-
-	// Job extends beyond existing work - completion time becomes the new job duration
-	return newPodDuration
+	return maxRemainingTime
 }
 
 // calculateOptimizedScore implements hierarchical bin-packing optimization:

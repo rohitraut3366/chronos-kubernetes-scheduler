@@ -57,7 +57,7 @@ func TestPluginIntegrationWithRealObjects(t *testing.T) {
 					existingJobs: []IntegrationJob{}, // Empty!
 				},
 			},
-			expectedWinner: "web-frontend", // Should avoid empty node (cache-redis) and prefer active node
+			expectedWinner: "database", // Offers largest bin-packing window (1800s remaining vs 300s)
 		},
 		{
 			name:        "MLTrainingCluster",
@@ -77,7 +77,7 @@ func TestPluginIntegrationWithRealObjects(t *testing.T) {
 					},
 				},
 			},
-			expectedWinner: "cpu-cluster", // Finishes much sooner (10 min vs 1 hour)
+			expectedWinner: "gpu-node-1", // Offers better bin-packing (3600s remaining vs 300s extension penalty)
 		},
 		{
 			name:        "CapacityTieBreaker",
@@ -113,7 +113,7 @@ func TestPluginIntegrationWithRealObjects(t *testing.T) {
 					},
 				},
 			},
-			expectedWinner: "finishing-soon", // Will complete in 2 min vs 20 min
+			expectedWinner: "long-running", // Bin-packing priority: 1200s window > 30s extension penalty
 		},
 	}
 
@@ -142,8 +142,8 @@ func TestPluginIntegrationWithRealObjects(t *testing.T) {
 					nodeInfo.AddPod(pod)
 				}
 
-				// Calculate score using plugin logic directly
-				score := calculateDirectIntegrationScore(scenario.newPod, nodeInfo)
+				// Calculate score using PRODUCTION plugin logic directly
+				score := calculateProductionScore(scenario.newPod, nodeInfo)
 
 				t.Logf("  📊 %s: score=%d (pods: %d)",
 					nodeScenario.node.Name, score, len(nodeScenario.existingJobs))
@@ -180,7 +180,7 @@ func TestIntegrationErrorHandling(t *testing.T) {
 		{
 			name:          "ValidAnnotation",
 			pod:           createIntegrationPod("valid-job", 300),
-			expectedScore: 99999700, // Raw score: 100000000 - 300 = 99999700
+			expectedScore: 1000, // Empty node penalty (production algorithm)
 			description:   "Pod with valid duration annotation",
 		},
 		{
@@ -192,7 +192,7 @@ func TestIntegrationErrorHandling(t *testing.T) {
 		{
 			name:          "ZeroDuration",
 			pod:           createIntegrationPod("instant-job", 0),
-			expectedScore: 100000000, // Raw score: 100000000 - 0 = 100000000 (zero duration)
+			expectedScore: 1000, // Empty node penalty (production algorithm)
 			description:   "Pod with zero duration",
 		},
 	}
@@ -201,7 +201,7 @@ func TestIntegrationErrorHandling(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Logf("🧪 %s", testCase.description)
 
-			score := calculateDirectIntegrationScore(testCase.pod, nodeInfo)
+			score := calculateProductionScore(testCase.pod, nodeInfo)
 
 			assert.Equal(t, testCase.expectedScore, score,
 				"Expected score %d, got %d for %s", testCase.expectedScore, score, testCase.description)
@@ -261,7 +261,7 @@ func TestIntegrationPerformance(t *testing.T) {
 			}
 		}
 
-		score := calculateDirectIntegrationScore(newPod, nodeInfo)
+		score := calculateProductionScore(newPod, nodeInfo)
 
 		if score > bestScore {
 			bestScore = score
@@ -297,8 +297,8 @@ type IntegrationJob struct {
 	startedSecondsAgo int64
 }
 
-// calculateDirectIntegrationScore implements the plugin's scoring logic directly
-func calculateDirectIntegrationScore(pod *v1.Pod, nodeInfo *framework.NodeInfo) int64 {
+// calculateProductionScore uses the actual production plugin logic for integration tests
+func calculateProductionScore(pod *v1.Pod, nodeInfo *framework.NodeInfo) int64 {
 	// Extract duration from pod annotation
 	durationStr, exists := pod.Annotations[JobDurationAnnotation]
 	if !exists {
@@ -344,21 +344,11 @@ func calculateDirectIntegrationScore(pod *v1.Pod, nodeInfo *framework.NodeInfo) 
 		}
 	}
 
-	// Calculate node completion time
-	nodeCompletionTime := maxRemainingTime
-	if newPodDuration > nodeCompletionTime {
-		nodeCompletionTime = newPodDuration
-	}
+	// ✅ CRITICAL FIX: Use actual production plugin logic
+	plugin := &Chronos{}
+	nodeCompletionTime := plugin.CalculateBinPackingCompletionTime(maxRemainingTime, newPodDuration)
+	score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration, nodeCompletionTime)
 
-	// Calculate raw score using new implementation logic
-	// Use default value for integration tests
-	testMaxPossibleScore := int64(maxPossibleScore)
-	score := testMaxPossibleScore - nodeCompletionTime
-	if score < 0 {
-		score = 0
-	}
-
-	// NOTE: Load balancing is now handled by separate plugins, not here
 	return score
 }
 
