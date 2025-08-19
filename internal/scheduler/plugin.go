@@ -73,7 +73,7 @@ func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.
 		klog.Warningf("Could not parse duration '%s' for pod %s/%s: %v", newPodDurationStr, p.Namespace, p.Name, err)
 		return 0, framework.NewStatus(framework.Success)
 	}
-	newPodDuration := int64(newPodDurationFloat) // Convert float to int64 (truncates decimal)
+	newPodDuration := int64(newPodDurationFloat) // Convert float to int64 (truncates towards zero, e.g., -1.9 becomes -1)
 
 	// 2. Get node information.
 	nodeInfo, err := s.handle.SnapshotSharedLister().NodeInfos().Get(nodeName)
