@@ -261,27 +261,8 @@ jobs:
       with:
         name: benchmark-results
         path: benchmarks.txt
-        retention-days: 30
+        retention-days: 5
 
-    - name: Comment benchmark results on PR
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v6
-      with:
-        script: |
-          const fs = require('fs');
-          try {
-            const benchmarks = fs.readFileSync('benchmarks.txt', 'utf8');
-            const comment = `## 📈 Benchmark Results\n\n\`\`\`\n${benchmarks}\n\`\`\``;
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
-          } catch (error) {
-            console.log('Could not post benchmark results:', error);
-          }
 
   # Validate Kubernetes manifests
   validate-k8s:
