@@ -12,10 +12,10 @@ on:
   # Allow manual triggering
   workflow_dispatch:
 
-# Cancel in-progress workflow runs when new commits are pushed
+# Cancel old workflows when new commits are pushed to the same PR
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   GO_VERSION: '1.22'
