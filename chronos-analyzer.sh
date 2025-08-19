@@ -56,12 +56,12 @@ calc_percentage() {
 echo "🏥 SCHEDULER HEALTH CHECK"
 echo "========================="
 
-SCHEDULER_POD=$(kubectl get pods -n $SCHEDULER_NAMESPACE -l app=chronos-kubernetes-scheduler --no-headers 2>/dev/null | head -1)
+SCHEDULER_POD=$(kubectl get pods -n $SCHEDULER_NAMESPACE -l app.kubernetes.io/name=chronos-kubernetes-scheduler --no-headers 2>/dev/null | head -1)
 
 if [ -z "$SCHEDULER_POD" ]; then
     echo "❌ CRITICAL: Chronos scheduler pod not found!"
     echo "   Make sure the scheduler is deployed in '$SCHEDULER_NAMESPACE' namespace"
-    echo "   with label app=chronos-kubernetes-scheduler"
+    echo "   with label app.kubernetes.io/name=chronos-kubernetes-scheduler"
     exit 1
 fi
 

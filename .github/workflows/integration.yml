@@ -307,7 +307,7 @@ jobs:
         # Run our comprehensive analyzer
         if [ -f "./chronos-analyzer.sh" ]; then
           echo "=== COMPREHENSIVE SCHEDULER ANALYSIS ==="
-          ./chronos-analyzer.sh integration-test chronos-system || true
+          ./chronos-analyzer.sh integration-test chronos-system
         fi
 
     - name: Upload integration test artifacts
