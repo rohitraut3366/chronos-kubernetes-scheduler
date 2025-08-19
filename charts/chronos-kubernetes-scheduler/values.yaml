@@ -119,11 +119,11 @@ securityContext:
 # -- Resource limits and requests
 resources:
   limits:
-    cpu: 500m
-    memory: 512Mi
+    cpu: 2
+    memory: 4Gi
   requests:
-    cpu: 100m
-    memory: 128Mi
+    cpu: 2
+    memory: 8Gi
 
 # -- Node selector for scheduler placement
 nodeSelector:
