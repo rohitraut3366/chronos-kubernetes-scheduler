@@ -28,9 +28,12 @@ jobs:
       uses: docker/setup-buildx-action@v3
 
     - name: Install Helm
-      uses: azure/setup-helm@v3
-      with:
-        version: 'latest'
+      run: |
+        # Install Helm directly without needing GitHub token
+        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        chmod 700 get_helm.sh
+        ./get_helm.sh
+        rm get_helm.sh
 
     - name: Set up K3s cluster
       run: |
@@ -54,16 +57,30 @@ jobs:
     - name: Build and import Docker image
       run: |
         # Build image
+        echo "🔨 Building Docker image..."
         make docker-build
         
+        # Verify local build
+        docker images | grep chronos-kubernetes-scheduler
+        
         # Tag for integration tests
+        echo "🏷️ Tagging image for integration tests..."
         docker tag chronos-kubernetes-scheduler:latest chronos-kubernetes-scheduler:integration-test
         
-        # Import into K3s
+        # Import into K3s with better error handling
+        echo "📦 Importing image into K3s..."
         docker save chronos-kubernetes-scheduler:integration-test | sudo k3s ctr images import -
         
-        # Verify import
-        sudo k3s ctr images list | grep chronos-kubernetes-scheduler
+        # Verify import worked
+        echo "✅ Verifying image import..."
+        sudo k3s ctr images list | grep chronos-kubernetes-scheduler || {
+          echo "❌ Image import failed!"
+          echo "Available K3s images:"
+          sudo k3s ctr images list
+          exit 1
+        }
+        
+        echo "🎉 Image successfully imported to K3s!"
 
     - name: Deploy Chronos scheduler
       run: |
@@ -106,9 +123,20 @@ jobs:
           --timeout 5m
         
         # Wait for scheduler pod to be ready
-        kubectl wait --for=condition=Ready pod -l app=chronos-kubernetes-scheduler -n chronos-system --timeout=120s
+        echo "⏳ Waiting for scheduler pod to be ready..."
+        kubectl wait --for=condition=Ready pod -l app=chronos-kubernetes-scheduler -n chronos-system --timeout=180s || {
+          echo "❌ Scheduler pod failed to become ready!"
+          echo "Pod status:"
+          kubectl get pods -n chronos-system -o wide
+          echo "Pod describe:"
+          kubectl describe pods -n chronos-system -l app=chronos-kubernetes-scheduler
+          echo "Pod logs:"
+          kubectl logs -n chronos-system -l app=chronos-kubernetes-scheduler --tail=50 || true
+          exit 1
+        }
         
         # Show scheduler status
+        echo "✅ Scheduler pod is ready!"
         kubectl get pods -n chronos-system -o wide
         kubectl logs -n chronos-system -l app=chronos-kubernetes-scheduler --tail=20
 
