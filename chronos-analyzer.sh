@@ -112,13 +112,13 @@ if [ $TOTAL_PODS -eq 0 ] || [ "$ALL_PODS" = "" ]; then
     exit 0
 fi
 
-# Pod status counts
+# Pod status counts (for entire namespace overview)
 RUNNING=$(kubectl get pods -n $POD_NAMESPACE --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l)
 PENDING=$(kubectl get pods -n $POD_NAMESPACE --field-selector=status.phase=Pending --no-headers 2>/dev/null | wc -l)
 FAILED=$(kubectl get pods -n $POD_NAMESPACE --field-selector=status.phase=Failed --no-headers 2>/dev/null | wc -l)
 SUCCEEDED=$(kubectl get pods -n $POD_NAMESPACE --field-selector=status.phase=Succeeded --no-headers 2>/dev/null | wc -l)
 
-# Calculate percentages
+# Calculate percentages for namespace overview
 RUNNING_PCT=$(calc_percentage $RUNNING $TOTAL_PODS)
 PENDING_PCT=$(calc_percentage $PENDING $TOTAL_PODS)
 SUCCESS_RATE=$(calc_percentage $RUNNING $TOTAL_PODS)
@@ -152,6 +152,23 @@ echo "   🎯 Chronos scheduler: $CHRONOS_PODS ($CHRONOS_PCT%)"
 echo "   🔷 Default scheduler: $DEFAULT_PODS ($DEFAULT_PCT%)"
 echo "   ❓ No scheduler specified: $NO_SCHEDULER"
 
+# Calculate Chronos-specific pod status (for accurate scoring)
+if [ $CHRONOS_PODS -gt 0 ]; then
+    CHRONOS_RUNNING=$(kubectl get pods -n $POD_NAMESPACE -o json 2>/dev/null | jq -r '.items[] | select(.spec.schedulerName=="'$SCHEDULER_NAME'") | select(.status.phase=="Running") | .metadata.name' | wc -l)
+    CHRONOS_PENDING=$(kubectl get pods -n $POD_NAMESPACE -o json 2>/dev/null | jq -r '.items[] | select(.spec.schedulerName=="'$SCHEDULER_NAME'") | select(.status.phase=="Pending") | .metadata.name' | wc -l)
+    CHRONOS_FAILED=$(kubectl get pods -n $POD_NAMESPACE -o json 2>/dev/null | jq -r '.items[] | select(.spec.schedulerName=="'$SCHEDULER_NAME'") | select(.status.phase=="Failed") | .metadata.name' | wc -l)
+    
+    CHRONOS_SUCCESS_RATE=$(calc_percentage $CHRONOS_RUNNING $CHRONOS_PODS)
+    
+    echo ""
+    echo "📊 Chronos Scheduler Pod Status:"
+    echo "   🟢 Running: $CHRONOS_RUNNING/$CHRONOS_PODS ($CHRONOS_SUCCESS_RATE%)"
+    echo "   🟡 Pending: $CHRONOS_PENDING"
+    echo "   ❌ Failed: $CHRONOS_FAILED"
+else
+    CHRONOS_SUCCESS_RATE=0
+fi
+
 if [ $CHRONOS_PODS -eq $TOTAL_PODS ]; then
     echo "✅ EXCELLENT: All pods using Chronos scheduler"
 elif [ $CHRONOS_PODS -gt 0 ]; then
@@ -168,19 +185,38 @@ echo ""
 echo "📝 ANNOTATION USAGE ANALYSIS"
 echo "============================"
 
-WITH_ANNOTATION=$(kubectl get pods -n $POD_NAMESPACE -o json 2>/dev/null | jq -r '.items[] | select(.metadata.annotations["scheduling.workload.io/expected-duration-seconds"] != null) | .metadata.name' | wc -l)
-WITHOUT_ANNOTATION=$((TOTAL_PODS - WITH_ANNOTATION))
+# Annotation usage for all pods (namespace overview)
+WITH_ANNOTATION_ALL=$(kubectl get pods -n $POD_NAMESPACE -o json 2>/dev/null | jq -r '.items[] | select(.metadata.annotations["scheduling.workload.io/expected-duration-seconds"] != null) | .metadata.name' | wc -l)
+WITHOUT_ANNOTATION_ALL=$((TOTAL_PODS - WITH_ANNOTATION_ALL))
 
-ANNOTATION_PCT=$(calc_percentage $WITH_ANNOTATION $TOTAL_PODS)
+# Annotation usage for Chronos-scheduled pods only (for accurate scoring)
+if [ $CHRONOS_PODS -gt 0 ]; then
+    CHRONOS_WITH_ANNOTATION=$(kubectl get pods -n $POD_NAMESPACE -o json 2>/dev/null | jq -r '.items[] | select(.spec.schedulerName=="'$SCHEDULER_NAME'") | select(.metadata.annotations["scheduling.workload.io/expected-duration-seconds"] != null) | .metadata.name' | wc -l)
+    CHRONOS_WITHOUT_ANNOTATION=$((CHRONOS_PODS - CHRONOS_WITH_ANNOTATION))
+    CHRONOS_ANNOTATION_PCT=$(calc_percentage $CHRONOS_WITH_ANNOTATION $CHRONOS_PODS)
+else
+    CHRONOS_WITH_ANNOTATION=0
+    CHRONOS_WITHOUT_ANNOTATION=0
+    CHRONOS_ANNOTATION_PCT=0
+fi
 
-echo "📊 Duration Annotation Usage:"
-echo "   ✅ With annotation: $WITH_ANNOTATION ($ANNOTATION_PCT%)"
-echo "   ❌ Without annotation: $WITHOUT_ANNOTATION"
+ANNOTATION_PCT=$(calc_percentage $WITH_ANNOTATION_ALL $TOTAL_PODS)
 
-if [ $WITH_ANNOTATION -eq $TOTAL_PODS ]; then
+echo "📊 Duration Annotation Usage (All Pods):"
+echo "   ✅ With annotation: $WITH_ANNOTATION_ALL ($ANNOTATION_PCT%)"
+echo "   ❌ Without annotation: $WITHOUT_ANNOTATION_ALL"
+
+if [ $CHRONOS_PODS -gt 0 ]; then
+    echo ""
+    echo "📊 Chronos Pods Annotation Usage:"
+    echo "   ✅ With annotation: $CHRONOS_WITH_ANNOTATION/$CHRONOS_PODS ($CHRONOS_ANNOTATION_PCT%)"
+    echo "   ❌ Without annotation: $CHRONOS_WITHOUT_ANNOTATION"
+fi
+
+if [ $WITH_ANNOTATION_ALL -eq $TOTAL_PODS ]; then
     echo "✅ EXCELLENT: All pods have duration annotations"
-elif [ $WITH_ANNOTATION -gt 0 ]; then
-    echo "⚠️  WARNING: $WITHOUT_ANNOTATION pods lack duration annotations"
+elif [ $WITH_ANNOTATION_ALL -gt 0 ]; then
+    echo "⚠️  WARNING: $WITHOUT_ANNOTATION_ALL pods lack duration annotations"
     echo "   → These pods fall back to NodeResourcesFit scoring only"
 else
     echo "❌ CRITICAL: No pods have duration annotations!"
@@ -188,7 +224,7 @@ else
 fi
 
 # Show annotation values distribution if any exist
-if [ $WITH_ANNOTATION -gt 0 ]; then
+if [ $WITH_ANNOTATION_ALL -gt 0 ]; then
     echo ""
     echo "📊 Duration Distribution:"
     kubectl get pods -n $POD_NAMESPACE -o json 2>/dev/null | jq -r '
@@ -535,15 +571,19 @@ else
     echo "   ❌ Scheduler Health: FAILED"
 fi
 
-# 2. Pod success rate
-if [ $(echo "$SUCCESS_RATE >= 95" | bc -l) -eq 1 ]; then
-    echo "   ✅ Scheduling Success: EXCELLENT ($SUCCESS_RATE%)"
-    SCORE=$((SCORE + 2))
-elif [ $(echo "$SUCCESS_RATE >= 80" | bc -l) -eq 1 ]; then
-    echo "   ⚠️  Scheduling Success: GOOD ($SUCCESS_RATE%)"
-    SCORE=$((SCORE + 1))
+# 2. Chronos pod success rate
+if [ $CHRONOS_PODS -gt 0 ]; then
+    if [ $(echo "$CHRONOS_SUCCESS_RATE >= 95" | bc -l) -eq 1 ]; then
+        echo "   ✅ Chronos Scheduling Success: EXCELLENT ($CHRONOS_SUCCESS_RATE%)"
+        SCORE=$((SCORE + 2))
+    elif [ $(echo "$CHRONOS_SUCCESS_RATE >= 80" | bc -l) -eq 1 ]; then
+        echo "   ⚠️  Chronos Scheduling Success: GOOD ($CHRONOS_SUCCESS_RATE%)"
+        SCORE=$((SCORE + 1))
+    else
+        echo "   ❌ Chronos Scheduling Success: POOR ($CHRONOS_SUCCESS_RATE%)"
+    fi
 else
-    echo "   ❌ Scheduling Success: POOR ($SUCCESS_RATE%)"
+    echo "   ❓ Chronos Scheduling Success: N/A (no Chronos pods found)"
 fi
 
 # 3. Chronos adoption
@@ -557,15 +597,19 @@ else
     echo "   ❌ Chronos Adoption: POOR ($CHRONOS_PCT%)"
 fi
 
-# 4. Annotation usage
-if [ $(echo "$ANNOTATION_PCT >= 90" | bc -l) -eq 1 ]; then
-    echo "   ✅ Annotation Usage: EXCELLENT ($ANNOTATION_PCT%)"
-    SCORE=$((SCORE + 2))
-elif [ $(echo "$ANNOTATION_PCT >= 50" | bc -l) -eq 1 ]; then
-    echo "   ⚠️  Annotation Usage: PARTIAL ($ANNOTATION_PCT%)"
-    SCORE=$((SCORE + 1))
+# 4. Chronos annotation usage
+if [ $CHRONOS_PODS -gt 0 ]; then
+    if [ $(echo "$CHRONOS_ANNOTATION_PCT >= 90" | bc -l) -eq 1 ]; then
+        echo "   ✅ Chronos Annotation Usage: EXCELLENT ($CHRONOS_ANNOTATION_PCT%)"
+        SCORE=$((SCORE + 2))
+    elif [ $(echo "$CHRONOS_ANNOTATION_PCT >= 50" | bc -l) -eq 1 ]; then
+        echo "   ⚠️  Chronos Annotation Usage: PARTIAL ($CHRONOS_ANNOTATION_PCT%)"
+        SCORE=$((SCORE + 1))
+    else
+        echo "   ❌ Chronos Annotation Usage: POOR ($CHRONOS_ANNOTATION_PCT%)"
+    fi
 else
-    echo "   ❌ Annotation Usage: POOR ($ANNOTATION_PCT%)"
+    echo "   ❓ Chronos Annotation Usage: N/A (no Chronos pods found)"
 fi
 
 # 5. Currently stuck pods (not historical events)
@@ -602,8 +646,8 @@ if [ $CHRONOS_PODS -lt $TOTAL_PODS ]; then
     echo "   🔧 Add 'schedulerName: $SCHEDULER_NAME' to pod specs"
 fi
 
-if [ $WITHOUT_ANNOTATION -gt 0 ]; then
-    echo "   🔧 Add 'scheduling.workload.io/expected-duration-seconds' annotation to $WITHOUT_ANNOTATION pods"
+if [ $CHRONOS_WITHOUT_ANNOTATION -gt 0 ]; then
+    echo "   🔧 Add 'scheduling.workload.io/expected-duration-seconds' annotation to $CHRONOS_WITHOUT_ANNOTATION Chronos-scheduled pods"
 fi
 
 if [ $PENDING -gt 0 ]; then
