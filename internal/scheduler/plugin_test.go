@@ -2022,6 +2022,18 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 				expectedRange: [2]int64{0, 0}, // Zero score for no annotation
 				description:   "Pod without duration annotation gets zero score",
 			},
+			{
+				name: "DecimalDurationSupport",
+				pod: &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "decimal-duration-job", Namespace: "default",
+						Annotations: map[string]string{JobDurationAnnotation: "600.75"}, // 10 min 45 sec (truncated to 600)
+					},
+				},
+				nodeName:      "node-with-work",
+				expectedRange: [2]int64{70000, 80000}, // Actual observed range for this scenario
+				description:   "Pod with decimal duration gets converted to integer (600.75 -> 600)",
+			},
 		}
 
 		for _, scenario := range testScenarios {
