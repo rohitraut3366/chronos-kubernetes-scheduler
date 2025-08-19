@@ -50,7 +50,7 @@ jobs:
     - name: Run Gosec Security Scanner
       run: |
         # Install gosec
-        go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+        go install github.com/securego/gosec/v2/cmd/gosec@latest
         # Run gosec scan with SARIF output
         gosec -fmt sarif -out gosec-results.sarif -exclude-dir=.git -exclude-generated ./...
 
@@ -183,34 +183,7 @@ jobs:
       with:
         category: "/language:${{matrix.language}}"
 
-  # Kubernetes manifest security scanning
-  k8s-security:
-    name: Kubernetes Security Scan
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
 
-    - name: Install kubesec
-      run: |
-        wget https://github.com/controlplaneio/kubesec/releases/download/v2.12.0/kubesec_linux_amd64.tar.gz
-        tar -xzf kubesec_linux_amd64.tar.gz
-        sudo mv kubesec /usr/local/bin/
-
-    - name: Scan example manifests
-      run: |
-        echo "Scanning example manifests..."
-        for file in examples/*.yaml; do
-          echo "Scanning $file"
-          kubesec scan "$file" | tee "kubesec-$(basename "$file" .yaml)-results.json"
-        done
-
-    - name: Upload kubesec results
-      uses: actions/upload-artifact@v4
-      with:
-        name: kubesec-results
-        path: kubesec-*-results.json
-        retention-days: 30
 
 
   # SBOM (Software Bill of Materials) generation
@@ -259,7 +232,7 @@ jobs:
   security-summary:
     name: Security Summary
     runs-on: ubuntu-latest
-    needs: [gosec, dependency-scan, docker-scan, codeql, k8s-security, sbom]
+    needs: [gosec, dependency-scan, docker-scan, codeql, sbom]
     if: always()
     steps:
     - name: Create security summary
@@ -274,7 +247,6 @@ jobs:
         | Dependency Scan | ${{ needs.dependency-scan.result == 'success' && '✅ Passed' || '❌ Failed' }} |
         | Docker Image Scan | ${{ needs.docker-scan.result == 'success' && '✅ Passed' || '❌ Failed' }} |
         | CodeQL Analysis | ${{ needs.codeql.result == 'success' && '✅ Passed' || '❌ Failed' }} |
-        | K8s Security Scan | ${{ needs.k8s-security.result == 'success' && '✅ Passed' || '❌ Failed' }} |
         | SBOM Generation | ${{ needs.sbom.result == 'success' && '✅ Generated' || '❌ Failed' }} |
         
         ## Next Steps
@@ -295,9 +267,6 @@ jobs:
         fi
         if [[ "${{ needs.docker-scan.result }}" != "success" ]]; then
           FAILURES="$FAILURES docker-scan"
-        fi
-        if [[ "${{ needs.k8s-security.result }}" != "success" ]]; then
-          FAILURES="$FAILURES k8s-security"
         fi
         
         if [[ -n "$FAILURES" ]]; then

@@ -1,0 +1,256 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  # Allow manual triggering
+  workflow_dispatch:
+
+env:
+  GO_VERSION: '1.22'
+
+jobs:
+  integration-test:
+    name: Full Integration Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'latest'
+
+    - name: Set up K3s cluster
+      run: |
+        # Install K3s
+        curl -sfL https://get.k3s.io | sh -s - \
+          --write-kubeconfig-mode 644 \
+          --disable traefik \
+          --disable servicelb \
+          --disable metrics-server
+
+        # Wait for K3s to be ready
+        sudo chmod 644 /etc/rancher/k3s/k3s.yaml
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        
+        # Wait for node to be ready
+        timeout 60s bash -c 'until kubectl get nodes | grep -q Ready; do sleep 5; done'
+        
+        kubectl cluster-info
+        kubectl get nodes -o wide
+
+    - name: Build and import Docker image
+      run: |
+        # Build image
+        make docker-build
+        
+        # Tag for integration tests
+        docker tag chronos-kubernetes-scheduler:latest chronos-kubernetes-scheduler:integration-test
+        
+        # Import into K3s
+        docker save chronos-kubernetes-scheduler:integration-test | sudo k3s ctr images import -
+        
+        # Verify import
+        sudo k3s ctr images list | grep chronos-kubernetes-scheduler
+
+    - name: Deploy Chronos scheduler
+      run: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        
+        # Create namespace
+        kubectl create namespace chronos-system
+        
+        # Create integration test values
+        cat > values-ci.yaml << 'HELM_VALUES'
+        replicaCount: 1
+        
+        image:
+          repository: chronos-kubernetes-scheduler
+          tag: "integration-test"
+          pullPolicy: Never
+        
+        scheduler:
+          name: chronos-kubernetes-scheduler
+          leaderElection:
+            enabled: false  # Single replica in CI
+        
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        
+        logLevel: 4  # Debug logging
+        HELM_VALUES
+        
+        # Install Helm chart
+        helm upgrade --install chronos-scheduler \
+          ./charts/chronos-kubernetes-scheduler \
+          --namespace chronos-system \
+          --values values-ci.yaml \
+          --wait \
+          --timeout 5m
+        
+        # Wait for scheduler pod to be ready
+        kubectl wait --for=condition=Ready pod -l app=chronos-kubernetes-scheduler -n chronos-system --timeout=120s
+        
+        # Show scheduler status
+        kubectl get pods -n chronos-system -o wide
+        kubectl logs -n chronos-system -l app=chronos-kubernetes-scheduler --tail=20
+
+    - name: Run integration tests
+      run: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        
+        # Create test namespace
+        kubectl create namespace integration-test
+        
+        # Create test pods
+        cat > integration-test-pods.yaml << 'TEST_PODS'
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: test-short-job
+          namespace: integration-test
+          annotations:
+            scheduling.workload.io/expected-duration-seconds: "60"
+        spec:
+          schedulerName: chronos-kubernetes-scheduler
+          containers:
+          - name: worker
+            image: alpine:latest
+            command: ["sh", "-c", "echo 'Short job starting'; sleep 60; echo 'Short job completed'"]
+          restartPolicy: Never
+        
+        ---
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: test-decimal-duration
+          namespace: integration-test
+          annotations:
+            scheduling.workload.io/expected-duration-seconds: "120.5"
+        spec:
+          schedulerName: chronos-kubernetes-scheduler
+          containers:
+          - name: worker
+            image: busybox:latest
+            command: ["sh", "-c", "echo 'Decimal duration job'; sleep 120; echo 'Completed'"]
+          restartPolicy: Never
+        
+        ---
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: test-no-annotation
+          namespace: integration-test
+        spec:
+          schedulerName: chronos-kubernetes-scheduler
+          containers:
+          - name: worker
+            image: nginx:alpine
+            command: ["sh", "-c", "echo 'No annotation job'; sleep 30; echo 'Completed'"]
+          restartPolicy: Never
+        TEST_PODS
+        
+        # Apply test pods
+        kubectl apply -f integration-test-pods.yaml
+        
+        # Wait for pods to be scheduled
+        sleep 15
+        
+        # Check results
+        echo "=== POD SCHEDULING RESULTS ==="
+        kubectl get pods -n integration-test -o wide
+        
+        echo "=== SCHEDULER LOGS ==="
+        kubectl logs -n chronos-system -l app=chronos-kubernetes-scheduler --tail=50
+        
+        echo "=== SCHEDULING EVENTS ==="
+        kubectl get events -n integration-test --field-selector reason=Scheduled
+        
+        echo "=== FAILED SCHEDULING EVENTS ==="  
+        kubectl get events -n integration-test --field-selector reason=FailedScheduling
+
+    - name: Validate scheduling correctness
+      run: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        
+        # Check that pods were scheduled by Chronos
+        CHRONOS_PODS=$(kubectl get pods -n integration-test -o jsonpath='{.items[?(@.spec.schedulerName=="chronos-kubernetes-scheduler")].metadata.name}' | wc -w)
+        TOTAL_PODS=$(kubectl get pods -n integration-test --no-headers | wc -l)
+        
+        echo "Pods scheduled by Chronos: $CHRONOS_PODS/$TOTAL_PODS"
+        
+        if [ "$CHRONOS_PODS" -eq "$TOTAL_PODS" ]; then
+          echo "✅ SUCCESS: All pods scheduled by Chronos"
+        else
+          echo "❌ FAILURE: Not all pods scheduled by Chronos"
+          exit 1
+        fi
+        
+        # Check that scheduler is processing annotations
+        LOGS_WITH_SCORING=$(kubectl logs -n chronos-system -l app=chronos-kubernetes-scheduler | grep -c "Score.*optimized" || echo "0")
+        
+        echo "Scheduler scoring operations found: $LOGS_WITH_SCORING"
+        
+        if [ "$LOGS_WITH_SCORING" -gt 0 ]; then
+          echo "✅ SUCCESS: Scheduler processing duration annotations"
+        else
+          echo "⚠️  WARNING: No scoring operations found in logs"
+        fi
+        
+        # Check for any failed scheduling
+        FAILED_EVENTS=$(kubectl get events -n integration-test --field-selector reason=FailedScheduling --no-headers | wc -l)
+        
+        if [ "$FAILED_EVENTS" -eq 0 ]; then
+          echo "✅ SUCCESS: No failed scheduling events"
+        else
+          echo "❌ FAILURE: $FAILED_EVENTS failed scheduling events found"
+          kubectl get events -n integration-test --field-selector reason=FailedScheduling
+          exit 1
+        fi
+
+    - name: Run scheduler analysis
+      if: always()
+      run: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        
+        # Run our comprehensive analyzer
+        if [ -f "./chronos-analyzer.sh" ]; then
+          echo "=== COMPREHENSIVE SCHEDULER ANALYSIS ==="
+          ./chronos-analyzer.sh integration-test chronos-system || true
+        fi
+
+    - name: Upload integration test artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: integration-test-results
+        path: |
+          values-ci.yaml
+          integration-test-pods.yaml
+        retention-days: 7
+
+    - name: Cleanup
+      if: always()
+      run: |
+        # Show final status
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        kubectl get pods -A || true
+        
+        # K3s cleanup happens automatically when runner terminates
