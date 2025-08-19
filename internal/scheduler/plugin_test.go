@@ -29,6 +29,9 @@ import (
 // Test Fixtures and Mock Helpers
 // =================================================================
 
+// testContextKey is a custom type for context keys to avoid collisions
+type testContextKey string
+
 // mockNodeInfo creates a realistic mock framework.NodeInfo for testing.
 func mockNodeInfo(nodeName string, podCount int, capacity int64) *framework.NodeInfo {
 	node := &v1.Node{
@@ -995,7 +998,7 @@ func TestMainEntryPoints(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
 		}
 
-		score1, status1 := plugin.Score(nil, nil, podNoAnnotation, "any-node")
+		score1, status1 := plugin.Score(context.TODO(), nil, podNoAnnotation, "any-node")
 		assert.True(t, status1.IsSuccess(), "Missing annotation should be handled gracefully")
 		assert.Equal(t, int64(0), score1, "Missing annotation should return score 0")
 
@@ -1009,7 +1012,7 @@ func TestMainEntryPoints(t *testing.T) {
 			},
 		}
 
-		score2, status2 := plugin.Score(nil, nil, podInvalidAnnotation, "any-node")
+		score2, status2 := plugin.Score(context.TODO(), nil, podInvalidAnnotation, "any-node")
 		assert.True(t, status2.IsSuccess(), "Invalid annotation should be handled gracefully")
 		assert.Equal(t, int64(0), score2, "Invalid annotation should return score 0")
 
@@ -1038,7 +1041,7 @@ func TestMainEntryPoints(t *testing.T) {
 			}
 		}()
 
-		score, status := pluginNilHandle.Score(nil, nil, podWithAnnotation, "test-node")
+		score, status := pluginNilHandle.Score(context.TODO(), nil, podWithAnnotation, "test-node")
 
 		// If we get here without panic, check for error status
 		if !status.IsSuccess() {
@@ -1064,7 +1067,7 @@ func TestMainEntryPoints(t *testing.T) {
 		}
 
 		// Call NormalizeScore function
-		status := plugin.NormalizeScore(nil, nil, pod, scores)
+		status := plugin.NormalizeScore(context.TODO(), nil, pod, scores)
 
 		assert.Nil(t, status, "NormalizeScore should return nil on success")
 
@@ -1093,7 +1096,7 @@ func TestMainEntryPoints(t *testing.T) {
 		}
 
 		// Call NormalizeScore function
-		status := plugin.NormalizeScore(nil, nil, pod, scores)
+		status := plugin.NormalizeScore(context.TODO(), nil, pod, scores)
 
 		assert.Nil(t, status, "NormalizeScore should return nil on success")
 
@@ -1445,7 +1448,7 @@ func TestMaximumCoveragePush(t *testing.T) {
 			},
 		}
 
-		status := plugin.NormalizeScore(nil, nil, pod, negativeScores)
+		status := plugin.NormalizeScore(context.TODO(), nil, pod, negativeScores)
 		assert.Nil(t, status, "Should handle negative scores")
 		assert.Equal(t, int64(0), negativeScores[0].Score, "Most negative should normalize to 0")
 		assert.Equal(t, int64(100), negativeScores[2].Score, "Highest should normalize to 100")
@@ -1462,7 +1465,7 @@ func TestMaximumCoveragePush(t *testing.T) {
 			},
 		}
 
-		status2 := plugin.NormalizeScore(nil, nil, pod2, largeScores)
+		status2 := plugin.NormalizeScore(context.TODO(), nil, pod2, largeScores)
 		assert.Nil(t, status2, "Should handle large differences")
 		assert.Equal(t, int64(0), largeScores[0].Score, "Smallest should be 0")
 		assert.Equal(t, int64(100), largeScores[1].Score, "Largest should be 100")
@@ -1934,7 +1937,7 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 		contexts := []context.Context{
 			context.Background(),
 			context.TODO(),
-			context.WithValue(context.Background(), "test-key", "test-value"),
+			context.WithValue(context.Background(), testContextKey("test-key"), "test-value"),
 		}
 
 		for i, ctx := range contexts {
@@ -2340,15 +2343,6 @@ func (m *mockEventRecorder) Eventf(regarding runtime.Object, related runtime.Obj
 type mockStorageInfoLister struct{}
 
 func (m *mockStorageInfoLister) IsPVCUsedByPods(key string) bool { return false }
-
-// mockParallelizer implements a simple version of parallelize.Parallelizer interface.
-type mockParallelizer struct{}
-
-func (m *mockParallelizer) Until(ctx context.Context, pieces int, doWorkPiece func(piece int)) {
-	for i := 0; i < pieces; i++ {
-		doWorkPiece(i)
-	}
-}
 
 // =================================================================
 // Realistic Test Node Creation Functions
