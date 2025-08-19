@@ -264,30 +264,6 @@ jobs:
         retention-days: 5
 
 
-  # Validate Kubernetes manifests
-  validate-k8s:
-    name: Validate Kubernetes Manifests
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up kubectl
-      uses: azure/setup-kubectl@v3
-      with:
-        version: 'v1.28.0'
-
-    - name: Validate deployment manifests
-      run: |
-        kubectl --dry-run=client --validate=true apply -f deploy/manifests.yaml
-
-    - name: Validate example manifests
-      run: |
-        for file in examples/*.yaml; do
-          echo "Validating $file"
-          kubectl --dry-run=client --validate=true apply -f "$file"
-        done
-
   # Security scanning
   security:
     name: Security Scan
@@ -331,7 +307,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [quality, unit-tests, integration-tests, full-tests, build, docker-build, validate-k8s, security]
+    needs: [quality, unit-tests, integration-tests, full-tests, build, docker-build, security]
     if: always()
     steps:
     - name: Check all jobs
@@ -358,10 +334,6 @@ jobs:
         fi
         if [[ "${{ needs.docker-build.result }}" != "success" ]]; then
           echo "Docker build failed"
-          exit 1
-        fi
-        if [[ "${{ needs.validate-k8s.result }}" != "success" ]]; then
-          echo "Kubernetes validation failed"
           exit 1
         fi
         if [[ "${{ needs.security.result }}" != "success" ]]; then

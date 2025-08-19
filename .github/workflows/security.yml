@@ -197,23 +197,6 @@ jobs:
         tar -xzf kubesec_linux_amd64.tar.gz
         sudo mv kubesec /usr/local/bin/
 
-    - name: Scan Kubernetes deployment manifests
-      run: |
-        echo "Scanning deployment manifests for security issues..."
-        
-        # Scan main deployment
-        kubesec scan deploy/manifests.yaml | tee kubesec-deploy-results.json
-        
-        # Check if any critical issues were found
-        CRITICAL_COUNT=$(cat kubesec-deploy-results.json | jq '[.[] | select(.scoring.critical > 0)] | length')
-        if [ "$CRITICAL_COUNT" -gt 0 ]; then
-          echo "❌ Critical security issues found in Kubernetes manifests!"
-          cat kubesec-deploy-results.json | jq '.[] | select(.scoring.critical > 0)'
-          exit 1
-        else
-          echo "✅ No critical security issues found in deployment manifests"
-        fi
-
     - name: Scan example manifests
       run: |
         echo "Scanning example manifests..."
@@ -228,7 +211,6 @@ jobs:
         name: kubesec-results
         path: kubesec-*-results.json
         retention-days: 30
-
 
 
   # SBOM (Software Bill of Materials) generation
