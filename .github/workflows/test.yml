@@ -2,9 +2,8 @@ name: Tests
 
 on:
   push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main, develop ]
+    branches: [ main, master, develop ]
+  pull_request:  # Run on all PRs regardless of target branch
   # Allow manual triggering
   workflow_dispatch:
 

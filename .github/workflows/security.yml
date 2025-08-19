@@ -4,6 +4,8 @@ on:
   # Run security scans on pushes to main
   push:
     branches: [ main ]
+  # Run security scans on PRs (lighter scan)
+  pull_request:
   # Run weekly security scans
   schedule:
     - cron: '0 2 * * 1'  # Every Monday at 2 AM UTC
