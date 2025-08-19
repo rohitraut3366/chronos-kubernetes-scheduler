@@ -15,7 +15,7 @@ image:
   # -- Image repository
   repository: scheduler
   # -- Image tag (defaults to chart appVersion if not set)
-  tag: latest
+  tag: v4
   # -- Image pull policy
   pullPolicy: IfNotPresent
 
