@@ -159,21 +159,27 @@ jobs:
         
         # Wait for scheduler pod to be ready
         echo "⏳ Waiting for scheduler pod to be ready..."
-        kubectl wait --for=condition=Ready pod -l app=chronos-kubernetes-scheduler -n chronos-system --timeout=180s || {
+        
+        # First check all pods to see what labels exist
+        echo "Debug: All pods in chronos-system:"
+        kubectl get pods -n chronos-system --show-labels
+        
+        # Wait for any pod in the namespace to be ready (more reliable for single deployment)
+        kubectl wait --for=condition=Ready pod --all -n chronos-system --timeout=180s || {
           echo "❌ Scheduler pod failed to become ready!"
           echo "Pod status:"
           kubectl get pods -n chronos-system -o wide
           echo "Pod describe:"
-          kubectl describe pods -n chronos-system -l app=chronos-kubernetes-scheduler
+          kubectl describe pods -n chronos-system
           echo "Pod logs:"
-          kubectl logs -n chronos-system -l app=chronos-kubernetes-scheduler --tail=50 || true
+          kubectl logs -n chronos-system --all-containers=true --tail=50 || true
           exit 1
         }
         
         # Show scheduler status
         echo "✅ Scheduler pod is ready!"
         kubectl get pods -n chronos-system -o wide
-        kubectl logs -n chronos-system -l app=chronos-kubernetes-scheduler --tail=20
+        kubectl logs -n chronos-system --all-containers=true --tail=20
 
     - name: Run integration tests
       run: |
@@ -241,7 +247,7 @@ jobs:
         kubectl get pods -n integration-test -o wide
         
         echo "=== SCHEDULER LOGS ==="
-        kubectl logs -n chronos-system -l app=chronos-kubernetes-scheduler --tail=50
+        kubectl logs -n chronos-system --all-containers=true --tail=50
         
         echo "=== SCHEDULING EVENTS ==="
         kubectl get events -n integration-test --field-selector reason=Scheduled
@@ -267,7 +273,7 @@ jobs:
         fi
         
         # Check that scheduler is processing annotations
-        LOGS_WITH_SCORING=$(kubectl logs -n chronos-system -l app=chronos-kubernetes-scheduler | grep -c "Score.*optimized" || echo "0")
+        LOGS_WITH_SCORING=$(kubectl logs -n chronos-system --all-containers=true | grep -c "Score.*optimized" || echo "0")
         
         echo "Scheduler scoring operations found: $LOGS_WITH_SCORING"
         
