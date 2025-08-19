@@ -1,18 +1,19 @@
 # Chronos Kubernetes Scheduler
 
-[![Tests](https://github.com/your-org/chronos-kubernetes-scheduler/workflows/tests/badge.svg)](https://github.com/your-org/chronos-kubernetes-scheduler/actions)
-[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen.svg)](https://github.com/your-org/chronos-kubernetes-scheduler/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/your-org/chronos-kubernetes-scheduler)](https://goreportcard.com/report/github.com/your-org/chronos-kubernetes-scheduler)
+[![Tests](https://github.com/rohitraut3366/chronos-kubernetes-scheduler/workflows/Tests/badge.svg)](https://github.com/rohitraut3366/chronos-kubernetes-scheduler/actions)
+[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen.svg)](https://github.com/rohitraut3366/chronos-kubernetes-scheduler/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/rohitraut3366/chronos-kubernetes-scheduler)](https://goreportcard.com/report/github.com/rohitraut3366/chronos-kubernetes-scheduler)
 
-A **production-ready** Kubernetes custom scheduler plugin that schedules pods on the node predicted to become empty the soonest, optimizing cluster resource utilization for workloads with predictable durations.
+A **production-ready** Kubernetes custom scheduler plugin that intelligently bin-packs workloads based on job durations, maximizing cluster resource utilization and consolidation for workloads with predictable durations.
 
 ## 🎯 Overview
 
-The **Chronos** scheduler plugin uses job duration annotations to predict when nodes will become available, then schedules new workloads on the node that will be free soonest. This approach:
+The **Chronos** scheduler plugin uses job duration annotations to intelligently bin-pack workloads, prioritizing consolidation over spreading. This approach:
 
-- **Reduces Wait Times**: New pods get scheduled on nodes that clear up quickly
-- **Balances Load**: Uses pod count as a tie-breaker for optimal distribution  
-- **Optimizes Utilization**: Maximizes cluster efficiency for batch and timed workloads
+- **Bin-Packing First**: Fits new jobs into existing time windows when possible
+- **Maximizes Consolidation**: Prefers nodes with longer remaining work for better packing  
+- **Minimizes Extensions**: When jobs must extend beyond existing work, chooses the node requiring minimal extension
+- **Avoids Empty Nodes**: Heavily penalizes empty nodes to enable cluster cost optimization
 
 ## 🏗️ Architecture
 
