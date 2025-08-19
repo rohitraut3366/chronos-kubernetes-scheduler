@@ -94,6 +94,7 @@ jobs:
         replicaCount: 1
         
         image:
+          registry: ""
           repository: chronos-kubernetes-scheduler
           tag: "integration-test"
           pullPolicy: Never
@@ -112,15 +113,49 @@ jobs:
             memory: 256Mi
         
         logLevel: 4  # Debug logging
+        
+        # Add tolerations for any taints
+        tolerations:
+        - operator: Exists
+        
+        # Simplified security context for CI
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
         HELM_VALUES
         
-        # Install Helm chart
+        # Debug before installation
+        echo "=== DEBUGGING BEFORE HELM INSTALL ==="
+        echo "Kubernetes cluster info:"
+        kubectl cluster-info
+        echo "Nodes:"
+        kubectl get nodes -o wide
+        echo "Available images in K3s:"
+        sudo k3s ctr images list | grep -E "(chronos|scheduler)" || echo "No scheduler images found"
+        echo "Helm values file:"
+        cat values-ci.yaml
+        echo "Chart templates dry-run:"
+        helm template chronos-scheduler ./charts/chronos-kubernetes-scheduler --values values-ci.yaml --namespace chronos-system || {
+          echo "❌ Helm template validation failed!"
+          exit 1
+        }
+        
+        # Install Helm chart with detailed logging
+        echo "🚀 Installing Helm chart..."
         helm upgrade --install chronos-scheduler \
           ./charts/chronos-kubernetes-scheduler \
           --namespace chronos-system \
           --values values-ci.yaml \
           --wait \
-          --timeout 5m
+          --timeout 5m \
+          --debug || {
+          echo "❌ Helm installation failed!"
+          echo "Helm status:"
+          helm status chronos-scheduler -n chronos-system || true
+          echo "Pod events:"
+          kubectl get events -n chronos-system --sort-by='.lastTimestamp' || true
+          exit 1
+        }
         
         # Wait for scheduler pod to be ready
         echo "⏳ Waiting for scheduler pod to be ready..."
