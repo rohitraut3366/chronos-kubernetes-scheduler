@@ -1,8 +1,5 @@
 # Stage 1: Build the Go binary
-FROM golang:1.22-alpine AS builder
-
-# Install git (required by some Go modules)
-RUN apk add --no-cache git
+FROM golang:1.22 AS builder
 
 # Set the working directory
 WORKDIR /app
@@ -17,10 +14,14 @@ RUN go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 
+# Build arguments for cross-compilation
+ARG TARGETOS
+ARG TARGETARCH
+
 # Build the binary for a static, scratch-based image
 # CGO_ENABLED=0 is important for creating a static binary
 # -ldflags="-w -s" strips debugging information to reduce the binary size
-RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-w -s" -o /scheduler ./cmd/scheduler
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -ldflags="-w -s" -o /scheduler ./cmd/scheduler
 
 # Stage 2: Create the final, minimal image
 # Using a distroless static image for a minimal attack surface
