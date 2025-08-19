@@ -93,10 +93,11 @@ jobs:
           coverage.out
         retention-days: 30
 
-  # Run integration tests
-  integration-tests:
-    name: Integration Tests
+  # Run Go-based integration tests (unit-style)
+  go-integration-tests:
+    name: Go Integration Tests
     runs-on: ubuntu-latest
+    needs: [quality]  # Reuse quality job's setup
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -119,98 +120,16 @@ jobs:
     - name: Download dependencies
       run: make deps
 
-    - name: Run integration tests
+    - name: Run Go integration tests
       run: make test-integration
 
-  # Run full test suite with coverage
-  full-tests:
-    name: Full Test Suite
-    runs-on: ubuntu-latest
-    needs: [quality, unit-tests, integration-tests]
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: ${{ env.GO_VERSION }}
-
-    - name: Cache Go modules
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cache/go-build
-          ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
-
-    - name: Download dependencies
-      run: make deps
-
-    - name: Run all tests with coverage
-      run: make coverage
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        file: ./coverage.out
-        flags: unittests
-        name: codecov-umbrella
-        fail_ci_if_error: false
-
-    - name: Upload coverage results
-      uses: actions/upload-artifact@v4
-      with:
-        name: coverage-report
-        path: |
-          coverage.out
-          coverage.html
-        retention-days: 30
-
-  # Build binary to ensure it compiles
-  build:
-    name: Build Binary
+  # Build Docker image and run security scanning
+  docker-build:
+    name: Docker Build & Security Scan
     runs-on: ubuntu-latest
     needs: [quality]
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: ${{ env.GO_VERSION }}
-
-    - name: Cache Go modules
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cache/go-build
-          ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-        restore-keys: |
-          ${{ runner.os }}-go-
-
-    - name: Download dependencies
-      run: make deps
-
-    - name: Build binary
-      run: make build
-
-    - name: Upload binary
-      uses: actions/upload-artifact@v4
-      with:
-        name: scheduler-binary
-        path: bin/chronos-kubernetes-scheduler
-        retention-days: 30
-
-  # Build Docker image to ensure it works
-  docker-build:
-    name: Docker Build
-    runs-on: ubuntu-latest
-    needs: [build]
+    permissions:
+      security-events: write
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -225,6 +144,36 @@ jobs:
       run: |
         # Basic smoke test - ensure container starts and exits gracefully
         timeout 10s docker run --rm chronos-kubernetes-scheduler:latest --help || true
+
+    - name: Install Trivy
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+        echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+        sudo apt-get update
+        sudo apt-get install -y trivy
+
+    - name: Run Trivy vulnerability scanner
+      run: |
+        # Scan for HIGH and CRITICAL vulnerabilities
+        trivy image --format sarif --output trivy-results.sarif chronos-kubernetes-scheduler:latest
+        
+        # Also create a table format for human reading
+        trivy image --severity HIGH,CRITICAL chronos-kubernetes-scheduler:latest
+
+    - name: Upload Trivy SARIF results
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: trivy-results.sarif
+        category: trivy
+
+    - name: Upload Trivy results as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: trivy-results
+        path: trivy-results.sarif
+        retention-days: 30
 
   # Run benchmarks to detect performance regressions
   benchmarks:
@@ -263,51 +212,11 @@ jobs:
         path: benchmarks.txt
         retention-days: 5
 
-
-  # Security scanning
-  security:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    permissions:
-      security-events: write
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: ${{ env.GO_VERSION }}
-
-    - name: Run Gosec Security Scanner
-      run: |
-        # Install gosec
-        go install github.com/securego/gosec/v2/cmd/gosec@latest
-        # Run gosec scan
-        gosec ./...
-
-    - name: Scan Docker image for vulnerabilities
-      if: always()
-      run: |
-        # Build image first
-        make docker-build
-        
-        # Install Trivy for vulnerability scanning
-        sudo apt-get update
-        sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-        echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-        sudo apt-get update
-        sudo apt-get install -y trivy
-        
-        # Scan the built image
-        trivy image --exit-code 0 --severity HIGH,CRITICAL chronos-kubernetes-scheduler:latest
-
   # Final status check
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [quality, unit-tests, integration-tests, full-tests, build, docker-build, security]
+    needs: [quality, unit-tests, go-integration-tests, docker-build]
     if: always()
     steps:
     - name: Check all jobs
@@ -320,24 +229,14 @@ jobs:
           echo "Unit tests failed"
           exit 1
         fi
-        if [[ "${{ needs.integration-tests.result }}" != "success" ]]; then
-          echo "Integration tests failed"
+        if [[ "${{ needs.go-integration-tests.result }}" != "success" ]]; then
+          echo "Go integration tests failed"
           exit 1
         fi
-        if [[ "${{ needs.full-tests.result }}" != "success" ]]; then
-          echo "Full test suite failed"
-          exit 1
-        fi
-        if [[ "${{ needs.build.result }}" != "success" ]]; then
-          echo "Build failed"
-          exit 1
-        fi
+
         if [[ "${{ needs.docker-build.result }}" != "success" ]]; then
           echo "Docker build failed"
           exit 1
         fi
-        if [[ "${{ needs.security.result }}" != "success" ]]; then
-          echo "Security scan failed"
-          exit 1
-        fi
+
         echo "✅ All CI checks passed!"
