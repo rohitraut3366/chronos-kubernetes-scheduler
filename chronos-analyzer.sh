@@ -197,15 +197,23 @@ if [ $WITH_ANNOTATION -gt 0 ]; then
     .metadata.annotations["scheduling.workload.io/expected-duration-seconds"]' | sort -n | awk '
     {
         duration = $1
-        if (duration <= 300) short++
-        else if (duration <= 1800) medium++
-        else long++
+        if (duration < 300) under5++
+        else if (duration < 600) between5_10++
+        else if (duration < 900) between10_15++
+        else if (duration < 1200) between15_20++
+        else if (duration < 1500) between20_25++
+        else if (duration <= 1800) between25_30++
+        else over30++
         total++
     }
     END {
-        printf "   🟢 Short jobs (≤5min): %d\n", short
-        printf "   🟡 Medium jobs (5min-30min): %d\n", medium  
-        printf "   🔴 Long jobs (>30min): %d\n", long
+        printf "   🟢 <5min: %d\n", under5
+        printf "   🟡 5-10min: %d\n", between5_10
+        printf "   🟠 10-15min: %d\n", between10_15
+        printf "   🔶 15-20min: %d\n", between15_20
+        printf "   🔸 20-25min: %d\n", between20_25
+        printf "   🔴 25-30min: %d\n", between25_30
+        printf "   ⚫ >30min: %d\n", over30
     }'
 fi
 
@@ -217,9 +225,37 @@ echo ""
 echo "🏠 NODE DISTRIBUTION ANALYSIS"
 echo "============================="
 
-echo "📊 Pods per node:"
+echo "📊 All pods per node (entire namespace):"
 NODE_DISTRIBUTION=$(kubectl get pods -n $POD_NAMESPACE -o wide --no-headers 2>/dev/null | awk '{print $7}' | sort | uniq -c | sort -nr)
 echo "$NODE_DISTRIBUTION"
+
+# Show Chronos-specific distribution if there are Chronos pods
+if [ $CHRONOS_PODS -gt 0 ]; then
+    echo ""
+    echo "🎯 Chronos-scheduled pods per node:"
+    CHRONOS_DISTRIBUTION=$(kubectl get pods -n $POD_NAMESPACE -o wide --no-headers 2>/dev/null | grep -E "\s+$SCHEDULER_NAME\s+|chronos-kubernetes-scheduler" | awk '{print $7}' | sort | uniq -c | sort -nr)
+    if [ ! -z "$CHRONOS_DISTRIBUTION" ]; then
+        echo "$CHRONOS_DISTRIBUTION"
+        
+        # Calculate Chronos-specific metrics
+        CHRONOS_NODES_WITH_PODS=$(echo "$CHRONOS_DISTRIBUTION" | wc -l)
+        MAX_CHRONOS_ON_NODE=$(echo "$CHRONOS_DISTRIBUTION" | head -1 | awk '{print $1}')
+        MIN_CHRONOS_ON_NODE=$(echo "$CHRONOS_DISTRIBUTION" | tail -1 | awk '{print $1}')
+        CHRONOS_DISTRIBUTION_RATIO=$((MAX_CHRONOS_ON_NODE - MIN_CHRONOS_ON_NODE))
+        
+        echo ""
+        echo "📈 Chronos Distribution Quality:"
+        if [ $CHRONOS_DISTRIBUTION_RATIO -le 2 ]; then
+            echo "✅ EXCELLENT: Even Chronos pod distribution (max: $MAX_CHRONOS_ON_NODE, min: $MIN_CHRONOS_ON_NODE)"
+        elif [ $CHRONOS_DISTRIBUTION_RATIO -le 5 ]; then
+            echo "⚠️  GOOD: Moderate Chronos distribution (max: $MAX_CHRONOS_ON_NODE, min: $MIN_CHRONOS_ON_NODE)"
+        else
+            echo "❌ POOR: Uneven Chronos distribution (max: $MAX_CHRONOS_ON_NODE, min: $MIN_CHRONOS_ON_NODE)"
+        fi
+    else
+        echo "   No Chronos-scheduled pods found"
+    fi
+fi
 
 TOTAL_NODES=$(kubectl get nodes --no-headers 2>/dev/null | wc -l)
 NODES_WITH_PODS=$(echo "$NODE_DISTRIBUTION" | wc -l)
@@ -227,54 +263,145 @@ EMPTY_NODES=$((TOTAL_NODES - NODES_WITH_PODS))
 PODS_PER_NODE=$(calc_percentage $TOTAL_PODS $TOTAL_NODES)
 
 echo ""
-echo "📈 Distribution Metrics:"
+echo "📈 Overall Distribution Metrics (all pods):"
 echo "   Total cluster nodes: $TOTAL_NODES"
 echo "   Nodes with pods: $NODES_WITH_PODS"
 echo "   Empty nodes: $EMPTY_NODES"
 echo "   Average pods per node: $PODS_PER_NODE"
 
-# Check distribution quality
+# Check overall distribution quality
 MAX_PODS_ON_NODE=$(echo "$NODE_DISTRIBUTION" | head -1 | awk '{print $1}')
 MIN_PODS_ON_NODE=$(echo "$NODE_DISTRIBUTION" | tail -1 | awk '{print $1}')
 DISTRIBUTION_RATIO=$((MAX_PODS_ON_NODE - MIN_PODS_ON_NODE))
 
+echo "📊 Overall Distribution Quality:"
 if [ $DISTRIBUTION_RATIO -le 2 ]; then
-    echo "✅ GOOD: Even pod distribution across nodes"
+    echo "✅ EXCELLENT: Even overall pod distribution (max: $MAX_PODS_ON_NODE, min: $MIN_PODS_ON_NODE)"
 elif [ $DISTRIBUTION_RATIO -le 5 ]; then
-    echo "⚠️  FAIR: Moderate pod distribution"
+    echo "⚠️  GOOD: Moderate overall pod distribution (max: $MAX_PODS_ON_NODE, min: $MIN_PODS_ON_NODE)"
 else
-    echo "❌ POOR: Uneven pod distribution (max: $MAX_PODS_ON_NODE, min: $MIN_PODS_ON_NODE)"
+    echo "❌ POOR: Uneven overall pod distribution (max: $MAX_PODS_ON_NODE, min: $MIN_PODS_ON_NODE)"
 fi
 
 echo ""
 
 # ================================================================
-# 6. SCHEDULING EVENTS ANALYSIS
+# 6. CHRONOS SCHEDULING PERFORMANCE ANALYSIS
 # ================================================================
-echo "📅 SCHEDULING EVENTS ANALYSIS"
-echo "============================="
+if [ $CHRONOS_PODS -gt 0 ]; then
+    echo "⚡ CHRONOS SCHEDULING PERFORMANCE"
+    echo "================================"
 
-# Recent successful scheduling
-RECENT_SCHEDULED=$(kubectl get events -n $POD_NAMESPACE --field-selector reason=Scheduled --no-headers 2>/dev/null | wc -l)
-echo "✅ Recent successful scheduling events: $RECENT_SCHEDULED"
+    # Analyze Chronos vs Default scheduler performance
+    EVENTS_OUTPUT=$(kubectl get events -n $POD_NAMESPACE --field-selector reason=Scheduled --no-headers 2>/dev/null || echo "")
+    CHRONOS_SCHEDULED=$(echo "$EVENTS_OUTPUT" | grep -c "chronos-kubernetes-scheduler" 2>/dev/null || echo "0")
+    DEFAULT_SCHEDULED=$(echo "$EVENTS_OUTPUT" | grep -c "default-scheduler" 2>/dev/null || echo "0")
+    # Clean up any whitespace and ensure we have valid numbers
+    CHRONOS_SCHEDULED=$(echo "$CHRONOS_SCHEDULED" | tr -d ' \n\r\t')
+    DEFAULT_SCHEDULED=$(echo "$DEFAULT_SCHEDULED" | tr -d ' \n\r\t')
+    CHRONOS_SCHEDULED=${CHRONOS_SCHEDULED:-0}
+    DEFAULT_SCHEDULED=${DEFAULT_SCHEDULED:-0}
+    TOTAL_SCHEDULED=$((CHRONOS_SCHEDULED + DEFAULT_SCHEDULED))
 
-if [ $RECENT_SCHEDULED -gt 0 ]; then
-    echo "   Last 5 successful schedules:"
-    kubectl get events -n $POD_NAMESPACE --field-selector reason=Scheduled --sort-by='.firstTimestamp' 2>/dev/null | tail -5 | awk '{print "   " $1 " " $4 " " $5 " " $6}'
+    if [ $TOTAL_SCHEDULED -gt 0 ]; then
+        CHRONOS_SCHED_PCT=$(calc_percentage $CHRONOS_SCHEDULED $TOTAL_SCHEDULED)
+        echo "📊 Recent scheduling activity:"
+        echo "   🎯 Chronos scheduler: $CHRONOS_SCHEDULED events ($CHRONOS_SCHED_PCT%)"
+        echo "   🔷 Default scheduler: $DEFAULT_SCHEDULED events"
+        
+        if [ $(echo "$CHRONOS_SCHED_PCT >= 80" | bc -l) -eq 1 ]; then
+            echo "✅ EXCELLENT: Chronos handling most scheduling"
+        elif [ $(echo "$CHRONOS_SCHED_PCT >= 50" | bc -l) -eq 1 ]; then
+            echo "⚠️  MODERATE: Mixed scheduler usage"
+        else
+            echo "❌ LOW: Most pods using default scheduler"
+        fi
+    else
+        echo "ℹ️  No recent scheduling events found"
+    fi
+
+    echo ""
+
+    # Show recent Chronos-scheduled pods (removing misleading "speed" metric)
+    RECENT_CHRONOS_PODS=$(kubectl get pods -n $POD_NAMESPACE --sort-by='.metadata.creationTimestamp' --no-headers 2>/dev/null | tail -10 | while read line; do
+        POD_NAME=$(echo "$line" | awk '{print $1}')
+        POD_STATUS=$(echo "$line" | awk '{print $3}')
+        
+        if [ "$POD_STATUS" = "Running" ] || [ "$POD_STATUS" = "Completed" ]; then
+            # Get scheduler used for this pod
+            SCHEDULER_USED=$(kubectl get pod $POD_NAME -n $POD_NAMESPACE -o jsonpath='{.spec.schedulerName}' 2>/dev/null || echo "default")
+            
+            if [ "$SCHEDULER_USED" = "$SCHEDULER_NAME" ]; then
+                echo "$line"
+            fi
+        fi
+    done)
+    
+    if [ ! -z "$RECENT_CHRONOS_PODS" ]; then
+        CHRONOS_RUNNING_COUNT=$(echo "$RECENT_CHRONOS_PODS" | wc -l)
+        echo "✅ Recent Chronos pods successfully running: $CHRONOS_RUNNING_COUNT/10"
+        echo "   (Note: Actual scheduling latency analysis requires event correlation)"
+    else
+        echo "ℹ️  No recently created Chronos pods found"
+    fi
+else
+    echo "⚠️  SCHEDULING ANALYSIS SKIPPED"
+    echo "==============================="
+    echo "   No Chronos-scheduled pods found for performance analysis"
 fi
 
 echo ""
 
-# Failed scheduling events
-FAILED_EVENTS=$(kubectl get events -n $POD_NAMESPACE --field-selector reason=FailedScheduling --no-headers 2>/dev/null | wc -l)
+# Analyze current scheduling issues vs historical events
+RECENT_FAILED_EVENTS=$(kubectl get events -n $POD_NAMESPACE --field-selector reason=FailedScheduling --no-headers 2>/dev/null | awk 'NR<=50' | wc -l)
+TOTAL_FAILED_EVENTS=$(kubectl get events -n $POD_NAMESPACE --field-selector reason=FailedScheduling --no-headers 2>/dev/null | wc -l)
 
-if [ $FAILED_EVENTS -gt 0 ]; then
-    echo "❌ Failed scheduling events: $FAILED_EVENTS"
-    echo "   Recent failures:"
-    kubectl get events -n $POD_NAMESPACE --field-selector reason=FailedScheduling --sort-by='.firstTimestamp' 2>/dev/null | tail -3 | awk '{print "   " $1 " " $6 " " $7 " " $8}'
+# Focus on currently stuck pods (pending for >5 minutes)
+STUCK_PODS=$(kubectl get pods -n $POD_NAMESPACE --field-selector=status.phase=Pending --no-headers 2>/dev/null | awk '
+BEGIN { stuck_count = 0 }
+{
+    # Extract age column (usually column 5, but can vary)
+    age = $(NF)
+    
+    # Convert age to minutes for comparison
+    if (age ~ /[0-9]+m/) {
+        minutes = int(age)
+        if (minutes >= 5) stuck_count++
+    } else if (age ~ /[0-9]+h/) {
+        stuck_count++  # Any hours is definitely stuck
+    } else if (age ~ /[0-9]+d/) {
+        stuck_count++  # Any days is definitely stuck
+    }
+}
+END { print stuck_count }')
+
+echo "📊 Scheduling Issues Analysis:"
+echo "   🕒 Currently stuck pods (>5min pending): $STUCK_PODS"
+echo "   ⚠️  Recent failed events (last 50): $RECENT_FAILED_EVENTS"
+echo "   📜 Total historical failed events: $TOTAL_FAILED_EVENTS"
+
+if [ $STUCK_PODS -gt 0 ]; then
+    echo ""
+    echo "❌ CRITICAL: $STUCK_PODS pods are stuck in pending state!"
+    echo "   Pods pending >5 minutes:"
+    kubectl get pods -n $POD_NAMESPACE --field-selector=status.phase=Pending --no-headers 2>/dev/null | awk '
+    {
+        age = $(NF)
+        if (age ~ /[0-9]+m/ && int(age) >= 5) print "   " $1 " (age: " age ")"
+        else if (age ~ /[0-9]+[hd]/) print "   " $1 " (age: " age ")"
+    }'
+    
+    echo ""
+    echo "   Recent scheduling failure reasons:"
+    kubectl get events -n $POD_NAMESPACE --field-selector reason=FailedScheduling --sort-by='.firstTimestamp' 2>/dev/null | tail -3 | awk '{print "   " $1 ": " $NF}'
+elif [ $RECENT_FAILED_EVENTS -gt 0 ]; then
+    echo "⚠️  Some recent scheduling retries occurred, but no pods currently stuck"
 else
-    echo "✅ No failed scheduling events"
+    echo "✅ No current scheduling issues"
 fi
+
+# Set FAILED_EVENTS to stuck pods count for assessment (not historical events)
+FAILED_EVENTS=$STUCK_PODS
 
 echo ""
 
@@ -296,32 +423,49 @@ if [ $CHRONOS_PODS -gt 0 ] && [ $WITH_ANNOTATION -gt 0 ]; then
         node = $1
         duration = $2
         
-        if (duration <= 300) {
-            short[node]++
+        if (duration < 600) {
+            short[node]++  # <10min (combines <5min and 5-10min)
             total_short++
-        } else if (duration <= 1800) {
-            medium[node]++
+        } else if (duration < 1200) {
+            medium[node]++  # 10-20min (combines 10-15min and 15-20min)
             total_medium++
-        } else {
-            long[node]++
+        } else if (duration <= 1800) {
+            long[node]++   # 20-30min (combines 20-25min and 25-30min)
             total_long++
+        } else {
+            vlong[node]++  # >30min
+            total_vlong++
         }
         nodes[node] = 1
     }
     END {
+        # Calculate dynamic node column width based on actual node names
+        max_node_length = length("NODE")  # Start with header width
+        for (node in nodes) {
+            if (length(node) > max_node_length) {
+                max_node_length = length(node)
+            }
+        }
+        # Add 2 characters padding for better readability
+        node_width = max_node_length + 2
+        
         print "📊 Job distribution by node (bin-packing analysis):"
-        printf "%-25s %8s %10s %8s %8s\n", "NODE", "SHORT", "MEDIUM", "LONG", "TOTAL"
-        print "────────────────────────────────────────────────────────────"
+        printf "%-*s %7s %7s %7s %7s %7s\n", node_width, "NODE", "<10min", "10-20m", "20-30m", ">30min", "TOTAL"
+        
+        # Create separator line with dynamic width
+        separator = ""
+        for (i = 1; i <= node_width; i++) separator = separator "─"
+        printf "%-*s %7s %7s %7s %7s %7s\n", node_width, separator, "───────", "───────", "───────", "───────", "───────"
         
         consolidation_score = 0
         node_count = 0
         
         for (node in nodes) {
-            node_total = short[node] + medium[node] + long[node]
-            printf "%-25s %8d %10d %8d %8d\n", node, short[node], medium[node], long[node], node_total
+            node_total = short[node] + medium[node] + long[node] + vlong[node]
+            printf "%-*s %7d %7d %7d %7d %7d\n", node_width, node, short[node], medium[node], long[node], vlong[node], node_total
             
             # Calculate consolidation score (higher is better)
-            job_types = (short[node] > 0) + (medium[node] > 0) + (long[node] > 0)
+            job_types = (short[node] > 0) + (medium[node] > 0) + (long[node] > 0) + (vlong[node] > 0)
             if (job_types > 1) consolidation_score++
             node_count++
         }
@@ -351,7 +495,7 @@ echo "======================"
 # Scheduler scoring activity
 if [ ! -z "$SCHEDULER_NAME_POD" ]; then
     SCORING_ACTIVITY=$(kubectl logs -n $SCHEDULER_NAMESPACE $SCHEDULER_NAME_POD --since=1h 2>/dev/null | grep -c "Score.*optimized")
-    echo "�� Chronos scoring operations (last hour): $SCORING_ACTIVITY"
+    echo "⚡ Chronos scoring operations (last hour): $SCORING_ACTIVITY"
     
     if [ $SCORING_ACTIVITY -gt 0 ]; then
         echo "✅ Scheduler actively processing workloads"
@@ -372,7 +516,7 @@ fi
 echo ""
 
 # ================================================================
-# 9. OVERALL ASSESSMENT & RECOMMENDATIONS
+# 8. OVERALL ASSESSMENT & RECOMMENDATIONS
 # ================================================================
 echo "🎯 OVERALL ASSESSMENT & RECOMMENDATIONS"
 echo "======================================"
@@ -392,10 +536,10 @@ else
 fi
 
 # 2. Pod success rate
-if [ $SUCCESS_RATE -ge 95 ]; then
+if [ $(echo "$SUCCESS_RATE >= 95" | bc -l) -eq 1 ]; then
     echo "   ✅ Scheduling Success: EXCELLENT ($SUCCESS_RATE%)"
     SCORE=$((SCORE + 2))
-elif [ $SUCCESS_RATE -ge 80 ]; then
+elif [ $(echo "$SUCCESS_RATE >= 80" | bc -l) -eq 1 ]; then
     echo "   ⚠️  Scheduling Success: GOOD ($SUCCESS_RATE%)"
     SCORE=$((SCORE + 1))
 else
@@ -403,10 +547,10 @@ else
 fi
 
 # 3. Chronos adoption
-if [ $CHRONOS_PCT -ge 90 ]; then
+if [ $(echo "$CHRONOS_PCT >= 90" | bc -l) -eq 1 ]; then
     echo "   ✅ Chronos Adoption: EXCELLENT ($CHRONOS_PCT%)"
     SCORE=$((SCORE + 2))
-elif [ $CHRONOS_PCT -ge 50 ]; then
+elif [ $(echo "$CHRONOS_PCT >= 50" | bc -l) -eq 1 ]; then
     echo "   ⚠️  Chronos Adoption: PARTIAL ($CHRONOS_PCT%)"
     SCORE=$((SCORE + 1))
 else
@@ -414,25 +558,25 @@ else
 fi
 
 # 4. Annotation usage
-if [ $ANNOTATION_PCT -ge 90 ]; then
+if [ $(echo "$ANNOTATION_PCT >= 90" | bc -l) -eq 1 ]; then
     echo "   ✅ Annotation Usage: EXCELLENT ($ANNOTATION_PCT%)"
     SCORE=$((SCORE + 2))
-elif [ $ANNOTATION_PCT -ge 50 ]; then
+elif [ $(echo "$ANNOTATION_PCT >= 50" | bc -l) -eq 1 ]; then
     echo "   ⚠️  Annotation Usage: PARTIAL ($ANNOTATION_PCT%)"
     SCORE=$((SCORE + 1))
 else
     echo "   ❌ Annotation Usage: POOR ($ANNOTATION_PCT%)"
 fi
 
-# 5. No failures
+# 5. Currently stuck pods (not historical events)
 if [ $FAILED_EVENTS -eq 0 ]; then
-    echo "   ✅ Scheduling Failures: NONE"
+    echo "   ✅ Stuck Pods: NONE (no pods pending >5min)"
     SCORE=$((SCORE + 2))
 elif [ $FAILED_EVENTS -le 2 ]; then
-    echo "   ⚠️  Scheduling Failures: FEW ($FAILED_EVENTS)"
+    echo "   ⚠️  Stuck Pods: FEW ($FAILED_EVENTS pods pending >5min)"
     SCORE=$((SCORE + 1))
 else
-    echo "   ❌ Scheduling Failures: MANY ($FAILED_EVENTS)"
+    echo "   ❌ Stuck Pods: MANY ($FAILED_EVENTS pods pending >5min)"
 fi
 
 SCORE_PCT=$(calc_percentage $SCORE $MAX_SCORE)
@@ -440,11 +584,11 @@ SCORE_PCT=$(calc_percentage $SCORE $MAX_SCORE)
 echo ""
 echo "🏆 OVERALL SCORE: $SCORE/$MAX_SCORE ($SCORE_PCT%)"
 
-if [ $SCORE_PCT -ge 80 ]; then
+if [ $(echo "$SCORE_PCT >= 80" | bc -l) -eq 1 ]; then
     echo "🎉 STATUS: EXCELLENT - Chronos scheduler is working optimally!"
-elif [ $SCORE_PCT -ge 60 ]; then
+elif [ $(echo "$SCORE_PCT >= 60" | bc -l) -eq 1 ]; then
     echo "👍 STATUS: GOOD - Chronos scheduler is working well with minor issues"
-elif [ $SCORE_PCT -ge 40 ]; then
+elif [ $(echo "$SCORE_PCT >= 40" | bc -l) -eq 1 ]; then
     echo "⚠️  STATUS: FAIR - Chronos scheduler needs attention"
 else
     echo "❌ STATUS: POOR - Chronos scheduler requires immediate fixes"
@@ -463,7 +607,7 @@ if [ $WITHOUT_ANNOTATION -gt 0 ]; then
 fi
 
 if [ $PENDING -gt 0 ]; then
-    echo "   �� Investigate $PENDING pending pods - check resource constraints"
+    echo "   🔍 Investigate $PENDING pending pods - check resource constraints"
 fi
 
 if [ $FAILED -gt 0 ]; then
@@ -471,7 +615,12 @@ if [ $FAILED -gt 0 ]; then
 fi
 
 if [ $FAILED_EVENTS -gt 0 ]; then
-    echo "   🔧 Review failed scheduling events for resource or constraint issues"
+    echo "   🚨 URGENT: $FAILED_EVENTS pods stuck pending >5min - check resource constraints, node availability, and taints"
+fi
+
+# Additional recommendation for high historical failure count
+if [ $TOTAL_FAILED_EVENTS -gt 1000 ] && [ $FAILED_EVENTS -eq 0 ]; then
+    echo "   ℹ️  High historical failed events ($TOTAL_FAILED_EVENTS) but no currently stuck pods - likely due to cluster scaling/retries"
 fi
 
 if [ $EMPTY_NODES -eq 0 ] && [ $TOTAL_PODS -gt $TOTAL_NODES ]; then
