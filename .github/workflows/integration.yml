@@ -177,14 +177,14 @@ jobs:
           echo "Pod describe:"
           kubectl describe pods -n chronos-system
           echo "Pod logs:"
-          kubectl logs -n chronos-system --all-containers=true --tail=50 || true
+          kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=50 || true
           exit 1
         }
         
         # Show scheduler status
         echo "✅ Scheduler pod is ready!"
         kubectl get pods -n chronos-system -o wide
-        kubectl logs -n chronos-system --all-containers=true --tail=20
+        kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=20
 
     - name: Run integration tests
       run: |
@@ -252,7 +252,7 @@ jobs:
         kubectl get pods -n integration-test -o wide
         
         echo "=== SCHEDULER LOGS ==="
-        kubectl logs -n chronos-system --all-containers=true --tail=50
+        kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=50
         
         echo "=== SCHEDULING EVENTS ==="
         kubectl get events -n integration-test --field-selector reason=Scheduled
@@ -278,7 +278,7 @@ jobs:
         fi
         
         # Check that scheduler is processing annotations
-        LOGS_WITH_SCORING=$(kubectl logs -n chronos-system --all-containers=true | grep -c "Score.*optimized" || echo "0")
+        LOGS_WITH_SCORING=$(kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler | grep -c "Score.*optimized" || echo "0")
         
         echo "Scheduler scoring operations found: $LOGS_WITH_SCORING"
         
