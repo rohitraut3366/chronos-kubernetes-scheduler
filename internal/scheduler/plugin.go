@@ -73,7 +73,7 @@ func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.
 		klog.Warningf("Could not parse duration '%s' for pod %s/%s: %v", newPodDurationStr, p.Namespace, p.Name, err)
 		return 0, framework.NewStatus(framework.Success)
 	}
-	newPodDuration := int64(newPodDurationFloat) // Convert float to int64 (truncates decimal portion, e.g., 600.75 becomes 600)
+	newPodDuration := int64(math.Round(newPodDurationFloat)) // Use math.Round for predictable conversion (e.g., 600.75 becomes 601)
 
 	// 2. Get node information.
 	nodeInfo, err := s.handle.SnapshotSharedLister().NodeInfos().Get(nodeName)
@@ -129,7 +129,7 @@ func (s *Chronos) calculateMaxRemainingTimeOptimized(pods []*framework.PodInfo) 
 		if err != nil {
 			continue
 		}
-		duration := int64(durationFloat) // Convert float to int64 (truncates decimal)
+		duration := int64(math.Round(durationFloat)) // Use math.Round for predictable conversion
 		if duration <= 0 {
 			continue
 		}
