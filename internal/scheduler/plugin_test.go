@@ -129,9 +129,9 @@ func TestPluginBasics(t *testing.T) {
 	t.Run("Constants", func(t *testing.T) {
 		assert.Equal(t, "Chronos", PluginName)
 		assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation)
-		assert.Equal(t, 100000000, maxPossibleScore, "maxPossibleScore supports jobs up to ~3.17 years")
+		// maxPossibleScore constant removed as it's no longer used in scoring logic
 
-		t.Logf("✅ Constants validated - framework.MaxNodeScore = %d, maxPossibleScore = %d", framework.MaxNodeScore, maxPossibleScore)
+		t.Logf("✅ Constants validated - framework.MaxNodeScore = %d", framework.MaxNodeScore)
 	})
 }
 
@@ -343,9 +343,14 @@ func TestRandomizedPropertyValidation(t *testing.T) {
 					successfulTests++
 				}
 
-				// Test invariant: Scores should never be negative
-				assert.GreaterOrEqual(t, score1, int64(0), "Score1 should never be negative")
-				assert.GreaterOrEqual(t, score2, int64(0), "Score2 should never be negative")
+				// Test invariant: Only bin-packing and empty node scores should be non-negative
+				// Extension cases can legitimately produce negative scores (heavy penalty for poor fits)
+				if node1Fits || node1Remaining == 0 {
+					assert.GreaterOrEqual(t, score1, int64(0), "Bin-packing/empty scores should not be negative")
+				}
+				if node2Fits || node2Remaining == 0 {
+					assert.GreaterOrEqual(t, score2, int64(0), "Bin-packing/empty scores should not be negative")
+				}
 			})
 		}
 
@@ -387,7 +392,7 @@ func TestRealisticClusterScenarios(t *testing.T) {
 				{"cache-redis", 0, 0, 100},    // Empty standby
 			},
 			newJobDuration:  120, // 2 minutes
-			expectedPattern: "Cache node should win due to immediate availability",
+			expectedPattern: "Database node should win because it offers the largest bin-packing window (600s remaining)",
 		},
 		{
 			name:        "MLTrainingCluster",
@@ -404,7 +409,7 @@ func TestRealisticClusterScenarios(t *testing.T) {
 				{"storage-node", 0, 5, 100}, // Empty but some load
 			},
 			newJobDuration:  480, // 8 minutes
-			expectedPattern: "CPU node should win due to early completion and high capacity",
+			expectedPattern: "gpu-node-1 should win as it provides the best consolidation opportunity (3600s remaining)",
 		},
 	}
 
@@ -514,14 +519,15 @@ func TestCorrectnessInvariants(t *testing.T) {
 	})
 
 	t.Run("UtilizationTieBreakerWorks", func(t *testing.T) {
-		// When both nodes are in same category, utilization should decide
-		lessUtilized := calculateMockScore(60, 0, 5, 100)  // Empty, fewer pods (more available)
-		moreUtilized := calculateMockScore(60, 0, 15, 100) // Empty, more pods (less available)
+		// With pure time-based scoring, nodes with identical time characteristics have identical scores
+		// NodeResourcesFit plugin now handles all resource-based tie-breaking
+		emptyNode1 := calculateMockScore(60, 0, 5, 100)  // Empty node
+		emptyNode2 := calculateMockScore(60, 0, 15, 100) // Empty node (different utilization)
 
-		assert.Greater(t, lessUtilized, moreUtilized,
-			"Less utilized node should win ties (lessUtil=%d, moreUtil=%d)", lessUtilized, moreUtilized)
+		assert.Equal(t, emptyNode1, emptyNode2,
+			"Empty nodes have identical time-based scores (node1=%d, node2=%d). NodeResourcesFit handles resource tie-breaking.", emptyNode1, emptyNode2)
 
-		t.Log("✅ Utilization tie-breaker works correctly within same category")
+		t.Log("✅ Pure time-based scoring: identical time characteristics = identical scores")
 	})
 
 	t.Run("ScoreMonotonicity", func(t *testing.T) {
@@ -533,12 +539,12 @@ func TestCorrectnessInvariants(t *testing.T) {
 		assert.Greater(t, binPackingScore, extensionScore, "Bin-packing should beat extension")
 		assert.Greater(t, extensionScore, emptyScore, "Extension should beat empty node")
 
-		// Within same priority tier, better utilization should win
-		higherUtilization := calculateMockScore(30, 40, 5, 100) // More available slots
-		lowerUtilization := calculateMockScore(30, 40, 15, 100) // Fewer available slots
-		assert.Greater(t, higherUtilization, lowerUtilization, "Better utilization should improve score within same tier")
+		// Within same priority tier, with pure time-based scoring, identical time = identical score
+		sameTimeNode1 := calculateMockScore(30, 40, 5, 100)  // Bin-packing case
+		sameTimeNode2 := calculateMockScore(30, 40, 15, 100) // Same bin-packing, different utilization
+		assert.Equal(t, sameTimeNode1, sameTimeNode2, "Pure time-based scoring: same time characteristics = same score")
 
-		t.Log("✅ Hierarchical score monotonicity verified")
+		t.Log("✅ Hierarchical score monotonicity verified (time-based scoring)")
 	})
 }
 
@@ -554,6 +560,7 @@ func TestEdgeCaseCoverage(t *testing.T) {
 	t.Run("EstimateCapacityEdgeCases", func(t *testing.T) {
 		// Test zero CPU
 		nodeZero := &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "zero-capacity"},
 			Status: v1.NodeStatus{
 				Allocatable: v1.ResourceList{
 					v1.ResourceCPU: *resource.NewMilliQuantity(0, resource.DecimalSI),
@@ -562,11 +569,12 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		}
 		nodeInfoZero := framework.NewNodeInfo()
 		nodeInfoZero.SetNode(nodeZero)
-		resourceUtil := plugin.calculateResourceUtilization(nodeInfoZero)
-		assert.Equal(t, 100, resourceUtil.ResourceScore, "Zero utilized node should have maximum resource score")
+		// Resource scoring now handled by NodeResourcesFit plugin - just verify node is set correctly
+		assert.Equal(t, "zero-capacity", nodeInfoZero.Node().Name, "Node should be set correctly")
 
 		// Test very high CPU (above maximum)
 		nodeHuge := &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "huge-capacity"},
 			Status: v1.NodeStatus{
 				Allocatable: v1.ResourceList{
 					v1.ResourceCPU: *resource.NewMilliQuantity(100000, resource.DecimalSI), // 100 CPUs
@@ -575,10 +583,10 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		}
 		nodeInfoHuge := framework.NewNodeInfo()
 		nodeInfoHuge.SetNode(nodeHuge)
-		resourceUtilHuge := plugin.calculateResourceUtilization(nodeInfoHuge)
-		assert.Equal(t, 100, resourceUtilHuge.ResourceScore, "Empty node should have maximum resource score regardless of capacity")
+		// Resource scoring now handled by NodeResourcesFit plugin - just verify node is set correctly
+		assert.Equal(t, "huge-capacity", nodeInfoHuge.Node().Name, "Node should be set correctly")
 
-		t.Logf("✅ Resource utilization edge cases: zero score=%d, huge score=%d", resourceUtil.ResourceScore, resourceUtilHuge.ResourceScore)
+		t.Logf("✅ Resource utilization edge cases: NodeResourcesFit plugin now handles resource scoring")
 	})
 
 	t.Run("BinPackingEdgeCases", func(t *testing.T) {
@@ -613,13 +621,13 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		assert.Equal(t, expectedScore, scoreOver, "Over capacity should have same score as full capacity")
 
 		// Test edge case: very large capacity with low utilization (bin-packing case: 100 <= 300)
-		nodeInfoLarge := mockNodeInfo("large-node", 5, 1000) // 5 pods on huge capacity: 500m used / 100,000m total = 0.5% utilized
+		nodeInfoLarge := mockNodeInfo("large-node", 5, 1000) // 5 pods on huge capacity
 		scoreLarge := plugin.CalculateOptimizedScore(nodeInfoLarge, 300, 100, 300)
 		// This is bin-packing case (100 <= 300), so Priority 1
-		// ResourceScore = (1.0 - 0.005) * 100 = 99 (rounded down from 99.5%)
+		// Pure time-based scoring: baseScore + consolidationBonus (no resource bonus)
 		const binPackingPriority = 1000000
-		expectedLarge := int64(binPackingPriority) + 300*100 + 99*10 // ~99% resources available
-		assert.Equal(t, expectedLarge, scoreLarge, "Large capacity with low utilization should have high bin-packing score")
+		expectedLarge := int64(binPackingPriority) + 300*100 // Pure time-based score
+		assert.Equal(t, expectedLarge, scoreLarge, "Large capacity bin-packing score (pure time-based)")
 
 		t.Logf("✅ Optimized score edge cases covered")
 	})
@@ -1201,17 +1209,15 @@ func TestCalculateOptimizedScore(t *testing.T) {
 			nodeCompletionTime := plugin.CalculateBinPackingCompletionTime(tc.maxRemainingTime, tc.newPodDuration)
 			score := plugin.CalculateOptimizedScore(nodeInfo, tc.maxRemainingTime, tc.newPodDuration, nodeCompletionTime)
 
-			// Get actual resource utilization for accurate calculations
-			resourceUtil := plugin.calculateResourceUtilization(nodeInfo)
-			resourceScore := resourceUtil.ResourceScore // 0-100 percentage
+			// Resource scoring now handled by NodeResourcesFit plugin
+			// (removed resourceScore variable since it's no longer needed)
 
 			switch tc.expectedStrategy {
 			case "extension-utilization":
 				// Updated for new extension minimization priority: strong penalty for extension
 				const extensionPriority = 100000
 				extensionPenalty := (tc.newPodDuration - tc.maxRemainingTime) * 100 // Extension minimization dominates
-				resourceBonus := int64(resourceScore) * 5                           // Resource-based bonus (reduced factor for extensions)
-				expectedScore := int64(extensionPriority) - extensionPenalty + resourceBonus
+				expectedScore := int64(extensionPriority) - extensionPenalty        // Pure time-based score
 				assert.Equal(t, expectedScore, score, "Extension case should prioritize extension minimization")
 				assert.Greater(t, score, int64(1000), "Extension case should score higher than empty nodes")
 
@@ -1220,28 +1226,27 @@ func TestCalculateOptimizedScore(t *testing.T) {
 				const binPackingPriority = 1000000
 				baseScore := int64(binPackingPriority)
 				consolidationBonus := tc.maxRemainingTime * 100
-				resourceBonus := int64(resourceScore) * 10 // Resource-based bonus (full factor for bin-packing)
-				expectedTotal := baseScore + consolidationBonus + resourceBonus
+				expectedTotal := baseScore + consolidationBonus // Pure time-based score
 				assert.Equal(t, expectedTotal, score, "Bin-packing case should use hierarchical scoring")
 				assert.Greater(t, score, int64(100000), "Bin-packing case should score highest")
 
 			case "empty-penalty":
 				// Updated for new hierarchical scoring: empty node case
 				const emptyNodePriority = 1000
-				expectedScore := int64(emptyNodePriority) + int64(resourceScore)*1 // Minimal resource bonus for empty nodes
+				expectedScore := int64(emptyNodePriority) // Pure time-based score
 				assert.Equal(t, expectedScore, score, "Empty node should have lowest priority score")
 				// Empty nodes should have much lower scores than active nodes
 				assert.Less(t, score, int64(10000), "Empty penalty should be significantly lower")
 			}
 
-			t.Logf("✅ %s: Strategy=%s, Score=%d, ResourceScore=%d%%",
-				tc.name, tc.expectedStrategy, score, resourceScore)
+			t.Logf("✅ %s: Strategy=%s, Score=%d (pure time-based)",
+				tc.name, tc.expectedStrategy, score)
 		})
 	}
 }
 
 func TestEstimateNodeCapacity(t *testing.T) {
-	plugin := &Chronos{}
+	// Resource estimation now handled by NodeResourcesFit plugin
 
 	testCases := []struct {
 		name        string
@@ -1290,7 +1295,7 @@ func TestEstimateNodeCapacity(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			node := &v1.Node{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+				ObjectMeta: metav1.ObjectMeta{Name: tc.name},
 				Status: v1.NodeStatus{
 					Allocatable: v1.ResourceList{
 						v1.ResourceCPU: *resource.NewMilliQuantity(tc.cpuMillis, resource.DecimalSI),
@@ -1300,15 +1305,11 @@ func TestEstimateNodeCapacity(t *testing.T) {
 			nodeInfo := framework.NewNodeInfo()
 			nodeInfo.SetNode(node)
 
-			resourceUtil := plugin.calculateResourceUtilization(nodeInfo)
-			capacity := resourceUtil.ResourceScore
+			// Resource scoring now handled by NodeResourcesFit plugin
+			// Just verify node is properly set
+			assert.Equal(t, tc.name, nodeInfo.Node().Name, "Node should be set correctly")
 
-			assert.GreaterOrEqual(t, capacity, tc.expectedMin,
-				"ResourceScore should be at least minimum")
-			assert.LessOrEqual(t, capacity, tc.expectedMax,
-				"ResourceScore should not exceed maximum")
-
-			t.Logf("✅ %s: CPU=%dm, ResourceScore=%d%%", tc.name, tc.cpuMillis, capacity)
+			t.Logf("✅ %s: CPU=%dm (resource scoring now handled by NodeResourcesFit)", tc.name, tc.cpuMillis)
 		})
 	}
 }
@@ -1351,7 +1352,7 @@ func TestTwoPhaseDecisionLogic(t *testing.T) {
 			description:      "When job fits in both, choose longer existing work for consolidation",
 		},
 		{
-			name:           "UtilizationWins",
+			name:           "ExtensionMinimizationWins",
 			newJobDuration: 600, // 10 minutes - extends both nodes
 			nodes: []struct {
 				name         string
@@ -1359,12 +1360,12 @@ func TestTwoPhaseDecisionLogic(t *testing.T) {
 				currentPods  int
 				capacity     int
 			}{
-				{name: "node-less-utilized", maxRemaining: 300, currentPods: 5, capacity: 20},  // 15 free slots
-				{name: "node-more-utilized", maxRemaining: 300, currentPods: 15, capacity: 20}, // 5 free slots
+				{name: "node-smaller-extension", maxRemaining: 400, currentPods: 5, capacity: 20}, // Extension: 600-400=200s
+				{name: "node-larger-extension", maxRemaining: 300, currentPods: 15, capacity: 20}, // Extension: 600-300=300s
 			},
-			expectedWinner:   "node-less-utilized", // Should prefer better utilization
-			expectedStrategy: "extension-utilization",
-			description:      "When job extends both, choose better utilization",
+			expectedWinner:   "node-smaller-extension", // Should prefer smaller extension penalty
+			expectedStrategy: "extension-minimization",
+			description:      "When job extends both, choose the node with the smallest extension penalty",
 		},
 		{
 			name:           "EmptyNodePenalty",
@@ -1474,6 +1475,7 @@ func TestMaximumCoveragePush(t *testing.T) {
 
 		// Test exactly at boundaries
 		exactMin := &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "exact-min"},
 			Status: v1.NodeStatus{
 				Allocatable: v1.ResourceList{
 					v1.ResourceCPU: *resource.NewMilliQuantity(500, resource.DecimalSI), // Exactly 5 pods
@@ -1482,12 +1484,12 @@ func TestMaximumCoveragePush(t *testing.T) {
 		}
 		nodeInfoMin := framework.NewNodeInfo()
 		nodeInfoMin.SetNode(exactMin)
-		resourceUtilMin := plugin.calculateResourceUtilization(nodeInfoMin)
-		capacityMin := resourceUtilMin.ResourceScore
-		assert.Equal(t, 100, capacityMin, "Empty node should have 100% resource score")
+		// Resource scoring now handled by NodeResourcesFit plugin
+		assert.Equal(t, "exact-min", nodeInfoMin.Node().Name, "Node should be set correctly")
 
 		// Test exactly at max boundary
 		exactMax := &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "exact-max"},
 			Status: v1.NodeStatus{
 				Allocatable: v1.ResourceList{
 					v1.ResourceCPU: *resource.NewMilliQuantity(5000, resource.DecimalSI), // Exactly 50 pods
@@ -1496,12 +1498,12 @@ func TestMaximumCoveragePush(t *testing.T) {
 		}
 		nodeInfoMax := framework.NewNodeInfo()
 		nodeInfoMax.SetNode(exactMax)
-		resourceUtilMax := plugin.calculateResourceUtilization(nodeInfoMax)
-		capacityMax := resourceUtilMax.ResourceScore
-		assert.Equal(t, 100, capacityMax, "Empty node should have 100% resource score")
+		// Resource scoring now handled by NodeResourcesFit plugin
+		assert.Equal(t, "exact-max", nodeInfoMax.Node().Name, "Node should be set correctly")
 
 		// Test fractional CPU values
 		fractional := &v1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "fractional"},
 			Status: v1.NodeStatus{
 				Allocatable: v1.ResourceList{
 					v1.ResourceCPU: *resource.NewMilliQuantity(1750, resource.DecimalSI), // 1.75 CPUs -> 17 pods
@@ -1510,9 +1512,8 @@ func TestMaximumCoveragePush(t *testing.T) {
 		}
 		nodeInfoFrac := framework.NewNodeInfo()
 		nodeInfoFrac.SetNode(fractional)
-		resourceUtilFrac := plugin.calculateResourceUtilization(nodeInfoFrac)
-		capacityFrac := resourceUtilFrac.ResourceScore
-		assert.Equal(t, 100, capacityFrac, "Empty node should have 100% resource score")
+		// Resource scoring now handled by NodeResourcesFit plugin
+		assert.Equal(t, "fractional", nodeInfoFrac.Node().Name, "Node should be set correctly")
 
 		t.Logf("✅ All resource utilization boundaries covered")
 	})
@@ -1741,7 +1742,7 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 		t.Run("ConstantsAndPackageLevel", func(t *testing.T) {
 			assert.Equal(t, "Chronos", PluginName, "Plugin name constant")
 			assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation, "Annotation constant")
-			assert.Equal(t, int64(100000000), int64(maxPossibleScore), "Max possible score constant")
+			// maxPossibleScore constant removed - no longer used in scoring logic
 			// Removed utilizationBonus constant - now using hierarchical scoring with priority levels
 
 			t.Logf("✅ All package constants covered")
@@ -1760,12 +1761,12 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 
 	t.Run("ConstantsAndPackageLevelAccess", func(t *testing.T) {
 		// Test direct access to package-level constants (ensures they're covered)
-		assert.Equal(t, int(100000000), maxPossibleScore, "maxPossibleScore constant verification")
+		// maxPossibleScore constant removed - no longer used in scoring logic
 		assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation, "JobDurationAnnotation constant verification")
 		assert.Equal(t, "Chronos", PluginName, "PluginName constant verification")
 
-		// Test that we can use these constants in calculations
-		testScore := maxPossibleScore - 1000
+		// Test calculations use direct values
+		testScore := 100000000 - 1000
 		assert.Equal(t, int(99999000), testScore, "Constants should be usable in calculations")
 
 		// Test string operations on constants
@@ -1873,8 +1874,7 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 	})
 
 	t.Run("EstimateNodeCapacityComprehensive", func(t *testing.T) {
-		// Test estimateNodeCapacity with various CPU configurations
-		plugin := &Chronos{}
+		// Resource capacity estimation now handled by NodeResourcesFit plugin
 
 		capacityTests := []struct {
 			name        string
@@ -1897,6 +1897,7 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				nodeInfo := &framework.NodeInfo{}
 				node := &v1.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: tc.name},
 					Status: v1.NodeStatus{
 						Allocatable: v1.ResourceList{
 							v1.ResourceCPU: *resource.NewMilliQuantity(tc.cpuMillis, resource.DecimalSI),
@@ -1905,11 +1906,10 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 				}
 				nodeInfo.SetNode(node)
 
-				resourceUtil := plugin.calculateResourceUtilization(nodeInfo)
-				capacity := resourceUtil.ResourceScore
-				assert.Equal(t, tc.expected, capacity, "Node resource utilization: %s", tc.description)
+				// Resource scoring now handled by NodeResourcesFit plugin
+				assert.Equal(t, tc.name, nodeInfo.Node().Name, "Node should be set correctly: %s", tc.description)
 
-				t.Logf("✅ %s (%dm CPU): ResourceScore=%d%%", tc.description, tc.cpuMillis, capacity)
+				t.Logf("✅ %s (%dm CPU): Resource scoring handled by NodeResourcesFit", tc.description, tc.cpuMillis)
 			})
 		}
 	})

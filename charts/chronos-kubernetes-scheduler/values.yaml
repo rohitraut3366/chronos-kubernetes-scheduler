@@ -15,7 +15,7 @@ image:
   # -- Image repository
   repository: scheduler
   # -- Image tag (defaults to chart appVersion if not set)
-  tag: latest
+  tag: v4
   # -- Image pull policy
   pullPolicy: IfNotPresent
 
@@ -28,8 +28,8 @@ nameOverride: ""
 # -- Override the full name of the resources
 fullnameOverride: ""
 
-# -- Number of scheduler replicas (usually 1 for leader election)
-replicaCount: 1
+# -- Number of scheduler replicas (3 for HA with leader election)
+replicaCount: 3
 
 # -- Scheduler configuration
 scheduler:
@@ -40,12 +40,33 @@ scheduler:
   plugin:
     # -- Plugin name
     name: Chronos
+    # -- Plugin weight (higher = more influence)
+    weight: 100
     # -- Job duration annotation key
     jobDurationAnnotation: "scheduling.workload.io/expected-duration-seconds"
+
+  # -- NodeResourcesFit plugin configuration for resource-aware tie-breaking
+  nodeResourcesFit:
+    # -- Plugin weight (should be lower than Chronos for tie-breaking)
+    weight: 1
+    # -- Scoring strategy: "MostAllocated" (consolidation), "LeastAllocated" (spreading), or "RequestedToCapacityRatio" (custom)
+    scoringStrategy: "MostAllocated"
+    
+    # -- Resource-specific configuration
+    resources:
+      # -- CPU resource configuration  
+      cpu:
+        # -- CPU resource weight
+        weight: 1
+      
+      # -- Memory resource configuration
+      memory:
+        # -- Memory resource weight  
+        weight: 1
   
   # -- Leader election settings (for HA)
   leaderElection:
-    enabled: false
+    enabled: true
     # -- Lease duration
     leaseDuration: 15s
     # -- Renew deadline  
@@ -110,29 +131,13 @@ nodeSelector:
 
 # -- Tolerations for scheduler pods
 tolerations:
-  # -- Tolerate master/control-plane taints
+  # -- Tolerate control-plane taints
   - key: node-role.kubernetes.io/control-plane
-    operator: Exists
-    effect: NoSchedule
-  - key: node-role.kubernetes.io/master
     operator: Exists
     effect: NoSchedule
 
 # -- Affinity rules for scheduler placement  
-affinity:
-  # Prefer to run on control plane nodes
-  nodeAffinity:
-    preferredDuringSchedulingIgnoredDuringExecution:
-    - weight: 100
-      preference:
-        matchExpressions:
-        - key: node-role.kubernetes.io/control-plane
-          operator: Exists
-    - weight: 50
-      preference:
-        matchExpressions:
-        - key: node-role.kubernetes.io/master
-          operator: Exists
+affinity: {}
 
 # -- Pod disruption budget
 podDisruptionBudget:
@@ -143,16 +148,7 @@ podDisruptionBudget:
   # -- Maximum unavailable pods (alternative to minAvailable)
   maxUnavailable: ""
 
-# -- Horizontal Pod Autoscaler (not recommended for schedulers)
-autoscaling:
-  # -- Enable HPA
-  enabled: false
-  # -- Minimum replicas
-  minReplicas: 1
-  # -- Maximum replicas
-  maxReplicas: 3
-  # -- CPU utilization target
-  targetCPUUtilizationPercentage: 80
+
 
 # -- Probes configuration
 probes:
