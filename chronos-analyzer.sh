@@ -520,6 +520,347 @@ if [ $CHRONOS_PODS -gt 0 ] && [ $WITH_ANNOTATION -gt 0 ]; then
     }'
     
     echo ""
+    
+    # ================================================================
+    # NODE COMPLETION DURATION PERCENTILES
+    # ================================================================
+    echo "⏱️  NODE COMPLETION DURATION PERCENTILES"
+    echo "========================================"
+    
+    # Get completion durations for completed pods and additional node statistics
+    COMPLETION_DATA=$(kubectl get pods -n $POD_NAMESPACE -o json 2>/dev/null | jq -r '
+    .items[] | 
+    select(.status.phase == "Succeeded" or .status.phase == "Failed") |
+    select(.status.startTime != null) |
+    select(.spec.schedulerName == "'$SCHEDULER_NAME'" or .spec.schedulerName == null) |
+    {
+        node: .spec.nodeName,
+        startTime: .status.startTime,
+        endTime: (
+            if .status.containerStatuses != null then
+                (.status.containerStatuses[] | select(.state.terminated != null) | .state.terminated.finishedAt) // 
+                (.status.conditions[] | select(.type == "PodReadyCondition") | .lastTransitionTime) //
+                (.status.conditions[] | select(.type == "ContainersReady") | .lastTransitionTime)
+            else
+                (.status.conditions[] | select(.type == "PodReadyCondition") | .lastTransitionTime) //
+                (.status.conditions[] | select(.type == "ContainersReady") | .lastTransitionTime)
+            end
+        )
+    } |
+    select(.node != null and .startTime != null and .endTime != null) |
+    [.node, .startTime, .endTime] | 
+    @tsv' 2>/dev/null)
+    
+    # Get total pods per node and annotation statistics
+    NODE_STATS=$(kubectl get pods -n $POD_NAMESPACE -o json 2>/dev/null | jq -r '
+    .items[] |
+    select(.spec.nodeName != null) |
+    {
+        node: .spec.nodeName,
+        hasAnnotation: (if .metadata.annotations["scheduling.workload.io/expected-duration-seconds"] != null then "1" else "0" end)
+    } |
+    [.node, .hasAnnotation] |
+    @tsv' 2>/dev/null)
+    
+    if [ ! -z "$COMPLETION_DATA" ] && [ "$COMPLETION_DATA" != "" ]; then
+        # Combine completion data and node statistics for processing
+        {
+            echo "$COMPLETION_DATA"
+            echo "---NODE_STATS---"
+            echo "$NODE_STATS"
+        } | awk -F'\t' '
+        function iso8601_to_seconds(timestamp) {
+            # Convert ISO 8601 timestamp to seconds since epoch
+            # Remove 'Z' and 'T', convert to date command format
+            gsub(/[TZ]/, " ", timestamp)
+            gsub(/\.[0-9]+/, "", timestamp)  # Remove microseconds
+            
+            # Use date command to convert to epoch seconds
+            cmd = "date -d \"" timestamp "\" +%s 2>/dev/null || echo 0"
+            cmd | getline epoch_seconds
+            close(cmd)
+            return epoch_seconds
+        }
+        
+        function format_duration(seconds) {
+            if (seconds < 60) return seconds "s"
+            if (seconds < 3600) return int(seconds/60) "m" int(seconds%60) "s"
+            return int(seconds/3600) "h" int((seconds%3600)/60) "m"
+        }
+        
+        /^---NODE_STATS---$/ {
+            processing_stats = 1
+            next
+        }
+        
+        processing_stats {
+            # Process node statistics
+            node = $1
+            has_annotation = $2
+            
+            total_pods[node]++
+            if (has_annotation == "1") {
+                annotated_pods[node]++
+            }
+            all_nodes[node] = 1
+            next
+        }
+        
+        !processing_stats {
+            # Process completion duration data
+            node = $1
+            start_time = $2
+            end_time = $3
+            
+            # Calculate actual duration in seconds
+            start_seconds = iso8601_to_seconds(start_time)
+            end_seconds = iso8601_to_seconds(end_time)
+            
+            if (start_seconds > 0 && end_seconds > 0 && end_seconds > start_seconds) {
+                duration = end_seconds - start_seconds
+            } else {
+                # Skip invalid timestamps
+                next
+            }
+            
+            # Store durations for each node (using string concatenation)
+            if (completed_nodes[node] == "") {
+                durations[node] = duration
+                completed_counts[node] = 1
+            } else {
+                durations[node] = durations[node] "," duration
+                completed_counts[node]++
+            }
+            completed_nodes[node] = 1
+            all_nodes[node] = 1
+        }
+        
+        END {
+            if (length(all_nodes) == 0) {
+                print "   No pods found on any nodes"
+                next
+            }
+            
+            # Calculate dynamic node column width
+            max_node_length = length("NODE")
+            for (node in all_nodes) {
+                if (length(node) > max_node_length) {
+                    max_node_length = length(node)
+                }
+            }
+            node_width = max_node_length + 2
+            
+            print "📊 Pod completion duration percentiles by node:"
+            printf "%-*s %5s %5s %5s %4s %8s %8s %8s %8s %8s\n", node_width, "NODE", "TOTAL", "ANNOT", "COMP", "%", "MIN", "P50", "P75", "P90", "MAX"
+            
+            # Create separator line
+            separator = ""
+            for (i = 1; i <= node_width; i++) separator = separator "─"
+            printf "%-*s %5s %5s %5s %4s %8s %8s %8s %8s %8s\n", node_width, separator, "─────", "─────", "─────", "────", "────────", "────────", "────────", "────────", "────────"
+            
+            # Process each node and collect performance stats
+            total_p50 = 0
+            total_p90 = 0
+            node_perf_count = 0
+            
+            for (node in all_nodes) {
+                # Get node statistics
+                total_count = total_pods[node] ? total_pods[node] : 0
+                annotated_count = annotated_pods[node] ? annotated_pods[node] : 0
+                completed_count = completed_counts[node] ? completed_counts[node] : 0
+                
+                # Calculate annotation percentage
+                annotation_pct = (total_count > 0) ? int((annotated_count * 100) / total_count) : 0
+                
+                # Process completion durations if available
+                if (completed_count > 0 && durations[node] != "") {
+                    # Split duration string into array and sort
+                    split(durations[node], node_durations, ",")
+                    
+                    # Sort durations for percentile calculations
+                    for (i = 1; i <= completed_count - 1; i++) {
+                        for (j = i + 1; j <= completed_count; j++) {
+                            if (int(node_durations[i]) > int(node_durations[j])) {
+                                temp = node_durations[i]
+                                node_durations[i] = node_durations[j]
+                                node_durations[j] = temp
+                            }
+                        }
+                    }
+                    
+                    # Calculate percentiles
+                    min_val = int(node_durations[1])
+                    max_val = int(node_durations[completed_count])
+                    p50_idx = int(completed_count * 0.5) + 1
+                    p75_idx = int(completed_count * 0.75) + 1
+                    p90_idx = int(completed_count * 0.90) + 1
+                    
+                    # Handle edge cases for small arrays
+                    if (p50_idx < 1) p50_idx = 1
+                    if (p75_idx < 1) p75_idx = 1
+                    if (p90_idx < 1) p90_idx = 1
+                    if (p50_idx > completed_count) p50_idx = completed_count
+                    if (p75_idx > completed_count) p75_idx = completed_count
+                    if (p90_idx > completed_count) p90_idx = completed_count
+                    
+                    p50 = int(node_durations[p50_idx])
+                    p75 = int(node_durations[p75_idx])
+                    p90 = int(node_durations[p90_idx])
+                    
+                    # Accumulate for cluster-wide stats
+                    total_p50 += p50
+                    total_p90 += p90
+                    node_perf_count++
+                    
+                    printf "%-*s %5d %5d %5d %3d%% %8s %8s %8s %8s %8s\n", node_width, node, total_count, annotated_count, completed_count, annotation_pct, format_duration(min_val), format_duration(p50), format_duration(p75), format_duration(p90), format_duration(max_val)
+                } else {
+                    # Node has pods but no completed durations
+                    printf "%-*s %5d %5d %5d %3d%% %8s %8s %8s %8s %8s\n", node_width, node, total_count, annotated_count, completed_count, annotation_pct, "─", "─", "─", "─", "─"
+                }
+            }
+            
+            # Show cluster-wide performance summary
+            if (node_perf_count > 0) {
+                avg_p50 = total_p50 / node_perf_count
+                avg_p90 = total_p90 / node_perf_count
+                printf "%-*s %5s %5s %5s %4s %8s %8s %8s %8s %8s\n", node_width, "CLUSTER AVG", "─", "─", "─", "─", "─", format_duration(avg_p50), "─", format_duration(avg_p90), "─"
+            }
+            
+            print ""
+            print "📈 Performance Insights:"
+            
+            # Analyze performance patterns and provide specific insights
+            if (node_perf_count > 1) {
+                # Find best and worst performing nodes
+                best_p50 = 999999
+                worst_p50 = 0
+                best_node = ""
+                worst_node = ""
+                
+                for (node in all_nodes) {
+                    completed_count = completed_counts[node] ? completed_counts[node] : 0
+                    if (completed_count == 0 || durations[node] == "") continue
+                    
+                    # Calculate p50 for this node
+                    split(durations[node], node_durations, ",")
+                    p50_idx = int(completed_count * 0.5) + 1
+                    if (p50_idx > completed_count) p50_idx = completed_count
+                    if (p50_idx < 1) p50_idx = 1
+                    
+                    node_p50 = int(node_durations[p50_idx])
+                    
+                    if (node_p50 < best_p50) {
+                        best_p50 = node_p50
+                        best_node = node
+                    }
+                    if (node_p50 > worst_p50) {
+                        worst_p50 = node_p50
+                        worst_node = node
+                    }
+                }
+                
+                if (best_node != "" && worst_node != "" && best_node != worst_node) {
+                    improvement = ((worst_p50 - best_p50) / best_p50) * 100
+                    printf "   🏆 Best performing node: %s (%s median)\n", best_node, format_duration(best_p50)
+                    printf "   🐌 Slowest node: %s (%s median, %.0f%% slower)\n", worst_node, format_duration(worst_p50), improvement
+                }
+                
+                if (avg_p50 > 0 && avg_p90 > 0) {
+                    consistency = ((avg_p90 - avg_p50) / avg_p50) * 100
+                    if (consistency > 200) {
+                        print "   ⚠️  High performance variability - investigate resource constraints"
+                    } else if (consistency > 100) {
+                        print "   📊 Moderate performance spread - some optimization opportunities"
+                    } else {
+                        print "   ✅ Consistent performance across percentiles"
+                    }
+                }
+            } else {
+                print "   📊 Single node analysis - no performance comparison available"
+            }
+            
+            
+            # Add annotation usage insights
+            if (length(all_nodes) > 0) {
+                total_cluster_pods = 0
+                total_cluster_annotated = 0
+                nodes_with_low_annotation = 0
+                
+                for (node in all_nodes) {
+                    node_total = total_pods[node] ? total_pods[node] : 0
+                    node_annotated = annotated_pods[node] ? annotated_pods[node] : 0
+                    total_cluster_pods += node_total
+                    total_cluster_annotated += node_annotated
+                    
+                    if (node_total > 0) {
+                        node_annotation_pct = (node_annotated * 100) / node_total
+                        if (node_annotation_pct < 50) {
+                            nodes_with_low_annotation++
+                        }
+                    }
+                }
+                
+                cluster_annotation_pct = (total_cluster_pods > 0) ? (total_cluster_annotated * 100) / total_cluster_pods : 0
+                
+                printf "   📊 Cluster annotation coverage: %.0f%% (%d/%d pods)\n", cluster_annotation_pct, total_cluster_annotated, total_cluster_pods
+                
+                if (nodes_with_low_annotation > 0) {
+                    printf "   ⚠️  %d nodes have <50%% annotation coverage - consider adding duration annotations\n", nodes_with_low_annotation
+                }
+            }
+            
+            print "   💡 Use these metrics to identify resource bottlenecks and optimize scheduling"
+        }'
+    else
+        # Even without completion data, show basic node statistics if available
+        if [ ! -z "$NODE_STATS" ] && [ "$NODE_STATS" != "" ]; then
+            echo "   ⚠️  No completed pods found with completion time data"
+            echo "   → Showing basic node statistics only"
+            echo ""
+            
+            echo "$NODE_STATS" | awk -F'\t' '
+            {
+                node = $1
+                has_annotation = $2
+                
+                total_pods[node]++
+                if (has_annotation == "1") {
+                    annotated_pods[node]++
+                }
+                all_nodes[node] = 1
+            }
+            END {
+                # Calculate dynamic node column width
+                max_node_length = length("NODE")
+                for (node in all_nodes) {
+                    if (length(node) > max_node_length) {
+                        max_node_length = length(node)
+                    }
+                }
+                node_width = max_node_length + 2
+                
+                print "📊 Pod statistics by node (no completion durations available):"
+                printf "%-*s %5s %5s %4s\n", node_width, "NODE", "TOTAL", "ANNOT", "%"
+                
+                separator = ""
+                for (i = 1; i <= node_width; i++) separator = separator "─"
+                printf "%-*s %5s %5s %4s\n", node_width, separator, "─────", "─────", "────"
+                
+                for (node in all_nodes) {
+                    total_count = total_pods[node] ? total_pods[node] : 0
+                    annotated_count = annotated_pods[node] ? annotated_pods[node] : 0
+                    annotation_pct = (total_count > 0) ? int((annotated_count * 100) / total_count) : 0
+                    
+                    printf "%-*s %5d %5d %3d%%\n", node_width, node, total_count, annotated_count, annotation_pct
+                }
+            }'
+        else
+            echo "   ⚠️  No pods found in namespace '$POD_NAMESPACE'"
+            echo "   → Deploy some pods to see completion duration analysis"
+        fi
+    fi
+    
+    echo ""
 fi
 
 # ================================================================
