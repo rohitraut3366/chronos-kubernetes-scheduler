@@ -34,6 +34,9 @@ const (
 	PluginName = "Chronos"
 	// JobDurationAnnotation is the annotation on a pod that specifies its expected runtime in seconds.
 	JobDurationAnnotation = "scheduling.workload.io/expected-duration-seconds"
+	// DefaultStartupDelaySeconds is the estimated time for containers to reach Running state
+	// This should be tuned based on your environment (e.g., image pull times, resource contention)
+	DefaultStartupDelaySeconds = 240 // 4 minutes
 )
 
 // Chronos is a scheduler plugin that uses bin-packing logic with extension minimization
@@ -134,14 +137,27 @@ func (s *Chronos) calculateMaxRemainingTimeOptimized(pods []*framework.PodInfo) 
 			continue
 		}
 
-		// Fast nil check and time calculation
-		if pod.Status.StartTime == nil {
+		// Calculate elapsed time - handle both running and bound-but-pending pods
+		var elapsedSeconds int64
+
+		if pod.Status.StartTime != nil {
+			// Pod is running - use actual start time
+			elapsedNanos := now.Sub(pod.Status.StartTime.Time).Nanoseconds()
+			elapsedSeconds = elapsedNanos / 1e9
+		} else if pod.Spec.NodeName != "" {
+			// Pod is bound but not yet started - estimate based on binding time
+			// Use creation time + estimated container startup delay
+			estimatedStartTime := pod.CreationTimestamp.Add(DefaultStartupDelaySeconds * time.Second)
+			if now.After(estimatedStartTime) {
+				elapsedNanos := now.Sub(estimatedStartTime).Nanoseconds()
+				elapsedSeconds = elapsedNanos / 1e9
+			} else {
+				elapsedSeconds = 0 // Pod hasn't "started" yet by our estimate
+			}
+		} else {
+			// Pod is not bound - skip
 			continue
 		}
-
-		// Optimized time calculation - avoid float operations when possible
-		elapsedNanos := now.Sub(pod.Status.StartTime.Time).Nanoseconds()
-		elapsedSeconds := elapsedNanos / 1e9
 		remainingSeconds := duration - elapsedSeconds
 
 		// Clamp negative values and update maximum
