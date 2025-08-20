@@ -59,11 +59,13 @@ echo "========================="
 SCHEDULER_POD=$(kubectl get pods -n $SCHEDULER_NAMESPACE -l app.kubernetes.io/name=chronos-kubernetes-scheduler --no-headers 2>/dev/null | head -1)
 
 if [ -z "$SCHEDULER_POD" ]; then
-    echo "❌ CRITICAL: Chronos scheduler pod not found!"
-    echo "   Make sure the scheduler is deployed in '$SCHEDULER_NAMESPACE' namespace"
-    echo "   with label app.kubernetes.io/name=chronos-kubernetes-scheduler"
-    exit 1
-fi
+    echo "⚠️  WARNING: Chronos scheduler pod not found!"
+    echo "   Analysis will continue for general pod scheduling patterns"
+    echo "   To get Chronos-specific metrics, deploy the scheduler in '$SCHEDULER_NAMESPACE' namespace"
+    echo ""
+    SCHEDULER_STATUS="Not Found"
+    SCHEDULER_NAME_POD="N/A"
+else
 
 SCHEDULER_STATUS=$(echo $SCHEDULER_POD | awk '{print $3}')
 SCHEDULER_NAME_POD=$(echo $SCHEDULER_POD | awk '{print $1}')
@@ -94,6 +96,8 @@ else
     kubectl describe pod -n $SCHEDULER_NAMESPACE $SCHEDULER_NAME_POD | tail -10
     exit 1
 fi
+
+fi  # End of scheduler check
 
 echo ""
 
@@ -265,31 +269,31 @@ echo "📊 All pods per node (entire namespace):"
 NODE_DISTRIBUTION=$(kubectl get pods -n $POD_NAMESPACE -o wide --no-headers 2>/dev/null | awk '{print $7}' | sort | uniq -c | sort -nr)
 echo "$NODE_DISTRIBUTION"
 
-# Show Chronos-specific distribution if there are Chronos pods
-if [ $CHRONOS_PODS -gt 0 ]; then
+# Show pods with duration annotations per node
+if [ $WITH_ANNOTATION_ALL -gt 0 ]; then
     echo ""
-    echo "🎯 Chronos-scheduled pods per node:"
-    CHRONOS_DISTRIBUTION=$(kubectl get pods -n $POD_NAMESPACE -o wide --no-headers 2>/dev/null | grep -E "\s+$SCHEDULER_NAME\s+|chronos-kubernetes-scheduler" | awk '{print $7}' | sort | uniq -c | sort -nr)
-    if [ ! -z "$CHRONOS_DISTRIBUTION" ]; then
-        echo "$CHRONOS_DISTRIBUTION"
+    echo "🎯 Pods with duration annotations per node:"
+    ANNOTATED_DISTRIBUTION=$(kubectl get pods -n $POD_NAMESPACE -o json 2>/dev/null | jq -r '.items[] | select(.metadata.annotations["scheduling.workload.io/expected-duration-seconds"] != null) | .spec.nodeName' | sort | uniq -c | sort -nr)
+    if [ ! -z "$ANNOTATED_DISTRIBUTION" ]; then
+        echo "$ANNOTATED_DISTRIBUTION"
         
-        # Calculate Chronos-specific metrics
-        CHRONOS_NODES_WITH_PODS=$(echo "$CHRONOS_DISTRIBUTION" | wc -l)
-        MAX_CHRONOS_ON_NODE=$(echo "$CHRONOS_DISTRIBUTION" | head -1 | awk '{print $1}')
-        MIN_CHRONOS_ON_NODE=$(echo "$CHRONOS_DISTRIBUTION" | tail -1 | awk '{print $1}')
-        CHRONOS_DISTRIBUTION_RATIO=$((MAX_CHRONOS_ON_NODE - MIN_CHRONOS_ON_NODE))
+        # Calculate distribution metrics for annotated pods
+        ANNOTATED_NODES_WITH_PODS=$(echo "$ANNOTATED_DISTRIBUTION" | wc -l)
+        MAX_ANNOTATED_ON_NODE=$(echo "$ANNOTATED_DISTRIBUTION" | head -1 | awk '{print $1}')
+        MIN_ANNOTATED_ON_NODE=$(echo "$ANNOTATED_DISTRIBUTION" | tail -1 | awk '{print $1}')
+        ANNOTATED_DISTRIBUTION_RATIO=$((MAX_ANNOTATED_ON_NODE - MIN_ANNOTATED_ON_NODE))
         
         echo ""
-        echo "📈 Chronos Distribution Quality:"
-        if [ $CHRONOS_DISTRIBUTION_RATIO -le 2 ]; then
-            echo "✅ EXCELLENT: Even Chronos pod distribution (max: $MAX_CHRONOS_ON_NODE, min: $MIN_CHRONOS_ON_NODE)"
-        elif [ $CHRONOS_DISTRIBUTION_RATIO -le 5 ]; then
-            echo "⚠️  GOOD: Moderate Chronos distribution (max: $MAX_CHRONOS_ON_NODE, min: $MIN_CHRONOS_ON_NODE)"
+        echo "📈 Annotated Pod Distribution Quality:"
+        if [ $ANNOTATED_DISTRIBUTION_RATIO -le 2 ]; then
+            echo "✅ EXCELLENT: Even distribution of annotated pods (max: $MAX_ANNOTATED_ON_NODE, min: $MIN_ANNOTATED_ON_NODE)"
+        elif [ $ANNOTATED_DISTRIBUTION_RATIO -le 5 ]; then
+            echo "⚠️  GOOD: Moderate distribution of annotated pods (max: $MAX_ANNOTATED_ON_NODE, min: $MIN_ANNOTATED_ON_NODE)"
         else
-            echo "❌ POOR: Uneven Chronos distribution (max: $MAX_CHRONOS_ON_NODE, min: $MIN_CHRONOS_ON_NODE)"
+            echo "❌ POOR: Uneven distribution of annotated pods (max: $MAX_ANNOTATED_ON_NODE, min: $MIN_ANNOTATED_ON_NODE)"
         fi
     else
-        echo "   No Chronos-scheduled pods found"
+        echo "   No pods with duration annotations found"
     fi
 fi
 
@@ -448,10 +452,9 @@ if [ $CHRONOS_PODS -gt 0 ] && [ $WITH_ANNOTATION_ALL -gt 0 ]; then
     echo "📊 BIN-PACKING EFFECTIVENESS"
     echo "==========================="
     
-    # Analyze scheduling patterns by duration and node
+    # Analyze scheduling patterns by duration and node (ALL pods with duration annotations)
     kubectl get pods -n $POD_NAMESPACE -o json 2>/dev/null | jq -r '
     .items[] | 
-    select(.spec.schedulerName == "'$SCHEDULER_NAME'") |
     select(.metadata.annotations["scheduling.workload.io/expected-duration-seconds"] != null) |
     [.spec.nodeName, .metadata.annotations["scheduling.workload.io/expected-duration-seconds"]] | 
     @tsv' | awk -F'\t' '
@@ -507,7 +510,7 @@ if [ $CHRONOS_PODS -gt 0 ] && [ $WITH_ANNOTATION_ALL -gt 0 ]; then
         }
         
         print ""
-        consolidation_pct = (consolidation_score * 100) / node_count
+        consolidation_pct = (node_count > 0) ? (consolidation_score * 100) / node_count : 0
         printf "📈 Consolidation effectiveness: %.1f%% (%d/%d nodes have mixed workloads)\n", consolidation_pct, consolidation_score, node_count
         
         if (consolidation_pct > 60) {
@@ -528,12 +531,12 @@ if [ $CHRONOS_PODS -gt 0 ] && [ $WITH_ANNOTATION_ALL -gt 0 ]; then
     echo "========================================"
     
     # Get expected completion times for currently RUNNING pods with duration annotations
+    # Note: Shows ALL pods with duration annotations, regardless of scheduler
     COMPLETION_DATA=$(kubectl get pods -n $POD_NAMESPACE -o json 2>/dev/null | jq -r '
     .items[] | 
     select(.spec.nodeName != null) |
     select(.status.startTime != null) |
     select(.metadata.annotations["scheduling.workload.io/expected-duration-seconds"] != null) |
-    select(.spec.schedulerName == "'$SCHEDULER_NAME'" or .spec.schedulerName == null) |
     {
         node: .spec.nodeName,
         startTime: .status.startTime,
@@ -562,12 +565,12 @@ if [ $CHRONOS_PODS -gt 0 ] && [ $WITH_ANNOTATION_ALL -gt 0 ]; then
         } | awk -F'\t' '
         function iso8601_to_seconds(timestamp) {
             # Convert ISO 8601 timestamp to seconds since epoch
-            # Remove 'Z' and 'T', convert to date command format
+            # Handle both GNU date (Linux) and BSD date (macOS)
             gsub(/[TZ]/, " ", timestamp)
             gsub(/\.[0-9]+/, "", timestamp)  # Remove microseconds
             
-            # Use date command to convert to epoch seconds
-            cmd = "date -d \"" timestamp "\" +%s 2>/dev/null || echo 0"
+            # Try GNU date first, then BSD date format
+            cmd = "date -d \"" timestamp "\" +%s 2>/dev/null || date -j -f \"%Y-%m-%d %H:%M:%S\" \"" timestamp "\" +%s 2>/dev/null || echo 0"
             cmd | getline epoch_seconds
             close(cmd)
             return epoch_seconds
@@ -611,7 +614,9 @@ if [ $CHRONOS_PODS -gt 0 ] && [ $WITH_ANNOTATION_ALL -gt 0 ]; then
             # Calculate remaining time for running pod
             start_seconds = iso8601_to_seconds(start_time)
             if (start_seconds > 0) {
-                current_time = systime()
+                # Get current time in seconds since epoch
+                "date +%s" | getline current_time
+                close("date +%s")
                 elapsed_time = current_time - start_seconds
                 remaining_time = expected_duration - elapsed_time
                 
@@ -867,7 +872,7 @@ echo "⚡ PERFORMANCE ANALYSIS"
 echo "======================"
 
 # Scheduler scoring activity
-if [ ! -z "$SCHEDULER_NAME_POD" ]; then
+if [ ! -z "$SCHEDULER_NAME_POD" ] && [ "$SCHEDULER_NAME_POD" != "N/A" ]; then
     SCORING_ACTIVITY=$(kubectl logs -n $SCHEDULER_NAMESPACE $SCHEDULER_NAME_POD --since=1h 2>/dev/null | grep -c "Score.*optimized")
     echo "⚡ Chronos scoring operations (last hour): $SCORING_ACTIVITY"
     
@@ -876,6 +881,8 @@ if [ ! -z "$SCHEDULER_NAME_POD" ]; then
     elif [ $TOTAL_PODS -gt 0 ]; then
         echo "⚠️  No recent scoring activity (pods may be stable)"
     fi
+else
+    echo "⚠️  Chronos scheduler not deployed - showing general pod analysis"
 fi
 
 # Check for any obvious performance issues
