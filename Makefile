@@ -60,6 +60,37 @@ bench:
 	$(GOTEST) -bench=. -benchmem ./...
 	@echo "✅ Benchmarks completed"
 
+## integration-setup: Set up full K3s integration test environment
+integration-setup:
+	@echo "Setting up full integration test environment..."
+	./integration-test-setup.sh
+	@echo "✅ Integration environment setup completed"
+
+## integration-quick: Quick integration test with existing cluster
+integration-quick:
+	@echo "Running quick integration tests..."
+	@if ! kubectl cluster-info >/dev/null 2>&1; then \
+		echo "❌ No Kubernetes cluster found. Run 'make integration-setup' first."; \
+		exit 1; \
+	fi
+	@echo "Creating test pods..."
+	@kubectl apply -f - <<EOF \
+	apiVersion: v1 \
+	kind: Pod \
+	metadata: \
+	  name: quick-test-\$$(date +%s) \
+	  annotations: \
+	    scheduling.workload.io/expected-duration-seconds: "60.5" \
+	spec: \
+	  schedulerName: chronos-kubernetes-scheduler \
+	  containers: \
+	  - name: test \
+	    image: alpine:latest \
+	    command: ["sleep", "60"] \
+	  restartPolicy: Never \
+	EOF
+	@echo "✅ Quick integration test pod created"
+
 ## coverage: Generate test coverage report
 coverage: test
 	@echo "Generating coverage report..."

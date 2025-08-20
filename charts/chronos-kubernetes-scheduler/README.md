@@ -4,7 +4,7 @@ A Helm chart for deploying the Chronos Kubernetes scheduler plugin.
 
 ## Overview
 
-The Chronos scheduler is a custom Kubernetes scheduler plugin that optimizes pod placement by scheduling workloads on nodes predicted to become available the soonest. This is particularly useful for batch workloads and time-bounded applications with predictable durations.
+The Chronos scheduler is a custom Kubernetes scheduler plugin that optimizes pod placement through intelligent bin-packing, prioritizing workload consolidation over spreading. This approach maximizes cluster utilization and enables cost optimization for batch workloads and time-bounded applications with predictable durations.
 
 ## Prerequisites
 

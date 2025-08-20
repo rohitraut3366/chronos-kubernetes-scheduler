@@ -67,11 +67,13 @@ func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.
 		klog.Infof("Pod %s/%s is missing annotation %s, skipping.", p.Namespace, p.Name, JobDurationAnnotation)
 		return 0, framework.NewStatus(framework.Success)
 	}
-	newPodDuration, err := strconv.ParseInt(newPodDurationStr, 10, 64)
+	// Parse duration - support both integer and decimal values
+	newPodDurationFloat, err := strconv.ParseFloat(newPodDurationStr, 64)
 	if err != nil {
 		klog.Warningf("Could not parse duration '%s' for pod %s/%s: %v", newPodDurationStr, p.Namespace, p.Name, err)
 		return 0, framework.NewStatus(framework.Success)
 	}
+	newPodDuration := int64(math.Round(newPodDurationFloat)) // Use math.Round for predictable conversion (e.g., 600.75 becomes 601)
 
 	// 2. Get node information.
 	nodeInfo, err := s.handle.SnapshotSharedLister().NodeInfos().Get(nodeName)
@@ -122,9 +124,13 @@ func (s *Chronos) calculateMaxRemainingTimeOptimized(pods []*framework.PodInfo) 
 			continue
 		}
 
-		// Fast integer parsing (this is already quite optimized in Go)
-		duration, err := strconv.ParseInt(durationStr, 10, 64)
-		if err != nil || duration <= 0 {
+		// Parse duration - support both integer and decimal values
+		durationFloat, err := strconv.ParseFloat(durationStr, 64)
+		if err != nil {
+			continue
+		}
+		duration := int64(math.Round(durationFloat)) // Use math.Round for predictable conversion
+		if duration <= 0 {
 			continue
 		}
 
