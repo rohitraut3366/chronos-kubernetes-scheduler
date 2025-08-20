@@ -4,7 +4,7 @@
 [![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen.svg)](https://github.com/rohitraut3366/chronos-kubernetes-scheduler/actions)
 [![Go Report Card](https://goreportcard.com/badge/github.com/rohitraut3366/chronos-kubernetes-scheduler)](https://goreportcard.com/report/github.com/rohitraut3366/chronos-kubernetes-scheduler)
 
-A **production-ready** Kubernetes custom scheduler plugin that intelligently bin-packs workloads based on job durations, maximizing cluster resource utilization and consolidation for workloads with predictable durations.
+Kubernetes custom scheduler plugin that intelligently bin-packs workloads based on job durations, maximizing cluster resource utilization and consolidation for workloads with predictable durations.
 
 ## 🎯 Overview
 
