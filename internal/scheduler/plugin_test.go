@@ -108,8 +108,7 @@ func calculateMockScore(newPodDuration, maxRemainingTime int64, currentPods int,
 	nodeInfo := mockNodeInfo("test-node", currentPods, capacity)
 
 	// Use the actual optimized algorithm
-	nodeCompletionTime := plugin.CalculateBinPackingCompletionTime(maxRemainingTime, newPodDuration)
-	score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration, nodeCompletionTime)
+	score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration)
 
 	return score
 }
@@ -611,7 +610,7 @@ func TestEdgeCaseCoverage(t *testing.T) {
 	t.Run("OptimizedScoreEdgeCases", func(t *testing.T) {
 		// Test edge case: node at full resource utilization (extension case: 600 > 300)
 		nodeInfo := mockNodeInfo("full-node", 20, 20) // 20 pods, each using 100m CPU = 2000m total
-		score := plugin.CalculateOptimizedScore(nodeInfo, 300, 600, 600)
+		score := plugin.CalculateOptimizedScore(nodeInfo, 300, 600)
 		// Node has 2000m CPU allocated, 20 pods * 100m = 2000m used = 100% utilized, ResourceScore = 0
 		// Extension: 100000 - (600-300)*100 + 0*5 = 100000 - 30000 + 0 = 70000
 		expectedScore := int64(70000)
@@ -619,13 +618,13 @@ func TestEdgeCaseCoverage(t *testing.T) {
 
 		// Test edge case: node over capacity (shouldn't happen but test robustness)
 		nodeInfoOver := mockNodeInfo("over-node", 25, 20) // Over capacity: 25 pods * 100m = 2500m used on 2000m node
-		scoreOver := plugin.CalculateOptimizedScore(nodeInfoOver, 300, 600, 600)
+		scoreOver := plugin.CalculateOptimizedScore(nodeInfoOver, 300, 600)
 		// Over 100% utilized, ResourceScore clamped to 0, same calculation as above
 		assert.Equal(t, expectedScore, scoreOver, "Over capacity should have same score as full capacity")
 
 		// Test edge case: very large capacity with low utilization (bin-packing case: 100 <= 300)
 		nodeInfoLarge := mockNodeInfo("large-node", 5, 1000) // 5 pods on huge capacity
-		scoreLarge := plugin.CalculateOptimizedScore(nodeInfoLarge, 300, 100, 300)
+		scoreLarge := plugin.CalculateOptimizedScore(nodeInfoLarge, 300, 100)
 		// This is bin-packing case (100 <= 300), so Priority 1
 		// Pure time-based scoring: baseScore + consolidationBonus (no resource bonus)
 		const binPackingPriority = 1000000
@@ -648,7 +647,7 @@ func TestBoundaryConditions(t *testing.T) {
 
 		// Test scoring with zero durations
 		nodeInfo := mockNodeInfo("test", 5, 10)
-		score1 := plugin.CalculateOptimizedScore(nodeInfo, 0, 0, 0)
+		score1 := plugin.CalculateOptimizedScore(nodeInfo, 0, 0)
 		assert.Greater(t, score1, int64(0), "Zero duration should still have positive score from utilization")
 
 		t.Logf("✅ Zero duration boundaries covered")
@@ -662,7 +661,7 @@ func TestBoundaryConditions(t *testing.T) {
 
 		// Test scoring with large times
 		nodeInfo := mockNodeInfo("test", 1, 50)
-		score := plugin.CalculateOptimizedScore(nodeInfo, largeTime, 1000, largeTime)
+		score := plugin.CalculateOptimizedScore(nodeInfo, largeTime, 1000)
 		assert.Greater(t, score, int64(0), "Large times should still produce valid scores")
 
 		t.Logf("✅ Maximum value boundaries covered")
@@ -940,7 +939,7 @@ func TestMainEntryPoints(t *testing.T) {
 		assert.Equal(t, newJobDuration, completionTime, "Should extend completion time")
 
 		// Test optimized scoring
-		score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newJobDuration, completionTime)
+		score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newJobDuration)
 		assert.Greater(t, score, int64(0), "Score should be positive")
 
 		t.Logf("✅ Score calculation methods: completion=%ds, score=%d", completionTime, score)
@@ -1209,8 +1208,7 @@ func TestCalculateOptimizedScore(t *testing.T) {
 			// Create mock node with specified capacity
 			nodeInfo := mockNodeInfo("test-node", tc.currentPods, int64(tc.nodeCapacity))
 
-			nodeCompletionTime := plugin.CalculateBinPackingCompletionTime(tc.maxRemainingTime, tc.newPodDuration)
-			score := plugin.CalculateOptimizedScore(nodeInfo, tc.maxRemainingTime, tc.newPodDuration, nodeCompletionTime)
+			score := plugin.CalculateOptimizedScore(nodeInfo, tc.maxRemainingTime, tc.newPodDuration)
 
 			// Resource scoring now handled by NodeResourcesFit plugin
 			// (removed resourceScore variable since it's no longer needed)
@@ -1397,8 +1395,7 @@ func TestTwoPhaseDecisionLogic(t *testing.T) {
 			for i, nodeSpec := range tc.nodes {
 				nodeInfo := mockNodeInfo(nodeSpec.name, nodeSpec.currentPods, int64(nodeSpec.capacity))
 
-				nodeCompletionTime := plugin.CalculateBinPackingCompletionTime(nodeSpec.maxRemaining, tc.newJobDuration)
-				score := plugin.CalculateOptimizedScore(nodeInfo, nodeSpec.maxRemaining, tc.newJobDuration, nodeCompletionTime)
+				score := plugin.CalculateOptimizedScore(nodeInfo, nodeSpec.maxRemaining, tc.newJobDuration)
 				scores[i] = score
 
 				t.Logf("Node %s: Existing=%ds, Score=%d", nodeSpec.name, nodeSpec.maxRemaining, score)
@@ -1568,8 +1565,7 @@ func TestMaximumCoveragePush(t *testing.T) {
 
 		for _, tc := range testCases {
 			nodeInfo := mockNodeInfo(tc.name, tc.currentPods, tc.capacity)
-			completionTime := plugin.CalculateBinPackingCompletionTime(tc.maxRemaining, tc.newJobDuration)
-			score := plugin.CalculateOptimizedScore(nodeInfo, tc.maxRemaining, tc.newJobDuration, completionTime)
+			score := plugin.CalculateOptimizedScore(nodeInfo, tc.maxRemaining, tc.newJobDuration)
 
 			switch tc.expectedPattern {
 			case "empty-penalty":
@@ -1849,7 +1845,6 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 						node.nodeInfo,
 						scenario.maxRemainingTime,
 						scenario.newPodDuration,
-						scenario.nodeCompletionTime,
 					)
 
 					// Verify score ranges based on priority

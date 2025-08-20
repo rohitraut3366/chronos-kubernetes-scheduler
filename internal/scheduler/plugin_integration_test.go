@@ -346,8 +346,7 @@ func calculateProductionScore(pod *v1.Pod, nodeInfo *framework.NodeInfo) int64 {
 
 	// ✅ CRITICAL FIX: Use actual production plugin logic
 	plugin := &Chronos{}
-	nodeCompletionTime := plugin.CalculateBinPackingCompletionTime(maxRemainingTime, newPodDuration)
-	score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration, nodeCompletionTime)
+	score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration)
 
 	return score
 }
@@ -624,12 +623,11 @@ func TestOptimizedSchedulingIntegration(t *testing.T) {
 				}
 
 				// Calculate completion time and score
-				nodeCompletionTime := plugin.CalculateBinPackingCompletionTime(maxRemainingTime, tc.newJobDuration)
-				score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, tc.newJobDuration, nodeCompletionTime)
+				score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, tc.newJobDuration)
 				scores[i] = score
 
-				t.Logf("   Node %s: ExistingWork=%ds, NewJob=%ds, Completion=%ds, Score=%d",
-					nodeSpec.name, maxRemainingTime, tc.newJobDuration, nodeCompletionTime, score)
+				t.Logf("   Node %s: ExistingWork=%ds, NewJob=%ds, Score=%d",
+					nodeSpec.name, maxRemainingTime, tc.newJobDuration, score)
 			}
 
 			// Find winner (highest score)
@@ -668,12 +666,10 @@ func TestCostOptimizationScenarios(t *testing.T) {
 
 		for _, jobDuration := range jobDurations {
 			// Score active node
-			activeCompletion := plugin.CalculateBinPackingCompletionTime(600, jobDuration)
-			activeScore := plugin.CalculateOptimizedScore(activeNode, 600, jobDuration, activeCompletion)
+			activeScore := plugin.CalculateOptimizedScore(activeNode, 600, jobDuration)
 
 			// Score empty node
-			emptyCompletion := plugin.CalculateBinPackingCompletionTime(0, jobDuration)
-			emptyScore := plugin.CalculateOptimizedScore(emptyNode, 0, jobDuration, emptyCompletion)
+			emptyScore := plugin.CalculateOptimizedScore(emptyNode, 0, jobDuration)
 
 			// Active node should win for consolidation
 			assert.Greater(t, activeScore, emptyScore,
@@ -704,8 +700,7 @@ func TestCostOptimizationScenarios(t *testing.T) {
 		for i, node := range nodes {
 			nodeInfo := simpleMockNodeInfo(node.name, node.utilization, 20)
 
-			completion := plugin.CalculateBinPackingCompletionTime(node.existing, newJobDuration)
-			score := plugin.CalculateOptimizedScore(nodeInfo, node.existing, newJobDuration, completion)
+			score := plugin.CalculateOptimizedScore(nodeInfo, node.existing, newJobDuration)
 			scores[i] = score
 		}
 

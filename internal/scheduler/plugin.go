@@ -82,18 +82,15 @@ func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.
 		return 0, framework.NewStatus(framework.Error, fmt.Sprintf("getting node %q info: %s", nodeName, err))
 	}
 
-	// 3. Calculate node state using optimized single-pass algorithm
+	// 3. calculates max remaining time by looking at annotations on all the pods on the node
 	maxRemainingTime := s.calculateMaxRemainingTimeOptimized(nodeInfo.Pods)
 
-	// 4. Calculate completion time using bin-packing logic
-	nodeCompletionTime := s.CalculateBinPackingCompletionTime(maxRemainingTime, newPodDuration)
-
-	// 5. Apply pure time-based optimization strategy (NodeResourcesFit handles resource tie-breaking)
-	score := s.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration, nodeCompletionTime)
+	// 4. Apply pure time-based optimization strategy (NodeResourcesFit handles resource tie-breaking)
+	score := s.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration)
 
 	// Only log scoring results at debug level to improve performance
-	klog.V(4).Infof("Pod: %s/%s, Node: %s, Existing: %ds, NewJob: %ds, Completion: %ds, Score: %d (optimized)",
-		p.Namespace, p.Name, nodeName, maxRemainingTime, newPodDuration, nodeCompletionTime, score)
+	klog.V(4).Infof("Pod: %s/%s, Node: %s, Existing: %ds, NewJob: %ds, Score: %d (optimized)",
+		p.Namespace, p.Name, nodeName, maxRemainingTime, newPodDuration, score)
 
 	return score, framework.NewStatus(framework.Success)
 }
@@ -134,14 +131,22 @@ func (s *Chronos) calculateMaxRemainingTimeOptimized(pods []*framework.PodInfo) 
 			continue
 		}
 
-		// Fast nil check and time calculation
-		if pod.Status.StartTime == nil {
+		// Calculate elapsed time - handle both running and bound pods
+		var elapsedSeconds int64
+
+		if pod.Status.StartTime != nil {
+			// Pod is running - use actual start time
+			elapsedNanos := now.Sub(pod.Status.StartTime.Time).Nanoseconds()
+			elapsedSeconds = elapsedNanos / 1e9
+		} else if pod.Spec.NodeName != "" {
+			// Pod is bound but not yet started - use creation time as baseline
+			// Assume the pod "reserves" its expected duration from creation time
+			elapsedNanos := now.Sub(pod.CreationTimestamp.Time).Nanoseconds()
+			elapsedSeconds = elapsedNanos / 1e9
+		} else {
+			// Pod is not bound - skip
 			continue
 		}
-
-		// Optimized time calculation - avoid float operations when possible
-		elapsedNanos := now.Sub(pod.Status.StartTime.Time).Nanoseconds()
-		elapsedSeconds := elapsedNanos / 1e9
 		remainingSeconds := duration - elapsedSeconds
 
 		// Clamp negative values and update maximum
@@ -170,7 +175,7 @@ func (s *Chronos) CalculateBinPackingCompletionTime(maxRemainingTime, newPodDura
 // PRIORITY 1: Jobs that FIT within existing work windows (perfect bin-packing)
 // PRIORITY 2: Jobs that EXTEND existing commitments (extension minimization)
 // PRIORITY 3: Empty nodes (heavily penalized for cost optimization)
-func (s *Chronos) CalculateOptimizedScore(nodeInfo *framework.NodeInfo, maxRemainingTime int64, newPodDuration int64, nodeCompletionTime int64) int64 {
+func (s *Chronos) CalculateOptimizedScore(nodeInfo *framework.NodeInfo, maxRemainingTime int64, newPodDuration int64) int64 {
 	// Pure time-based scoring - NodeResourcesFit plugin handles all resource tie-breaking
 	// This keeps our plugin focused on its core competency: time-based bin-packing
 
