@@ -20,7 +20,10 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -30,126 +33,129 @@ import (
 )
 
 const (
-	// PluginName is the name of the custom scheduler plugin.
-	PluginName = "Chronos"
-	// JobDurationAnnotation is the annotation on a pod that specifies its expected runtime in seconds.
+	PluginName            = "Chronos"
 	JobDurationAnnotation = "scheduling.workload.io/expected-duration-seconds"
 )
 
-// Chronos is a scheduler plugin that uses bin-packing logic with extension minimization
-// to optimize resource utilization and minimize cluster commitment extensions.
 type Chronos struct {
-	handle framework.Handle
+	handle           framework.Handle
+	batchScheduler   *BatchScheduler
+	batchModeEnabled bool
+	inFlightPods     sync.Map
 }
 
-// New initializes a new plugin and returns it.
 func New(ctx context.Context, _ runtime.Object, h framework.Handle) (framework.Plugin, error) {
-	klog.Infof("Initializing Chronos plugin with bin-packing + extension minimization + utilization optimization")
-	return &Chronos{
+	klog.Infof("Initializing Chronos plugin")
+
+	chronos := &Chronos{
 		handle: h,
-	}, nil
+	}
+
+	if os.Getenv("CHRONOS_BATCH_MODE_ENABLED") == "true" {
+		chronos.batchModeEnabled = true
+		chronos.batchScheduler = NewBatchScheduler(h, chronos)
+		chronos.batchScheduler.Start()
+		klog.Infof("🚀 Chronos BATCH MODE enabled")
+	} else {
+		chronos.batchModeEnabled = false
+		klog.Infof("📝 Chronos INDIVIDUAL MODE enabled")
+	}
+
+	return chronos, nil
 }
 
-// Name returns the name of the plugin.
 func (s *Chronos) Name() string {
 	return PluginName
 }
 
-// Score is the core scheduling logic. It calculates a score for each node based on
-// when the node is expected to become idle.
 func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.Pod, nodeName string) (int64, *framework.Status) {
-	// Only log at debug level to reduce hot path overhead
 	klog.V(4).Infof("Scoring pod %s/%s for node %s", p.Namespace, p.Name, nodeName)
 
-	// 1. Get the expected duration of the pod being scheduled.
 	newPodDurationStr, ok := p.Annotations[JobDurationAnnotation]
 	if !ok {
-		klog.Infof("Pod %s/%s is missing annotation %s, skipping.", p.Namespace, p.Name, JobDurationAnnotation)
 		return 0, framework.NewStatus(framework.Success)
 	}
-	// Parse duration - support both integer and decimal values
+
+	if s.batchModeEnabled {
+		if _, inFlight := s.inFlightPods.Load(p.UID); inFlight {
+			klog.V(4).Infof("Pod %s/%s is in-flight with batch scheduler, assigning minimal score.", p.Namespace, p.Name)
+			return 1, framework.NewStatus(framework.Success)
+		}
+
+		klog.V(4).Infof("Pod %s/%s is a candidate for the batch scheduler.", p.Namespace, p.Name)
+		return 1, framework.NewStatus(framework.Success)
+	}
+
+	// INDIVIDUAL MODE
 	newPodDurationFloat, err := strconv.ParseFloat(newPodDurationStr, 64)
 	if err != nil {
 		klog.Warningf("Could not parse duration '%s' for pod %s/%s: %v", newPodDurationStr, p.Namespace, p.Name, err)
 		return 0, framework.NewStatus(framework.Success)
 	}
-	newPodDuration := int64(math.Round(newPodDurationFloat)) // Use math.Round for predictable conversion (e.g., 600.75 becomes 601)
+	newPodDuration := int64(math.Round(newPodDurationFloat))
 
-	// 2. Get node information.
 	nodeInfo, err := s.handle.SnapshotSharedLister().NodeInfos().Get(nodeName)
 	if err != nil {
 		klog.Errorf("Error getting node info for %s: %v", nodeName, err)
 		return 0, framework.NewStatus(framework.Error, fmt.Sprintf("getting node %q info: %s", nodeName, err))
 	}
 
-	// 3. calculates max remaining time by looking at annotations on all the pods on the node
 	maxRemainingTime := s.calculateMaxRemainingTimeOptimized(nodeInfo.Pods)
+	score := s.CalculateOptimizedScore(nodeName, maxRemainingTime, newPodDuration)
 
-	// 4. Apply pure time-based optimization strategy (NodeResourcesFit handles resource tie-breaking)
-	score := s.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration)
-
-	// Only log scoring results at debug level to improve performance
-	klog.V(4).Infof("Pod: %s/%s, Node: %s, Existing: %ds, NewJob: %ds, Score: %d (optimized)",
+	klog.V(4).Infof("Pod: %s/%s, Node: %s, Existing: %ds, NewJob: %ds, Score: %d (individual mode)",
 		p.Namespace, p.Name, nodeName, maxRemainingTime, newPodDuration, score)
 
 	return score, framework.NewStatus(framework.Success)
 }
 
-// calculateMaxRemainingTimeOptimized - Performance-optimized remaining time calculation
-// Single pass through pods with early termination and minimal allocations
+// REFINED: Optimized duration parsing by trying integer parsing first.
 func (s *Chronos) calculateMaxRemainingTimeOptimized(pods []*framework.PodInfo) int64 {
 	if len(pods) == 0 {
 		return 0
 	}
-
 	maxRemainingTime := int64(0)
 	now := time.Now()
-
-	// Single optimized loop - no redundant operations
 	for _, podInfo := range pods {
 		pod := podInfo.Pod
-
-		// Fast early termination for completed pods
-		switch pod.Status.Phase {
-		case v1.PodSucceeded, v1.PodFailed:
+		if pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed {
 			continue
 		}
-
-		// Fast annotation lookup with existence check
 		durationStr, exists := pod.Annotations[JobDurationAnnotation]
 		if !exists {
 			continue
 		}
 
-		// Parse duration - support both integer and decimal values
-		durationFloat, err := strconv.ParseFloat(durationStr, 64)
-		if err != nil {
+		var duration int64
+		// Optimization: Try parsing as an integer first, which is much faster.
+		// Fall back to float parsing only if necessary.
+		val, err := strconv.ParseInt(durationStr, 10, 64)
+		if err == nil {
+			duration = val
+		} else if strings.Contains(durationStr, ".") {
+			// Fallback for float values like "300.5"
+			fVal, fErr := strconv.ParseFloat(durationStr, 64)
+			if fErr != nil {
+				continue
+			}
+			duration = int64(math.Round(fVal))
+		} else {
 			continue
 		}
-		duration := int64(math.Round(durationFloat)) // Use math.Round for predictable conversion
+
 		if duration <= 0 {
 			continue
 		}
 
-		// Calculate elapsed time - handle both running and bound pods
 		var elapsedSeconds int64
-
 		if pod.Status.StartTime != nil {
-			// Pod is running - use actual start time
-			elapsedNanos := now.Sub(pod.Status.StartTime.Time).Nanoseconds()
-			elapsedSeconds = elapsedNanos / 1e9
+			elapsedSeconds = int64(now.Sub(pod.Status.StartTime.Time).Seconds())
 		} else if pod.Spec.NodeName != "" {
-			// Pod is bound but not yet started - use creation time as baseline
-			// Assume the pod "reserves" its expected duration from creation time
-			elapsedNanos := now.Sub(pod.CreationTimestamp.Time).Nanoseconds()
-			elapsedSeconds = elapsedNanos / 1e9
+			elapsedSeconds = int64(now.Sub(pod.CreationTimestamp.Time).Seconds())
 		} else {
-			// Pod is not bound - skip
 			continue
 		}
 		remainingSeconds := duration - elapsedSeconds
-
-		// Clamp negative values and update maximum
 		if remainingSeconds < 0 {
 			remainingSeconds = 0
 		}
@@ -157,84 +163,42 @@ func (s *Chronos) calculateMaxRemainingTimeOptimized(pods []*framework.PodInfo) 
 			maxRemainingTime = remainingSeconds
 		}
 	}
-
 	return maxRemainingTime
 }
 
-// CalculateBinPackingCompletionTime determines the completion time for bin-packing logic.
-// The completion time is simply the maximum of the existing window and the new job's duration.
-// This concisely represents both the "fit" (concurrent execution) and "extend" scenarios.
-func (s *Chronos) CalculateBinPackingCompletionTime(maxRemainingTime, newPodDuration int64) int64 {
-	if newPodDuration > maxRemainingTime {
-		return newPodDuration
-	}
-	return maxRemainingTime
-}
-
-// calculateOptimizedScore implements hierarchical bin-packing optimization:
-// PRIORITY 1: Jobs that FIT within existing work windows (perfect bin-packing)
-// PRIORITY 2: Jobs that EXTEND existing commitments (extension minimization)
-// PRIORITY 3: Empty nodes (heavily penalized for cost optimization)
-func (s *Chronos) CalculateOptimizedScore(nodeInfo *framework.NodeInfo, maxRemainingTime int64, newPodDuration int64) int64 {
-	// Pure time-based scoring - NodeResourcesFit plugin handles all resource tie-breaking
-	// This keeps our plugin focused on its core competency: time-based bin-packing
-
-	// Hierarchical scoring with clear priority levels
+// REFINED: Simplified function signature to be more honest about its usage.
+func (s *Chronos) CalculateOptimizedScore(nodeName string, maxRemainingTime int64, newPodDuration int64) int64 {
 	const (
-		binPackingPriority = 1000000 // Highest priority: jobs that fit within existing windows
-		extensionPriority  = 100000  // Medium priority: jobs that extend commitments
-		emptyNodePriority  = 1000    // Lowest priority: empty nodes
+		binPackingPriority = 1000000
+		extensionPriority  = 100000
+		emptyNodePriority  = 1000
 	)
 
-	if maxRemainingTime > 0 && newPodDuration <= maxRemainingTime {
-		// PRIORITY 1: Job fits within existing work - PERFECT BIN-PACKING
-		// This is true bin-packing: no extension of node commitment needed
-		baseScore := int64(binPackingPriority)
-		consolidationBonus := maxRemainingTime * 100 // Prefer longer existing work for better consolidation
-
-		finalScore := baseScore + consolidationBonus
-
-		klog.V(4).Infof("Node %s: BIN-PACKING - NewJob=%ds fits in Existing=%ds, Base=%d, Bonus=%d, Final=%d",
-			nodeInfo.Node().Name, newPodDuration, maxRemainingTime, baseScore, consolidationBonus, finalScore)
-		return finalScore
-
-	} else if maxRemainingTime > 0 {
-		// PRIORITY 2: Job extends beyond existing work - MINIMIZE EXTENSION
-		// Choose node that minimizes the extension of cluster resource commitments
-		baseScore := int64(extensionPriority)
-		extensionPenalty := (newPodDuration - maxRemainingTime) * 100 // Heavy penalty for extending commitments
-
-		finalScore := baseScore - extensionPenalty
-
-		klog.V(4).Infof("Node %s: EXTENSION - NewJob=%ds > Existing=%ds, Extension=%ds, Base=%d, Penalty=%d, Final=%d",
-			nodeInfo.Node().Name, newPodDuration, maxRemainingTime, newPodDuration-maxRemainingTime,
-			baseScore, extensionPenalty, finalScore)
-		return finalScore
-
-	} else {
-		// PRIORITY 3: Empty node - HEAVILY PENALIZED for cost optimization
-		// Avoid empty nodes to enable Karpenter termination and reduce costs
-		baseScore := int64(emptyNodePriority)
-
-		klog.V(4).Infof("Node %s: EMPTY NODE - Base=%d, Final=%d (penalized for cost optimization)",
-			nodeInfo.Node().Name, baseScore, baseScore)
-		return baseScore
+	if maxRemainingTime > 0 {
+		if newPodDuration <= maxRemainingTime {
+			// PRIORITY 1: BIN-PACKING
+			score := int64(binPackingPriority) + (maxRemainingTime * 100)
+			klog.V(5).Infof("Score Node %s: BIN-PACKING -> %d", nodeName, score)
+			return score
+		}
+		// PRIORITY 2: EXTENSION
+		extensionPenalty := (newPodDuration - maxRemainingTime) * 100
+		score := int64(extensionPriority) - extensionPenalty
+		klog.V(5).Infof("Score Node %s: EXTENSION -> %d", nodeName, score)
+		return score
 	}
+
+	// PRIORITY 3: EMPTY NODE
+	klog.V(5).Infof("Score Node %s: EMPTY_NODE -> %d", nodeName, int64(emptyNodePriority))
+	return int64(emptyNodePriority)
 }
 
-// Resource calculation removed - NodeResourcesFit plugin handles all resource-aware tie-breaking
-// This keeps our plugin focused purely on time-based bin-packing optimization
-
-// ScoreExtensions of the Score plugin.
 func (s *Chronos) ScoreExtensions() framework.ScoreExtensions {
 	return s
 }
 
-// NormalizeScore is the key to making this work for jobs of any duration.
-// It takes the raw scores from the Score function and scales them to a 0-100 range.
 func (s *Chronos) NormalizeScore(ctx context.Context, state *framework.CycleState, pod *v1.Pod, scores framework.NodeScoreList) *framework.Status {
 	var minScore, maxScore int64 = math.MaxInt64, math.MinInt64
-
 	for _, nodeScore := range scores {
 		if nodeScore.Score < minScore {
 			minScore = nodeScore.Score
@@ -243,21 +207,14 @@ func (s *Chronos) NormalizeScore(ctx context.Context, state *framework.CycleStat
 			maxScore = nodeScore.Score
 		}
 	}
-
-	// If all scores are the same, set them all to maximum score.
 	if maxScore == minScore {
 		for i := range scores {
-			scores[i].Score = framework.MaxNodeScore // Give all nodes a perfect score
+			scores[i].Score = framework.MaxNodeScore
 		}
 		return nil
 	}
-
 	for i, nodeScore := range scores {
-		// Formula to scale a value from one range [min, max] to another [0, 100].
-		normalized := (nodeScore.Score - minScore) * framework.MaxNodeScore / (maxScore - minScore)
-		scores[i].Score = normalized
-		klog.Infof("Pod: %s/%s, Node: %s, RawScore: %d, NormalizedScore: %d", pod.Namespace, pod.Name, nodeScore.Name, nodeScore.Score, normalized)
+		scores[i].Score = (nodeScore.Score - minScore) * framework.MaxNodeScore / (maxScore - minScore)
 	}
-
 	return nil
 }

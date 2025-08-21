@@ -346,7 +346,7 @@ func calculateProductionScore(pod *v1.Pod, nodeInfo *framework.NodeInfo) int64 {
 
 	// ✅ CRITICAL FIX: Use actual production plugin logic
 	plugin := &Chronos{}
-	score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration)
+	score := plugin.CalculateOptimizedScore("test-node", maxRemainingTime, newPodDuration)
 
 	return score
 }
@@ -609,7 +609,6 @@ func TestOptimizedSchedulingIntegration(t *testing.T) {
 			// Score each node
 			for i, nodeSpec := range tc.nodes {
 				// Use simpleMockNodeInfo for integration testing
-				nodeInfo := simpleMockNodeInfo(nodeSpec.name, len(nodeSpec.existingJobs), 110)
 				nodeNames[i] = nodeSpec.name
 
 				// Calculate max remaining time
@@ -623,7 +622,7 @@ func TestOptimizedSchedulingIntegration(t *testing.T) {
 				}
 
 				// Calculate completion time and score
-				score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, tc.newJobDuration)
+				score := plugin.CalculateOptimizedScore("test-node", maxRemainingTime, tc.newJobDuration)
 				scores[i] = score
 
 				t.Logf("   Node %s: ExistingWork=%ds, NewJob=%ds, Score=%d",
@@ -655,21 +654,18 @@ func TestCostOptimizationScenarios(t *testing.T) {
 
 	// Scenario 1: Multiple jobs that could consolidate
 	t.Run("MultipleJobConsolidation", func(t *testing.T) {
-		// Node with 10 minutes of existing work - use simpleMockNodeInfo with 1 pod
-		activeNode := simpleMockNodeInfo("active-node", 1, 110)
-
-		// Empty node - use simpleMockNodeInfo with 0 pods
-		emptyNode := simpleMockNodeInfo("empty-node", 0, 110)
+		// Node with 10 minutes of existing work
+		// Empty node
 
 		// Test multiple short jobs (2, 4, 6 minutes) - all should prefer active node
 		jobDurations := []int64{120, 240, 360} // 2, 4, 6 minutes
 
 		for _, jobDuration := range jobDurations {
 			// Score active node
-			activeScore := plugin.CalculateOptimizedScore(activeNode, 600, jobDuration)
+			activeScore := plugin.CalculateOptimizedScore("active-node", 600, jobDuration)
 
 			// Score empty node
-			emptyScore := plugin.CalculateOptimizedScore(emptyNode, 0, jobDuration)
+			emptyScore := plugin.CalculateOptimizedScore("empty-node", 0, jobDuration)
 
 			// Active node should win for consolidation
 			assert.Greater(t, activeScore, emptyScore,
@@ -698,9 +694,8 @@ func TestCostOptimizationScenarios(t *testing.T) {
 
 		scores := make([]int64, len(nodes))
 		for i, node := range nodes {
-			nodeInfo := simpleMockNodeInfo(node.name, node.utilization, 20)
 
-			score := plugin.CalculateOptimizedScore(nodeInfo, node.existing, newJobDuration)
+			score := plugin.CalculateOptimizedScore("test-node", node.existing, newJobDuration)
 			scores[i] = score
 		}
 
