@@ -4,10 +4,9 @@ Chronos Scheduler Simulation Runner
 Executes realistic scheduling scenarios to validate bin-packing logic
 """
 
-import yaml
+import yaml # type: ignore
 import subprocess
 import time
-import json
 import sys
 import re
 from typing import Dict, List, Any, Optional
@@ -159,7 +158,7 @@ spec:
         ])
         
         if code != 0 or not output:
-            print(f"❌ Could not find scheduler pod")
+            print("❌ Could not find scheduler pod")
             return ""
         
         scheduler_pod = output
@@ -231,7 +230,7 @@ spec:
         print(f"{'='*80}")
         
         # Setup initial conditions
-        print(f"\n📋 Setting up initial conditions...")
+        print("\n📋 Setting up initial conditions...")
         for node, pods in scenario['setup_pods'].items():
             for pod_config in pods:
                 if not self.create_setup_pod(
@@ -270,13 +269,13 @@ spec:
         )
         
         # Print results
-        print(f"\n📊 RESULTS:")
+        print("\n📊 RESULTS:")
         print(f"Expected node: {new_pod['expected_node']}")
         print(f"Actual node: {actual_node}")
         print(f"Expected strategy: {new_pod['expected_strategy']}")
         
         if analysis['chronos_scores']:
-            print(f"\n🔍 CHRONOS_SCORE details:")
+            print("\n🔍 CHRONOS_SCORE details:")
             for score in analysis['chronos_scores']:
                 print(f"  Node: {score['node']}")
                 print(f"  Strategy: {score['strategy']} ")
