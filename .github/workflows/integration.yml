@@ -126,7 +126,7 @@ jobs:
         
         # Ensure we see our custom logs (klog.Infof requires level 2+)
         logging:
-          level: 2
+          level: 4
           format: text
         
         resources:
