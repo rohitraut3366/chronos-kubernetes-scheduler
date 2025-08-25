@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -131,6 +132,73 @@ func TestPluginBasics(t *testing.T) {
 		// maxPossibleScore constant removed as it's no longer used in scoring logic
 
 		t.Logf("✅ Constants validated - framework.MaxNodeScore = %d", framework.MaxNodeScore)
+	})
+}
+
+func TestGroupingFeatureFlag(t *testing.T) {
+	t.Run("GroupingDisabled", func(t *testing.T) {
+		// Test individual mode (default behavior when CHRONOS_GROUPING_ENABLED is not set)
+		plugin, err := New(context.Background(), nil, nil)
+		assert.NoError(t, err)
+
+		chronos := plugin.(*Chronos)
+		assert.False(t, chronos.batchModeEnabled, "Should be in individual mode when grouping flag is not set")
+		assert.Nil(t, chronos.batchScheduler, "Should not have batch scheduler in individual mode")
+	})
+
+	t.Run("GroupingEnabledViaEnv", func(t *testing.T) {
+		// Test batch mode when CHRONOS_GROUPING_ENABLED=true
+		t.Setenv("CHRONOS_GROUPING_ENABLED", "true")
+
+		plugin, err := New(context.Background(), nil, nil)
+		assert.NoError(t, err)
+
+		chronos := plugin.(*Chronos)
+		assert.True(t, chronos.batchModeEnabled, "Should be in batch mode when grouping flag is true")
+		// In test mode with nil handle, batch scheduler is not created but flag is enabled
+		assert.Nil(t, chronos.batchScheduler, "Should not create batch scheduler in test mode with nil handle")
+	})
+
+	t.Run("GroupingExplicitlyDisabled", func(t *testing.T) {
+		// Test individual mode when CHRONOS_GROUPING_ENABLED=false
+		t.Setenv("CHRONOS_GROUPING_ENABLED", "false")
+
+		plugin, err := New(context.Background(), nil, nil)
+		assert.NoError(t, err)
+
+		chronos := plugin.(*Chronos)
+		assert.False(t, chronos.batchModeEnabled, "Should be in individual mode when grouping flag is false")
+		assert.Nil(t, chronos.batchScheduler, "Should not have batch scheduler when grouping is disabled")
+	})
+
+	t.Run("ConfigurationVerification", func(t *testing.T) {
+		// Test that the feature flag is correctly read from environment
+		originalEnv := os.Getenv("CHRONOS_GROUPING_ENABLED")
+		defer func() {
+			if originalEnv != "" {
+				os.Setenv("CHRONOS_GROUPING_ENABLED", originalEnv)
+			} else {
+				os.Unsetenv("CHRONOS_GROUPING_ENABLED")
+			}
+		}()
+
+		// Test enabled case
+		os.Setenv("CHRONOS_GROUPING_ENABLED", "true")
+		plugin1, err := New(context.Background(), nil, nil)
+		assert.NoError(t, err)
+		assert.True(t, plugin1.(*Chronos).batchModeEnabled, "Should enable batch mode when flag is true")
+
+		// Test disabled case
+		os.Setenv("CHRONOS_GROUPING_ENABLED", "false")
+		plugin2, err := New(context.Background(), nil, nil)
+		assert.NoError(t, err)
+		assert.False(t, plugin2.(*Chronos).batchModeEnabled, "Should disable batch mode when flag is false")
+
+		// Test default case
+		os.Unsetenv("CHRONOS_GROUPING_ENABLED")
+		plugin3, err := New(context.Background(), nil, nil)
+		assert.NoError(t, err)
+		assert.False(t, plugin3.(*Chronos).batchModeEnabled, "Should default to individual mode when flag is not set")
 	})
 }
 

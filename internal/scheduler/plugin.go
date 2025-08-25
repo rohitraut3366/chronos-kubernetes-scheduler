@@ -51,14 +51,20 @@ func New(ctx context.Context, _ runtime.Object, h framework.Handle) (framework.P
 		handle: h,
 	}
 
-	if os.Getenv("CHRONOS_BATCH_MODE_ENABLED") == "true" {
+	// Feature flag: grouping enables batch scheduling, disabled = individual scheduling
+	groupingEnabled := os.Getenv("CHRONOS_GROUPING_ENABLED")
+	if groupingEnabled == "true" && h != nil {
 		chronos.batchModeEnabled = true
 		chronos.batchScheduler = NewBatchScheduler(h, chronos)
 		chronos.batchScheduler.Start()
-		klog.Infof("🚀 Chronos BATCH MODE enabled")
+		klog.Infof("🚀 Chronos GROUPING MODE enabled - Using batch scheduler")
+	} else if groupingEnabled == "true" && h == nil {
+		// Test mode: enable batch mode flag but don't create actual batch scheduler
+		chronos.batchModeEnabled = true
+		klog.Infof("🧪 Chronos GROUPING MODE enabled - Test mode (no actual scheduler)")
 	} else {
 		chronos.batchModeEnabled = false
-		klog.Infof("📝 Chronos INDIVIDUAL MODE enabled")
+		klog.Infof("📝 Chronos INDIVIDUAL MODE enabled - Using traditional pod-by-pod scheduling")
 	}
 
 	return chronos, nil
@@ -76,17 +82,18 @@ func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.
 		return 0, framework.NewStatus(framework.Success)
 	}
 
+	// GROUPING MODE: When CHRONOS_GROUPING_ENABLED=true, use batch scheduler
 	if s.batchModeEnabled {
 		if _, inFlight := s.inFlightPods.Load(p.UID); inFlight {
 			klog.V(4).Infof("Pod %s/%s is in-flight with batch scheduler, assigning minimal score.", p.Namespace, p.Name)
 			return 1, framework.NewStatus(framework.Success)
 		}
 
-		klog.V(4).Infof("Pod %s/%s is a candidate for the batch scheduler.", p.Namespace, p.Name)
+		klog.V(4).Infof("Pod %s/%s is a candidate for batch grouping scheduler.", p.Namespace, p.Name)
 		return 1, framework.NewStatus(framework.Success)
 	}
 
-	// INDIVIDUAL MODE
+	// INDIVIDUAL MODE: When CHRONOS_GROUPING_ENABLED=false, use traditional pod-by-pod scoring
 	newPodDurationFloat, err := strconv.ParseFloat(newPodDurationStr, 64)
 	if err != nil {
 		klog.Warningf("Could not parse duration '%s' for pod %s/%s: %v", newPodDurationStr, p.Namespace, p.Name, err)
