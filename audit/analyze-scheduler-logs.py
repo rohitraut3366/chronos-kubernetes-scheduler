@@ -249,12 +249,35 @@ def main():
         # Generate analysis
         generate_analysis_report(scheduling_sessions)
         
-        # Optionally save full JSON output
-        output_file = f"scheduler_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        # Save full JSON output
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_file = f"scheduler_analysis_{timestamp}.json"
         with open(output_file, 'w') as f:
             json.dump(scheduling_sessions, f, indent=2)
         
         print(f"\n💾 Full analysis saved to: {output_file}")
+        
+        # Create separate JSON files by chosen strategy
+        strategy_files = {}
+        for strategy in ['BIN-PACKING', 'EXTENSION', 'EMPTY NODE']:
+            strategy_sessions = {
+                pod_name: session for pod_name, session in scheduling_sessions.items()
+                if session.get('chosen_node_strategy') == strategy
+            }
+            
+            if strategy_sessions:  # Only create file if there are pods for this strategy
+                strategy_file = f"scheduler_analysis_{strategy.lower().replace(' ', '_').replace('-', '_')}_{timestamp}.json"
+                strategy_files[strategy] = strategy_file
+                
+                with open(strategy_file, 'w') as f:
+                    json.dump(strategy_sessions, f, indent=2)
+                
+                print(f"📊 {strategy} pods ({len(strategy_sessions)}): {strategy_file}")
+        
+        # Summary of strategy files created
+        total_pods_in_files = sum(len(json.load(open(f))) for f in strategy_files.values())
+        print(f"\n🎯 Strategy-specific files created: {len(strategy_files)}")
+        print(f"📋 Total pods in strategy files: {total_pods_in_files}")
         
     except FileNotFoundError:
         print(f"❌ Error: Log file '{log_file_path}' not found!")

@@ -296,6 +296,10 @@ python3 audit/analyze-scheduler-logs.py ./scheduler.log
   - Raw and normalized scores for each node
   - Timestamps for tracking scheduling timeline
   - Per-pod strategy node counts showing scheduling landscape for each individual pod
+- **🎯 Strategy-Specific Files**: Automatically creates separate JSON files for each chosen strategy:
+  - `scheduler_analysis_bin_packing_*.json` - All pods that used BIN-PACKING strategy
+  - `scheduler_analysis_extension_*.json` - All pods that used EXTENSION strategy
+  - `scheduler_analysis_empty_node_*.json` - All pods that used EMPTY NODE strategy
 - **🔍 Production Ready**: Handles real Kubernetes scheduler log formats
 
 #### Sample Console Output
@@ -326,7 +330,13 @@ python3 audit/analyze-scheduler-logs.py ./scheduler.log
    ip-10-10-166-61.us-west-2.compute.internal: 23 pods
    ip-10-10-164-166.us-west-2.compute.internal: 19 pods
 
-💾 Full analysis saved to: scheduler_analysis_20250825_134804.json
+💾 Full analysis saved to: scheduler_analysis_20250825_140629.json
+📊 BIN-PACKING pods (619): scheduler_analysis_bin_packing_20250825_140629.json
+📊 EXTENSION pods (318): scheduler_analysis_extension_20250825_140629.json
+📊 EMPTY NODE pods (26): scheduler_analysis_empty_node_20250825_140629.json
+
+🎯 Strategy-specific files created: 3
+📋 Total pods in strategy files: 963
 ```
 
 #### Sample JSON File Content
@@ -364,6 +374,14 @@ This tool is invaluable for:
 - **📈 Analyzing** cluster utilization patterns  
 - **🎯 Optimizing** scheduler parameters
 - **📊 Understanding** production workload behaviors
+
+#### Strategy-Specific Analysis Benefits
+
+The separate JSON files enable targeted analysis:
+- **BIN-PACKING Analysis**: Study optimal scheduling patterns and identify time window utilization
+- **EXTENSION Analysis**: Understand when and why workloads extend node completion times
+- **EMPTY NODE Analysis**: Identify pods that go to empty nodes (potential cost optimization opportunities)
+- **Comparative Analysis**: Compare scheduling contexts across different strategy outcomes
 
 ## 🛠️ Development
 
