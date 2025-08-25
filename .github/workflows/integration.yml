@@ -347,7 +347,16 @@ jobs:
         fi
         
         echo "=== LEADER SCHEDULER LOGS ($LEADER_POD) ==="
-        kubectl logs -n chronos-system $LEADER_POD --tail=100
+        kubectl logs -n chronos-system $LEADER_POD
+        
+        echo "=== SCHEDULER STARTUP LOGS ==="
+        kubectl logs -n chronos-system $LEADER_POD | grep -E "(Chronos|plugin|scheduler)" | head -20
+        
+        echo "=== CHRONOS PLUGIN INITIALIZATION ==="
+        kubectl logs -n chronos-system $LEADER_POD | grep -i "Initializing Chronos plugin" || echo "No Chronos plugin initialization found"
+        
+        echo "=== POD SCHEDULING ACTIVITY ==="
+        kubectl logs -n chronos-system $LEADER_POD | grep -E "(Attempting to schedule|evaluating|scoring)" | head -10
         
         echo "=== CHRONOS_SCORE LOGS FROM LEADER ==="
         kubectl logs -n chronos-system $LEADER_POD | grep "CHRONOS_SCORE:" || echo "No CHRONOS_SCORE logs found"
@@ -358,8 +367,13 @@ jobs:
         echo "=== SUCCESSFULLY BOUND LOGS FROM LEADER ==="
         kubectl logs -n chronos-system $LEADER_POD | grep "Successfully bound" || echo "No successful binding logs found"
         
-        echo "=== POD SCHEDULING SUMMARY ==="
-        kubectl get pods -n integration-test -o wide
+        echo "=== TEST POD SCHEDULER VERIFICATION ==="
+        for pod in $(kubectl get pods -n integration-test -o name); do
+          POD_NAME=$(echo $pod | cut -d'/' -f2)
+          SCHEDULER=$(kubectl get pod -n integration-test $POD_NAME -o jsonpath='{.spec.schedulerName}')
+          ANNOTATIONS=$(kubectl get pod -n integration-test $POD_NAME -o jsonpath='{.metadata.annotations}' || echo "none")
+          echo "Pod: $POD_NAME | Scheduler: $SCHEDULER | Annotations: $ANNOTATIONS"
+        done
         
         echo "=== BASIC VALIDATION (INFORMATIONAL) ==="
         CHRONOS_PODS=$(kubectl get pods -n integration-test -o jsonpath='{.items[?(@.spec.schedulerName=="chronos-kubernetes-scheduler")].metadata.name}' | wc -w)
