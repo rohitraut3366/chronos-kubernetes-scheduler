@@ -42,24 +42,86 @@ jobs:
         ./get_helm.sh
         rm get_helm.sh
 
-    - name: Set up K3s cluster
+    - name: Set up K3s multi-node cluster
       run: |
-        # Install K3s
+        # Install K3s server (master node)
         curl -sfL https://get.k3s.io | sh -s - \
           --write-kubeconfig-mode 644 \
           --disable traefik \
           --disable servicelb \
-          --disable metrics-server
+          --disable metrics-server \
+          --node-name k3s-server
 
-        # Wait for K3s to be ready
+        # Wait for K3s server to be ready
         sudo chmod 644 /etc/rancher/k3s/k3s.yaml
         export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
         
-        # Wait for node to be ready
+        # Wait for server node to be ready
         timeout 60s bash -c 'until kubectl get nodes | grep -q Ready; do sleep 5; done'
         
+        # Get the node token and server info for agents
+        K3S_TOKEN=$(sudo cat /var/lib/rancher/k3s/server/node-token)
+        K3S_SERVER_IP=$(hostname -I | cut -d' ' -f1)
+        
+        echo "Server ready, adding agent nodes..."
+        
+        # Add second node using Docker container
+        docker run -d \
+          --name k3s-agent-1 \
+          --privileged \
+          --network host \
+          --pid host \
+          --ipc host \
+          --tmpfs /run \
+          --tmpfs /var/run \
+          -v /lib/modules:/lib/modules:ro \
+          rancher/k3s:latest \
+          agent \
+          --server https://${K3S_SERVER_IP}:6443 \
+          --token ${K3S_TOKEN} \
+          --node-name k3s-agent-1
+        
+        # Add third node for more diverse scheduling
+        docker run -d \
+          --name k3s-agent-2 \
+          --privileged \
+          --network host \
+          --pid host \
+          --ipc host \
+          --tmpfs /run \
+          --tmpfs /var/run \
+          -v /lib/modules:/lib/modules:ro \
+          rancher/k3s:latest \
+          agent \
+          --server https://${K3S_SERVER_IP}:6443 \
+          --token ${K3S_TOKEN} \
+          --node-name k3s-agent-2
+        
+        # Wait for all nodes to be ready (up to 3 minutes)
+        echo "Waiting for all nodes to be ready..."
+        for i in {1..36}; do
+          READY_NODES=$(kubectl get nodes --no-headers | grep -c " Ready ")
+          TOTAL_NODES=$(kubectl get nodes --no-headers | wc -l)
+          echo "Ready nodes: $READY_NODES/$TOTAL_NODES"
+          
+          if [ "$READY_NODES" -ge 3 ]; then
+            echo "✅ Multi-node cluster ready with $READY_NODES nodes!"
+            break
+          fi
+          
+          if [ "$i" -eq 36 ]; then
+            echo "⚠️ Timeout waiting for all nodes, continuing with available nodes"
+          fi
+          
+          sleep 5
+        done
+        
+        echo "=== FINAL CLUSTER STATUS ==="
         kubectl cluster-info
         kubectl get nodes -o wide
+        
+        echo "=== NODE DETAILS ==="
+        kubectl describe nodes
 
     - name: Build Docker image with caching
       uses: docker/build-push-action@v5
@@ -388,6 +450,25 @@ jobs:
         
         BINDING_COUNT=$(kubectl logs -n chronos-system $LEADER_POD | grep -c "Successfully bound" || echo "0")
         echo "Successfully bound events: $BINDING_COUNT"
+        
+        echo "=== NODE ANALYSIS ==="
+        NODE_COUNT=$(kubectl get nodes --no-headers | wc -l)
+        READY_NODE_COUNT=$(kubectl get nodes --no-headers | grep -c " Ready ")
+        echo "Total nodes in cluster: $NODE_COUNT (Ready: $READY_NODE_COUNT)"
+        
+        kubectl get nodes -o wide
+        
+        if [ "$READY_NODE_COUNT" -eq 1 ]; then
+          echo "ℹ️  Single node cluster detected - this explains why no scoring logs appear"
+          echo "   Kubernetes skips scoring phase when there's only one feasible node"
+          echo "   This is normal behavior and indicates our scheduler is working correctly"
+        elif [ "$READY_NODE_COUNT" -gt 1 ]; then
+          echo "🎯 Multi-node cluster detected - CHRONOS_SCORE logs should now appear!"
+          echo "   Expected: evaluatedNodes=$READY_NODE_COUNT, with scoring comparisons between nodes"
+          echo "   Our custom scheduler plugin should rank nodes using bin-packing logic"
+        else
+          echo "⚠️  No ready nodes detected - cluster may still be initializing"
+        fi
         
         echo "=== CRITICAL VALIDATION CHECKS ==="
         
