@@ -2,7 +2,7 @@
 # K9s Plugin: Show Chronos scheduling decision for specific pod
 # Usage: Called from K9s when Ctrl-D is pressed on a pod
 
-set -euo pipefail
+set -x
 
 # Colors for terminal output
 RED='\033[0;31m'
@@ -20,9 +20,20 @@ find_scheduler_pod() {
     
     # Get all scheduler pods
     local scheduler_pods
-    scheduler_pods=$(kubectl get pods -A -l app=chronos-kubernetes-scheduler -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}')
+    echo -e "${CYAN}Running: kubectl get pods -n codeship-custom-scheduler-eks -l app.kubernetes.io/name=chronos-kubernetes-scheduler${NC}"
+    
+    scheduler_pods=$(kubectl get pods -n codeship-custom-scheduler-eks -l app.kubernetes.io/name=chronos-kubernetes-scheduler -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' 2>&1)
+    local kubectl_exit_code=$?
+    
+    if [[ $kubectl_exit_code -ne 0 ]]; then
+        echo -e "${RED}❌ kubectl command failed with exit code: $kubectl_exit_code${NC}"
+        echo -e "${YELLOW}Error output:${NC}"
+        echo "$scheduler_pods"
+        return 1
+    fi
     
     if [[ -z "$scheduler_pods" ]]; then
+        echo -e "${YELLOW}⚠️  No Chronos scheduler pods found${NC}"
         return 1
     fi
     
@@ -36,24 +47,24 @@ find_scheduler_pod() {
         return 0
     fi
     
-    # Multiple pods - find the leader by checking recent scheduling activity
+    # Multiple pods - find the leader by checking total scheduling activity
     echo -e "${YELLOW}🔍 Multiple pods found, identifying leader...${NC}"
     local leader_pod=""
-    local max_recent_logs=0
+    local max_total_logs=0
     
     while IFS= read -r pod; do
         if [[ -n "$pod" ]]; then
             local namespace=$(echo "$pod" | cut -d'/' -f1)
             local pod_name=$(echo "$pod" | cut -d'/' -f2)
             
-            # Check for recent scheduling activity (last 5 minutes)
-            local recent_logs
-            recent_logs=$(kubectl logs -n "$namespace" "$pod_name" --since=5m 2>/dev/null | grep -E "(Successfully bound|Attempting to schedule)" | wc -l | tr -d ' ')
+            # Check all available logs for scheduling activity
+            local total_logs
+            total_logs=$(kubectl logs -n "$namespace" "$pod_name" 2>/dev/null | grep -E "(Successfully bound|Attempting to schedule)" | wc -l | tr -d ' ')
             
-            echo -e "${CYAN}  $pod: $recent_logs recent scheduling events${NC}"
+            echo -e "${CYAN}  $pod: $total_logs total scheduling events${NC}"
             
-            if [[ "$recent_logs" -gt "$max_recent_logs" ]]; then
-                max_recent_logs="$recent_logs"
+            if [[ "$total_logs" -gt "$max_total_logs" ]]; then
+                max_total_logs="$total_logs"
                 leader_pod="$pod"
             fi
         fi
@@ -67,7 +78,7 @@ find_scheduler_pod() {
         # Fallback: try to find leader via lease
         echo -e "${YELLOW}🔍 Checking leader election lease...${NC}"
         local lease_holder
-        lease_holder=$(kubectl get lease -A -l component=kube-scheduler -o jsonpath='{range .items[*]}{.spec.holderIdentity}{"\n"}{end}' | head -1 2>/dev/null || true)
+        lease_holder=$(kubectl get lease -n codeship-custom-scheduler-eks -o jsonpath='{range .items[*]}{.spec.holderIdentity}{"\n"}{end}' | head -1 2>/dev/null || true)
         
         if [[ -n "$lease_holder" ]]; then
             # Match lease holder to pod
@@ -100,7 +111,7 @@ analyze_pod_decision() {
     
     # Get scheduler logs and filter for this specific pod
     local logs
-    logs=$(kubectl logs -n "$namespace" "$pod_name_only" --tail=2000 2>/dev/null | grep -E "$pod_name" || true)
+    logs=$(kubectl logs -n "$namespace" "$pod_name_only" 2>/dev/null | grep -E "$pod_name" || true)
     
     if [[ -z "$logs" ]]; then
         echo -e "${RED}❌ No scheduling logs found for pod: $pod_name${NC}"
@@ -132,8 +143,8 @@ analyze_pod_decision() {
     printf "${BOLD}%-20s${NC} %s\n" "Chosen Node:" "${GREEN}$chosen_node${NC}"
     printf "${BOLD}%-20s${NC} %s\n" "Scheduled At:" "${BLUE}$timestamp${NC}"
     
-    # Count nodes evaluated
-    local nodes_evaluated=$(echo "$logs" | grep -E "(BIN-PACKING|EXTENSION|EMPTY)" | grep "Node " | wc -l | tr -d ' ')
+    # Count nodes evaluated from plugin output
+    local nodes_evaluated=$(echo "$logs" | grep "plugin.go.*Node:" | wc -l | tr -d ' ')
     printf "${BOLD}%-20s${NC} %s\n" "Nodes Evaluated:" "${CYAN}$nodes_evaluated${NC}"
     
     echo "════════════════════════════════════════════════════════════════════════════════"
@@ -217,16 +228,22 @@ main() {
     clear
     
     # Find scheduler pod
-    local scheduler_pod
-    scheduler_pod=$(find_scheduler_pod)
+    local scheduler_pod_output
+    scheduler_pod_output=$(find_scheduler_pod)
     
-    if [[ -z "$scheduler_pod" ]]; then
+    # Extract just the last line which contains the actual pod name
+    local scheduler_pod=$(echo "$scheduler_pod_output" | tail -1)
+    
+    if [[ -z "$scheduler_pod" || "$scheduler_pod" == *"No Chronos scheduler pods found"* ]]; then
         echo -e "${RED}❌ Could not find Chronos scheduler pod${NC}"
-        echo "Make sure the scheduler is running with label: app=chronos-kubernetes-scheduler"
+        echo "Make sure the scheduler is running with label: app.kubernetes.io/name=chronos-kubernetes-scheduler in namespace: codeship-custom-scheduler-eks"
         echo -e "\n${YELLOW}Press any key to return to K9s...${NC}"
         read -n 1 -s
         exit 1
     fi
+    
+    # Show the scheduler identification results (excluding the final line)
+    echo "$scheduler_pod_output" | sed '$d'
     
     # Get pod name from argument (passed by k9s)
     local pod_name="$1"

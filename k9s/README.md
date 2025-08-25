@@ -102,7 +102,7 @@ chmod +x ~/.config/k9s/plugins/*.sh
 1. Start k9s: `k9s`
 2. Navigate to pods: `:pods` or `:po`  
 3. Select any pod with arrow keys
-4. Press `w` to see scheduling analysis (Where/What node)
+4. Press `Shift-W` to see scheduling analysis (Where/What node)
 
 **What you'll see:**
 - 📱 **Live Analysis**: Real-time analysis from scheduler logs

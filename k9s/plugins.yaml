@@ -1,26 +1,35 @@
 # K9s Plugin: Chronos Pod Scheduling Decision
 # Shows scheduling decision for a specific pod
 
+# plugins:
+  # chronos-decision:
+  #   shortCut: Shift-W
+  #   description: "Show Chronos scheduling decision for this pod"
+  #   scopes:
+  #   - po
+  #   command: bash
+  #   background: false
+  #   args:
+  #   - -c
+  #   - |
+  #     echo "📱 Analyzing live scheduler logs for pod: $NAME"
+  #     ~/.config/k9s/plugins/chronos-pod-decision.sh "$NAME"
+      
+  #     echo -e "\n💡 Press any key to return to k9s..."
+  #     read -n 1 -s -r -p ""
 plugins:
-  # Analyze scheduling decision for current pod
   chronos-decision:
     shortCut: w
-    confirm: false
     description: "Show Chronos scheduling decision for this pod"
     scopes:
-    - pods
+    - po
     command: bash
     background: false
     args:
-    - -c
+    - -cx
     - |
-      # Get the current pod name from K9s context
-      POD_NAME="$1"
-      PLUGINS_DIR="$HOME/.config/k9s/plugins"
-      
-      echo "📱 Analyzing live scheduler logs for pod: $POD_NAME"
-      ${PLUGINS_DIR}/chronos-pod-decision.sh "$POD_NAME"
-      
+      echo "📱 Analyzing live scheduler logs for pod: $NAME (ns: $NAMESPACE)"
+      $HOME/.config/k9s/plugins/chronos-pod-decision.sh "$NAME" "$NAMESPACE" || echo "❌ Script failed"
+
       echo -e "\n💡 Press any key to return to k9s..."
       read -n 1 -s -r -p ""
-    - $NAME

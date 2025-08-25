@@ -75,8 +75,8 @@ if [[ -f "$K9S_CONFIG/plugin.yml" ]]; then
     fi
 else
     # Create new plugin config
-    cp "$SCRIPT_DIR/plugins.yaml" "$K9S_CONFIG/plugin.yml"
-    echo "✅ Created new plugin.yml"
+    cp "$SCRIPT_DIR/plugins.yaml" "$K9S_CONFIG/plugins.yaml"
+    echo "✅ Created new plugins.yaml"
 fi
 
 echo -e "\n${GREEN}🎉 Installation complete!${NC}\n"
@@ -84,7 +84,7 @@ echo -e "\n${GREEN}🎉 Installation complete!${NC}\n"
 echo -e "${BLUE}📖 Usage Instructions:${NC}"
 echo "1. Restart k9s"
 echo "2. Navigate to any pod"
-echo "3. Press 'w' to see scheduling analysis (Where/What node)"
+echo "3. Press 'Shift-W' to see scheduling analysis (Where/What node)"
 echo ""
 
 echo -e "${BLUE}💡 Pro Tips:${NC}"
@@ -95,5 +95,5 @@ echo ""
 
 echo -e "${YELLOW}🔄 Next Steps:${NC}"
 echo "1. Restart k9s"
-echo "2. Test the plugin: k9s → select pod → press 'w'"
+echo "2. Test the plugin: k9s → select pod → press 'Shift-W'"
 echo "3. Enjoy real-time scheduling analysis!"
