@@ -42,13 +42,12 @@ def parse_scheduler_logs(log_file_path):
     
     # Regex patterns for new CHRONOS_SCORE log format
     patterns = {
-        'chronos_score': r'CHRONOS_SCORE: Pod=([^,]+), Node=([^,]+), Strategy=([^,]+), NewJobDuration=(\d+), ExistingWork=(\d+), ExtensionDuration=(\d+), CompletionTime=([^,]+), FinalScore=(-?\d+)',
+        'chronos_score': r'CHRONOS_SCORE: Pod=([^,]+),\s*Node=([^,]+),\s*Strategy=([^,]+),\s*NewPodDuration=(\d+)s,\s*maxRemainingTime=(\d+)s,\s*ExtensionDuration=(\d+)s,\s*CompletionTime=([^,]+),\s*FinalScore=(-?\d+)',
         'timestamp': r'^I(\d{4} \d{2}:\d{2}:\d{2}\.\d+)',
         'final_score': r'Pod: ([^,]+), Node: ([^,]+), RawScore: (-?\d+), NormalizedScore: (\d+)',
         'successful_binding': r'Successfully bound pod to node.*pod="([^"]+)".*node="([^"]+)"'
     }
     
-    current_pod = None
     current_timestamp = None
     
     print("🔍 Analyzing scheduler logs...")
