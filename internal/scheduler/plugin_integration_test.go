@@ -346,7 +346,8 @@ func calculateProductionScore(pod *v1.Pod, nodeInfo *framework.NodeInfo) int64 {
 
 	// ✅ CRITICAL FIX: Use actual production plugin logic
 	plugin := &Chronos{}
-	score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration)
+	testPod := createIntegrationPod("test-pod", newPodDuration)
+	score := plugin.CalculateOptimizedScore(testPod, nodeInfo, maxRemainingTime, newPodDuration)
 
 	return score
 }
@@ -623,7 +624,8 @@ func TestOptimizedSchedulingIntegration(t *testing.T) {
 				}
 
 				// Calculate completion time and score
-				score := plugin.CalculateOptimizedScore(nodeInfo, maxRemainingTime, tc.newJobDuration)
+				testPod := createIntegrationPod("test-pod", tc.newJobDuration)
+				score := plugin.CalculateOptimizedScore(testPod, nodeInfo, maxRemainingTime, tc.newJobDuration)
 				scores[i] = score
 
 				t.Logf("   Node %s: ExistingWork=%ds, NewJob=%ds, Score=%d",
@@ -666,10 +668,12 @@ func TestCostOptimizationScenarios(t *testing.T) {
 
 		for _, jobDuration := range jobDurations {
 			// Score active node
-			activeScore := plugin.CalculateOptimizedScore(activeNode, 600, jobDuration)
+			testPodActive := createIntegrationPod("test-pod-active", jobDuration)
+			activeScore := plugin.CalculateOptimizedScore(testPodActive, activeNode, 600, jobDuration)
 
 			// Score empty node
-			emptyScore := plugin.CalculateOptimizedScore(emptyNode, 0, jobDuration)
+			testPodEmpty := createIntegrationPod("test-pod-empty", jobDuration)
+			emptyScore := plugin.CalculateOptimizedScore(testPodEmpty, emptyNode, 0, jobDuration)
 
 			// Active node should win for consolidation
 			assert.Greater(t, activeScore, emptyScore,
@@ -700,7 +704,8 @@ func TestCostOptimizationScenarios(t *testing.T) {
 		for i, node := range nodes {
 			nodeInfo := simpleMockNodeInfo(node.name, node.utilization, 20)
 
-			score := plugin.CalculateOptimizedScore(nodeInfo, node.existing, newJobDuration)
+			testPodFinal := createIntegrationPod("test-pod-final", newJobDuration)
+			score := plugin.CalculateOptimizedScore(testPodFinal, nodeInfo, node.existing, newJobDuration)
 			scores[i] = score
 		}
 
