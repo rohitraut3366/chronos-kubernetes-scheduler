@@ -14,19 +14,80 @@ MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 BOLD='\033[1m'
 
-# Function to find Chronos scheduler pod
+# Function to find Chronos scheduler leader pod
 find_scheduler_pod() {
-    kubectl get pods -A -l app=chronos-kubernetes-scheduler -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' | head -1
+    echo -e "${BLUE}🔍 Finding Chronos scheduler leader...${NC}"
+    
+    # Get all scheduler pods
+    local scheduler_pods
+    scheduler_pods=$(kubectl get pods -A -l app=chronos-kubernetes-scheduler -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}')
+    
+    if [[ -z "$scheduler_pods" ]]; then
+        return 1
+    fi
+    
+    local pod_count=$(echo "$scheduler_pods" | wc -l | tr -d ' ')
+    echo -e "${CYAN}📊 Found $pod_count scheduler pod(s)${NC}"
+    
+    # If only one pod, that's our scheduler
+    if [[ "$pod_count" -eq 1 ]]; then
+        echo -e "${GREEN}✅ Single scheduler pod found${NC}"
+        echo "$scheduler_pods"
+        return 0
+    fi
+    
+    # Multiple pods - find the leader by checking recent scheduling activity
+    echo -e "${YELLOW}🔍 Multiple pods found, identifying leader...${NC}"
+    local leader_pod=""
+    local max_recent_logs=0
+    
+    while IFS= read -r pod; do
+        if [[ -n "$pod" ]]; then
+            local namespace=$(echo "$pod" | cut -d'/' -f1)
+            local pod_name=$(echo "$pod" | cut -d'/' -f2)
+            
+            # Check for recent scheduling activity (last 5 minutes)
+            local recent_logs
+            recent_logs=$(kubectl logs -n "$namespace" "$pod_name" --since=5m 2>/dev/null | grep -E "(Successfully bound|Attempting to schedule)" | wc -l | tr -d ' ')
+            
+            echo -e "${CYAN}  $pod: $recent_logs recent scheduling events${NC}"
+            
+            if [[ "$recent_logs" -gt "$max_recent_logs" ]]; then
+                max_recent_logs="$recent_logs"
+                leader_pod="$pod"
+            fi
+        fi
+    done <<< "$scheduler_pods"
+    
+    if [[ -n "$leader_pod" ]]; then
+        echo -e "${GREEN}✅ Leader identified: $leader_pod${NC}"
+        echo "$leader_pod"
+        return 0
+    else
+        # Fallback: try to find leader via lease
+        echo -e "${YELLOW}🔍 Checking leader election lease...${NC}"
+        local lease_holder
+        lease_holder=$(kubectl get lease -A -l component=kube-scheduler -o jsonpath='{range .items[*]}{.spec.holderIdentity}{"\n"}{end}' | head -1 2>/dev/null || true)
+        
+        if [[ -n "$lease_holder" ]]; then
+            # Match lease holder to pod
+            while IFS= read -r pod; do
+                if [[ -n "$pod" && "$pod" == *"$lease_holder"* ]]; then
+                    echo -e "${GREEN}✅ Leader found via lease: $pod${NC}"
+                    echo "$pod"
+                    return 0
+                fi
+            done <<< "$scheduler_pods"
+        fi
+        
+        # Final fallback: just use the first pod
+        echo -e "${YELLOW}⚠️  Could not determine leader, using first pod${NC}"
+        echo "$scheduler_pods" | head -1
+        return 0
+    fi
 }
 
-# Function to extract pod name from K9s context
-get_pod_name() {
-    # K9s passes pod context as arguments or environment variables
-    # For now, we'll prompt for the pod name
-    echo -e "${YELLOW}Enter pod name to analyze: ${NC}"
-    read -r pod_name
-    echo "$pod_name"
-}
+# Pod name is now passed directly as argument from k9s plugin
 
 # Function to analyze specific pod scheduling decision
 analyze_pod_decision() {
@@ -167,12 +228,12 @@ main() {
         exit 1
     fi
     
-    # Get pod name to analyze
-    local pod_name
-    pod_name=$(get_pod_name)
+    # Get pod name from argument (passed by k9s)
+    local pod_name="$1"
     
     if [[ -z "$pod_name" ]]; then
         echo -e "${RED}❌ No pod name provided${NC}"
+        echo "This script should be called with a pod name as argument from k9s"
         echo -e "\n${YELLOW}Press any key to return to K9s...${NC}"
         read -n 1 -s
         exit 1

@@ -4,7 +4,7 @@
 plugins:
   # Analyze scheduling decision for current pod
   chronos-decision:
-    shortCut: Ctrl-D
+    shortCut: w
     confirm: false
     description: "Show Chronos scheduling decision for this pod"
     scopes:
@@ -18,7 +18,6 @@ plugins:
       POD_NAME="$1"
       PLUGINS_DIR="$HOME/.config/k9s/plugins"
       
-      # Always use live log analysis for real-time scheduling decisions
       echo "📱 Analyzing live scheduler logs for pod: $POD_NAME"
       ${PLUGINS_DIR}/chronos-pod-decision.sh "$POD_NAME"
       

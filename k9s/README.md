@@ -80,6 +80,9 @@ Install the k9s plugin that provides real-time scheduling analysis:
 # Run the automated installer
 ./k9s/install-k9s-plugin.sh
 
+# Or force reinstall (cleans up any duplicates)
+./k9s/install-k9s-plugin.sh --force
+
 # Restart K9s and start analyzing!
 ```
 
@@ -99,7 +102,7 @@ chmod +x ~/.config/k9s/plugins/*.sh
 1. Start k9s: `k9s`
 2. Navigate to pods: `:pods` or `:po`  
 3. Select any pod with arrow keys
-4. Press `Ctrl-D` to see scheduling analysis
+4. Press `w` to see scheduling analysis (Where/What node)
 
 **What you'll see:**
 - 📱 **Live Analysis**: Real-time analysis from scheduler logs
