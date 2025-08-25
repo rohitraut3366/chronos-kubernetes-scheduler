@@ -42,86 +42,41 @@ jobs:
         ./get_helm.sh
         rm get_helm.sh
 
-    - name: Set up K3s multi-node cluster
+    - name: Install KIND
       run: |
-        # Install K3s server (master node)
-        curl -sfL https://get.k3s.io | sh -s - \
-          --write-kubeconfig-mode 644 \
-          --disable traefik \
-          --disable servicelb \
-          --disable metrics-server \
-          --node-name k3s-server
-
-        # Wait for K3s server to be ready
-        sudo chmod 644 /etc/rancher/k3s/k3s.yaml
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+        chmod +x ./kind
+        sudo mv ./kind /usr/local/bin/kind
         
-        # Wait for server node to be ready
-        timeout 60s bash -c 'until kubectl get nodes | grep -q Ready; do sleep 5; done'
+    - name: Create KIND cluster config
+      run: |
+        cat > kind-config.yaml << 'EOF'
+        kind: Cluster
+        apiVersion: kind.x-k8s.io/v1alpha4
+        nodes:
+        - role: control-plane
+        - role: worker
+        - role: worker
+        EOF
         
-        # Get the node token and server info for agents
-        K3S_TOKEN=$(sudo cat /var/lib/rancher/k3s/server/node-token)
-        K3S_SERVER_IP=$(hostname -I | cut -d' ' -f1)
+    - name: Set up KIND multi-node cluster
+      run: |
+        echo "Creating KIND multi-node cluster..."
+        kind create cluster --config kind-config.yaml --name chronos-test
         
-        echo "Server ready, adding agent nodes..."
+        kind get kubeconfig --name chronos-test > /tmp/kubeconfig
+        export KUBECONFIG=/tmp/kubeconfig
+        kubectl config use-context kind-chronos-test
         
-        # Add second node using Docker container
-        docker run -d \
-          --name k3s-agent-1 \
-          --privileged \
-          --network host \
-          --pid host \
-          --ipc host \
-          --tmpfs /run \
-          --tmpfs /var/run \
-          -v /lib/modules:/lib/modules:ro \
-          rancher/k3s:latest \
-          agent \
-          --server https://${K3S_SERVER_IP}:6443 \
-          --token ${K3S_TOKEN} \
-          --node-name k3s-agent-1
+        echo "Waiting for nodes to be ready..."
+        kubectl wait --for=condition=Ready nodes --all --timeout=300s
         
-        # Add third node for more diverse scheduling
-        docker run -d \
-          --name k3s-agent-2 \
-          --privileged \
-          --network host \
-          --pid host \
-          --ipc host \
-          --tmpfs /run \
-          --tmpfs /var/run \
-          -v /lib/modules:/lib/modules:ro \
-          rancher/k3s:latest \
-          agent \
-          --server https://${K3S_SERVER_IP}:6443 \
-          --token ${K3S_TOKEN} \
-          --node-name k3s-agent-2
-        
-        # Wait for all nodes to be ready (up to 3 minutes)
-        echo "Waiting for all nodes to be ready..."
-        for i in {1..36}; do
-          READY_NODES=$(kubectl get nodes --no-headers | grep -c " Ready ")
-          TOTAL_NODES=$(kubectl get nodes --no-headers | wc -l)
-          echo "Ready nodes: $READY_NODES/$TOTAL_NODES"
-          
-          if [ "$READY_NODES" -ge 3 ]; then
-            echo "✅ Multi-node cluster ready with $READY_NODES nodes!"
-            break
-          fi
-          
-          if [ "$i" -eq 36 ]; then
-            echo "⚠️ Timeout waiting for all nodes, continuing with available nodes"
-          fi
-          
-          sleep 5
-        done
-        
-        echo "=== FINAL CLUSTER STATUS ==="
+        echo "=== CLUSTER STATUS ==="
         kubectl cluster-info
         kubectl get nodes -o wide
         
-        echo "=== NODE DETAILS ==="
-        kubectl describe nodes
+        echo "Loading scheduler image into KIND cluster..."
+        kind load docker-image chronos-kubernetes-scheduler:integration-test --name chronos-test
 
     - name: Build Docker image with caching
       uses: docker/build-push-action@v5
@@ -162,7 +117,7 @@ jobs:
 
     - name: Deploy Chronos scheduler
       run: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        export KUBECONFIG=/tmp/kubeconfig
         
         # Create namespace
         kubectl create namespace chronos-system
@@ -215,8 +170,8 @@ jobs:
         kubectl cluster-info
         echo "Nodes:"
         kubectl get nodes -o wide
-        echo "Available images in K3s:"
-        sudo k3s ctr images list | grep -E "(chronos|scheduler)" || echo "No scheduler images found"
+        echo "Available images in KIND:"
+        docker images | grep -E "(chronos|scheduler)" || echo "No scheduler images found"
         echo "Helm values file:"
         cat values-ci.yaml
         
@@ -275,7 +230,7 @@ jobs:
 
     - name: Run integration tests
       run: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        export KUBECONFIG=/tmp/kubeconfig
         
         # Create test namespace
         kubectl create namespace integration-test
@@ -349,7 +304,7 @@ jobs:
 
     - name: Print scheduler logs
       run: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        export KUBECONFIG=/tmp/kubeconfig
         
         echo "=== SCHEDULER DEPLOYMENT STATUS ==="
         kubectl get pods -n chronos-system -o wide
@@ -505,5 +460,5 @@ jobs:
       if: always()
       run: |
         # Show final status
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        export KUBECONFIG=/tmp/kubeconfig
         kubectl get pods -A || true
