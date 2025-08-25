@@ -3,13 +3,9 @@ name: Security Scan
 on:
   # Run security scans on pushes to main
   push:
-    branches: [ main ]
+    branches: [ master ]
   # Run security scans on PRs (lighter scan)
   pull_request:
-  # Run weekly security scans
-  schedule:
-    - cron: '0 2 * * 1'  # Every Monday at 2 AM UTC
-  # Allow manual triggering
   workflow_dispatch:
 
 # Cancel old workflows when new commits are pushed to the same PR
@@ -67,12 +63,6 @@ jobs:
         sarif_file: gosec-results.sarif
         category: gosec
 
-    - name: Upload Gosec results as artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: gosec-results
-        path: gosec-results.sarif
-        retention-days: 30
 
   # Dependency vulnerability scanning
   dependency-scan:
@@ -148,10 +138,6 @@ jobs:
       uses: github/codeql-action/analyze@v3
       with:
         category: "/language:${{matrix.language}}"
-
-
-
-
 
 
   # Security summary

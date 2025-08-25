@@ -1,0 +1,49 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# GitHub
+.github
+
+# Documentation
+*.md
+docs/
+examples/
+
+# Build artifacts
+*.out
+coverage.out
+coverage.html
+bin/
+dist/
+
+# Test files
+*_test.go
+test-workloads/
+
+# CI/CD
+.dockerignore
+Dockerfile*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log
+
+# Audit and analysis files
+audit/
+scheduler_analysis_*.json
+chronos-*.sh
+
+# Charts (not needed in container)
+charts/

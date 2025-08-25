@@ -11,11 +11,11 @@ global:
 # -- Image configuration  
 image:
   # -- Image registry
-  registry: rohitraut3366
+  registry: ghcr.io
   # -- Image repository
-  repository: scheduler
+  repository: rohitraut3366/chronos-kubernetes-scheduler
   # -- Image tag (defaults to chart appVersion if not set)
-  tag: v7
+  tag: latest
   # -- Image pull policy
   pullPolicy: IfNotPresent
 

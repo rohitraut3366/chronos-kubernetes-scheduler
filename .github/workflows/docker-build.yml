@@ -1,0 +1,49 @@
+name: Docker Build & Push to GHCR (Master Only)
+
+on:
+  push:
+    branches:
+      - master  # Push to GHCR on master branch only
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write  # Required for GHCR push
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/chronos-kubernetes-scheduler
+          tags: |
+            type=raw,value=${{ github.sha }}
+            type=raw,value=latest
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: build/Dockerfile  # Specify the Dockerfile location
+          platforms: linux/amd64,linux/arm64
+          push: true  # Always push since we only run on master
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
