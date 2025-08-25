@@ -268,6 +268,89 @@ make integration-setup
 make integration-quick
 ```
 
+## 🔍 Analysis Tools
+
+### Scheduler Log Analyzer with v4 verbosity
+
+The repository includes a comprehensive log analysis tool for debugging scheduling decisions and understanding cluster patterns.
+
+#### Usage
+
+```bash
+# Analyze scheduler logs
+python3 audit/analyze-scheduler-logs.py /path/to/scheduler-logs
+
+# Example with local log file
+python3 audit/analyze-scheduler-logs.py ./scheduler.log
+```
+
+#### Features
+
+- **📊 Performance Analysis**: Shows total sessions, success rates, and strategy distribution
+- **🎯 Node Utilization**: Identifies which nodes are being chosen most frequently  
+- **📋 Clean Summary Output**: Shows key performance metrics and cluster utilization
+- **💾 Complete JSON Export**: Saves detailed analysis to timestamped JSON file with:
+  - Pod duration and chosen node for each scheduling decision
+  - All evaluated nodes with completion times  
+  - Strategy used (BIN-PACKING/EXTENSION/EMPTY NODE)
+  - Raw and normalized scores for each node
+- **🔍 Production Ready**: Handles real Kubernetes scheduler log formats
+
+#### Sample Console Output
+
+```
+🔍 Analyzing scheduler logs...
+✅ Found 107 scheduling sessions
+✅ Found 107 successful bindings
+
+📊 SCHEDULER PERFORMANCE ANALYSIS
+============================================================
+📈 Total Scheduling Sessions: 107
+✅ Successfully Bound: 107
+❌ Failed to Bind: 0
+
+🎯 Strategy Distribution:
+   BIN-PACKING: 146 evaluations
+   EMPTY NODE: 953 evaluations
+   EXTENSION: 1557 evaluations
+
+🏗️ Node Utilization (Top 10):
+   ip-10-10-165-191.us-west-2.compute.internal: 26 pods
+   ip-10-10-166-61.us-west-2.compute.internal: 23 pods
+   ip-10-10-164-166.us-west-2.compute.internal: 19 pods
+
+💾 Full analysis saved to: scheduler_analysis_20250825_134804.json
+```
+
+#### Sample JSON File Content
+
+The detailed JSON file contains comprehensive data for each pod:
+
+```json
+{
+  "my-namespace/my-pod-xyz": {
+    "pod_name": "my-namespace/my-pod-xyz",
+    "pod_duration": "1200s",
+    "nodes": {
+      "node-1": {
+        "completion_time": "800s",
+        "strategy": "BIN-PACKING",
+        "raw_score": 120000,
+        "normalized_score": 100
+      }
+    },
+    "chosen_node": "node-1",
+    "total_candidates": 15
+  }
+}
+```
+
+This tool is invaluable for:
+- **🐛 Debugging** scheduling decisions
+- **📈 Analyzing** cluster utilization patterns  
+- **🎯 Optimizing** scheduler parameters
+- **📊 Understanding** production workload behaviors
+
 ## 🛠️ Development
 
 ### Project Structure Benefits
