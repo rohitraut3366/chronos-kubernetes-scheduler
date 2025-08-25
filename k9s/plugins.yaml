@@ -18,16 +18,10 @@ plugins:
       POD_NAME="$1"
       PLUGINS_DIR="$HOME/.config/k9s/plugins"
       
-      # Try JSON analysis first (more detailed), fallback to live logs
-      if ls ${PLUGINS_DIR}/../*analysis*.json >/dev/null 2>&1; then
-        JSON_FILE=$(ls -t ${PLUGINS_DIR}/../*analysis*.json | head -1)
-        echo "📊 Using JSON analysis: $(basename "$JSON_FILE")"
-        ${PLUGINS_DIR}/show-json-decision.sh "$POD_NAME" "$JSON_FILE"
-      else
-        echo "📱 Using live log analysis"
-        ${PLUGINS_DIR}/chronos-pod-decision.sh "$POD_NAME"
-      fi
+      # Always use live log analysis for real-time scheduling decisions
+      echo "📱 Analyzing live scheduler logs for pod: $POD_NAME"
+      ${PLUGINS_DIR}/chronos-pod-decision.sh "$POD_NAME"
       
-      echo -e "\n💡 TIP: Place scheduler_analysis_*.json files in the project root for enhanced analysis"
-      read -n 1 -s -r -p "Press any key to continue..."
+      echo -e "\n💡 Press any key to return to k9s..."
+      read -n 1 -s -r -p ""
     - $NAME

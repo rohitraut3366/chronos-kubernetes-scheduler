@@ -69,21 +69,18 @@ k9s
 
 ## 🔍 Optional: Pod-Specific Scheduling Analysis
 
-For deeper analysis of individual pod scheduling decisions, we provide two complementary tools:
+For deeper analysis of individual pod scheduling decisions:
 
 ### 📱 K9s Integration (Recommended)
 
-Install the intelligent k9s plugin that automatically uses JSON analysis when available:
+Install the k9s plugin that provides real-time scheduling analysis:
 
 **Easy Installation (Recommended):**
 ```bash
 # Run the automated installer
 ./k9s/install-k9s-plugin.sh
 
-# Place your JSON analysis file in the project root
-cp scheduler_analysis_*.json ./
-
-# Restart K9s
+# Restart K9s and start analyzing!
 ```
 
 **Manual Installation:**
@@ -98,19 +95,18 @@ chmod +x ~/.config/k9s/plugins/*.sh
 # Restart K9s
 ```
 
-**Usage:** In k9s, select any pod and press `Ctrl-D` to see:
-- 🎯 **Smart Analysis**: Automatically uses JSON files (detailed) or live logs (fallback)
+**Usage:** 
+1. Start k9s: `k9s`
+2. Navigate to pods: `:pods` or `:po`  
+3. Select any pod with arrow keys
+4. Press `Ctrl-D` to see scheduling analysis
+
+**What you'll see:**
+- 📱 **Live Analysis**: Real-time analysis from scheduler logs
 - 📊 **Rich Data**: Pod name, duration, all nodes evaluated with scores
 - ✅ **Highlighted Choice**: Chosen node with reasoning
 
-### 📊 JSON Analysis (for comprehensive datasets)
-
-```bash
-# Analyze scheduling decisions from pre-processed JSON files
-./k9s/plugins/show-json-decision.sh "namespace/pod-name" "scheduler_analysis.json"
-```
-
-**Both tools show:**
+**The plugin shows:**
 ```
 ┌─────────────────────────────────────┬─────────────┬─────────────────┬────────────┬────────────┐
 │ Node Name                           │ Strategy    │ Completion Time │ Raw Score  │ Norm Score │
