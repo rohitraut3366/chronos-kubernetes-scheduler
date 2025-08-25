@@ -20,6 +20,8 @@ jobs:
     name: Full Integration Test
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      actions: read  # Required for cache access
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -59,13 +61,22 @@ jobs:
         kubectl cluster-info
         kubectl get nodes -o wide
 
-    - name: Build and import Docker image
+    - name: Build Docker image with caching
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: build/Dockerfile
+        platforms: linux/amd64
+        push: false
+        load: true
+        tags: chronos-kubernetes-scheduler:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Import image to K3s
       run: |
-        # Build image
-        echo "🔨 Building Docker image..."
-        make docker-build
-        
         # Verify local build
+        echo "🔍 Verifying local Docker build..."
         docker images | grep chronos-kubernetes-scheduler
         
         # Tag for integration tests with dummy registry
@@ -299,32 +310,9 @@ jobs:
           exit 1
         fi
 
-    - name: Run scheduler analysis
-      if: always()
-      run: |
-        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-        
-        # Run our comprehensive analyzer
-        if [ -f "./chronos-analyzer.sh" ]; then
-          echo "=== COMPREHENSIVE SCHEDULER ANALYSIS ==="
-          ./chronos-analyzer.sh integration-test chronos-system
-        fi
-
-    - name: Upload integration test artifacts
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: integration-test-results
-        path: |
-          values-ci.yaml
-          integration-test-pods.yaml
-        retention-days: 7
-
     - name: Cleanup
       if: always()
       run: |
         # Show final status
         export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
         kubectl get pods -A || true
-        
-        # K3s cleanup happens automatically when runner terminates
