@@ -138,7 +138,7 @@ jobs:
   docker-build:
     name: Docker Build & Security Scan (Cached)
     runs-on: ubuntu-latest
-    needs: [quality]
+    # Removed needs: [quality] to run independently for faster feedback
     permissions:
       security-events: write
       actions: read  # Required for cache access
