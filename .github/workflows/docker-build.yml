@@ -22,7 +22,6 @@ jobs:
         uses: docker/setup-buildx-action@v3
         
       - name: Login to GitHub Container Registry
-        if: github.ref == 'refs/heads/master'  # Only login on master branch
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -43,7 +42,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.ref == 'refs/heads/master' }}  # Only push on master branch
+          push: true  # Push on both master and PR branches for testing
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -51,7 +50,6 @@ jobs:
       
       - name: Docker Scout CVE scanning
         uses: docker/scout-action@v1
-        if: github.ref == 'refs/heads/master'  # Only scan pushed images on master
         with:
           command: cves
           image: ghcr.io/${{ github.repository_owner }}/chronos-kubernetes-scheduler:${{ github.sha }}
