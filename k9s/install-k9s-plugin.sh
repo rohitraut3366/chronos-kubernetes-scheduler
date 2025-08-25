@@ -95,5 +95,5 @@ echo ""
 
 echo -e "${YELLOW}🔄 Next Steps:${NC}"
 echo "1. Restart k9s"
-echo "2. Test the plugin: k9s → select pod → Ctrl-A"
+echo "2. Test the plugin: k9s → select pod → press 'w'"
 echo "3. Enjoy real-time scheduling analysis!"
