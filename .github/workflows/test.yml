@@ -62,10 +62,11 @@ jobs:
     - name: Lint check
       run: make lint
 
-  # Run unit tests
-  unit-tests:
-    name: Unit Tests
+  # Run unit and integration tests
+  tests:
+    name: Unit & Integration Tests
     runs-on: ubuntu-latest
+    needs: [quality]  # Wait for quality checks to pass
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -93,45 +94,7 @@ jobs:
     - name: Run unit tests
       run: make test-unit
 
-    - name: Upload unit test results
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: unit-test-results
-        path: |
-          coverage.out
-        retention-days: 30
-
-  # Run Go-based integration tests (unit-style)
-  go-integration-tests:
-    name: Go Integration Tests
-    runs-on: ubuntu-latest
-    needs: [quality]  # Reuse quality job's setup
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: ${{ env.GO_VERSION }}
-
-    - name: Cache Go modules
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cache/go-build
-          ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum', '**/go.mod') }}
-        restore-keys: |
-          ${{ runner.os }}-go-${{ env.GO_VERSION }}-
-          ${{ runner.os }}-go-
-      continue-on-error: true
-
-    - name: Download dependencies
-      run: make deps
-
-    - name: Run Go integration tests
+    - name: Run integration tests
       run: make test-integration
 
   # Build Docker image with caching and run security scanning
@@ -188,12 +151,6 @@ jobs:
         sarif_file: trivy-results.sarif
         category: trivy
 
-    - name: Upload Trivy results as artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: trivy-results
-        path: trivy-results.sarif
-        retention-days: 30
 
   # Run benchmarks to detect performance regressions
   benchmarks:
@@ -227,18 +184,11 @@ jobs:
     - name: Run benchmarks
       run: make bench > benchmarks.txt
 
-    - name: Upload benchmark results
-      uses: actions/upload-artifact@v4
-      with:
-        name: benchmark-results
-        path: benchmarks.txt
-        retention-days: 5
-
   # Final status check
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [quality, unit-tests, go-integration-tests, docker-build]
+    needs: [quality, tests, docker-build]
     if: always()
     steps:
     - name: Check all jobs
@@ -247,15 +197,10 @@ jobs:
           echo "Quality checks failed"
           exit 1
         fi
-        if [[ "${{ needs.unit-tests.result }}" != "success" ]]; then
-          echo "Unit tests failed"
+        if [[ "${{ needs.tests.result }}" != "success" ]]; then
+          echo "Tests failed"
           exit 1
         fi
-        if [[ "${{ needs.go-integration-tests.result }}" != "success" ]]; then
-          echo "Go integration tests failed"
-          exit 1
-        fi
-
         if [[ "${{ needs.docker-build.result }}" != "success" ]]; then
           echo "Docker build failed"
           exit 1
