@@ -1,0 +1,136 @@
+# Chronos Scheduler Simulation Test Cases
+# Tests bin-packing, extension minimization, and consolidation logic
+
+scenarios:
+  
+  # Test 1: Bin-packing - new job fits in existing completion time
+  bin_packing_perfect_fit:
+    description: "New job should fit perfectly in node with longest remaining time"
+    new_pod:
+      name: "test-bin-packing"
+      duration: 30
+      expected_node: "chronos-test-worker2"  # Node with 120s remaining (better consolidation)
+      expected_strategy: "BIN-PACKING"
+    setup_pods:
+      chronos-test-worker:
+        - name: "existing-job-1"
+          duration: 60
+        - name: "existing-job-2" 
+          duration: 80
+        # Max remaining: 80s, consolidation score: 1,008,000
+      chronos-test-worker2:
+        - name: "existing-job-3"
+          duration: 120
+        - name: "existing-job-4"
+          duration: 90
+        # Max remaining: 120s, consolidation score: 1,012,000 (WINNER!)
+      # control-plane: empty (should be avoided due to empty node penalty)
+
+  # Test 2: Extension minimization - new job extends completion time
+  extension_minimal:
+    description: "New job requires extension, choose node with minimal extension needed"
+    new_pod:
+      name: "test-extension"
+      duration: 100
+      expected_node: "chronos-test-worker2"  # Extension: 100-80=20s (minimal)
+      expected_strategy: "EXTENSION"
+    setup_pods:
+      chronos-test-worker:
+        - name: "existing-job-1"
+          duration: 60
+        - name: "existing-job-2"
+          duration: 40  
+        # Max remaining: 60s, extension needed: 100-60=40s
+      chronos-test-worker2:
+        - name: "existing-job-3"
+          duration: 80
+        - name: "existing-job-4"
+          duration: 70
+        # Max remaining: 80s, extension needed: 100-80=20s (better)
+
+  # Test 3: Consolidation preference - choose longer remaining work
+  consolidation_preference:
+    description: "Between two nodes that can fit, choose one with longer remaining work"
+    new_pod:
+      name: "test-consolidation" 
+      duration: 40
+      expected_node: "chronos-test-worker2"  # 90s > 60s remaining
+      expected_strategy: "BIN-PACKING"
+    setup_pods:
+      chronos-test-worker:
+        - name: "existing-job-1"
+          duration: 60
+        # Max remaining: 60s, new job (40s) fits
+      chronos-test-worker2:
+        - name: "existing-job-2"
+          duration: 90  
+        # Max remaining: 90s, new job (40s) fits, better consolidation
+
+  # Test 4: Empty node avoidance - heavily penalized
+  empty_node_avoidance:
+    description: "Avoid empty nodes when other options exist"
+    new_pod:
+      name: "test-empty-avoidance"
+      duration: 50
+      expected_node: "chronos-test-worker"  # Should prefer node with existing work
+      expected_strategy: "BIN-PACKING"
+    setup_pods:
+      chronos-test-worker:
+        - name: "existing-job-1"
+          duration: 80
+        # Max remaining: 80s, new job (50s) fits
+      # chronos-test-worker2: empty - should be heavily penalized
+      # control-plane: empty - should be avoided
+
+  # Test 5: Extension job - choose minimal extension
+  extension_job:
+    description: "Job that extends all nodes, choose minimal extension"
+    new_pod:
+      name: "test-extension-job"
+      duration: 120
+      expected_node: "chronos-test-worker2"  # Extension: 120-100=20s (minimal)
+      expected_strategy: "EXTENSION"  
+    setup_pods:
+      chronos-test-worker:
+        - name: "existing-job-1"
+          duration: 60
+        - name: "existing-job-2"
+          duration: 50
+        - name: "existing-job-3"
+          duration: 40
+        # Max remaining: 60s, extension needed: 120-60=60s
+      chronos-test-worker2:
+        - name: "existing-job-4"
+          duration: 100
+        - name: "existing-job-5"
+          duration: 80
+        # Max remaining: 100s, extension needed: 120-100=20s (better)
+
+  # Test 6: Equal remaining times - tie-breaking
+  tie_breaking:
+    description: "Equal remaining times should use resource-based tie-breaking"  
+    new_pod:
+      name: "test-tie-breaking"
+      duration: 30
+      expected_node: "any"  # Either node acceptable, depends on resource tie-breaker
+      expected_strategy: "BIN-PACKING"
+    setup_pods:
+      chronos-test-worker:
+        - name: "existing-job-1"
+          duration: 70
+        # Max remaining: 70s
+      chronos-test-worker2:
+        - name: "existing-job-2"
+          duration: 70
+        # Max remaining: 70s (equal)
+
+# Test execution configuration - optimized for CI
+execution:
+  # Wait time between pod creations (seconds) - CI optimized
+  setup_wait_time: 3
+  # Wait time before scheduling test pod (seconds) - CI optimized
+  test_wait_time: 2
+  # Timeout for pod scheduling (seconds)
+  timeout: 45
+  # Namespace for test pods
+  namespace: "simulation-test"

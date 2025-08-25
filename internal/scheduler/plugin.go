@@ -86,12 +86,7 @@ func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.
 	maxRemainingTime := s.calculateMaxRemainingTimeOptimized(nodeInfo.Pods)
 
 	// 4. Apply pure time-based optimization strategy (NodeResourcesFit handles resource tie-breaking)
-	score := s.CalculateOptimizedScore(nodeInfo, maxRemainingTime, newPodDuration)
-
-	// Only log scoring results at debug level to improve performance
-	klog.V(4).Infof("Pod: %s/%s, Node: %s, Existing: %ds, NewJob: %ds, Score: %d (optimized)",
-		p.Namespace, p.Name, nodeName, maxRemainingTime, newPodDuration, score)
-
+	score := s.CalculateOptimizedScore(p, nodeInfo, maxRemainingTime, newPodDuration)
 	return score, framework.NewStatus(framework.Success)
 }
 
@@ -175,7 +170,7 @@ func (s *Chronos) CalculateBinPackingCompletionTime(maxRemainingTime, newPodDura
 // PRIORITY 1: Jobs that FIT within existing work windows (perfect bin-packing)
 // PRIORITY 2: Jobs that EXTEND existing commitments (extension minimization)
 // PRIORITY 3: Empty nodes (heavily penalized for cost optimization)
-func (s *Chronos) CalculateOptimizedScore(nodeInfo *framework.NodeInfo, maxRemainingTime int64, newPodDuration int64) int64 {
+func (s *Chronos) CalculateOptimizedScore(p *v1.Pod, nodeInfo *framework.NodeInfo, maxRemainingTime int64, newPodDuration int64) int64 {
 	// Pure time-based scoring - NodeResourcesFit plugin handles all resource tie-breaking
 	// This keeps our plugin focused on its core competency: time-based bin-packing
 
@@ -186,40 +181,42 @@ func (s *Chronos) CalculateOptimizedScore(nodeInfo *framework.NodeInfo, maxRemai
 		emptyNodePriority  = 1000    // Lowest priority: empty nodes
 	)
 
+	var finalScore int64
+	var nodeStrategy string
+	var completionTime string
+	var extensionDuration int64
+
 	if maxRemainingTime > 0 && newPodDuration <= maxRemainingTime {
 		// PRIORITY 1: Job fits within existing work - PERFECT BIN-PACKING
 		// This is true bin-packing: no extension of node commitment needed
-		baseScore := int64(binPackingPriority)
-		consolidationBonus := maxRemainingTime * 100 // Prefer longer existing work for better consolidation
-
-		finalScore := baseScore + consolidationBonus
-
-		klog.V(4).Infof("Node %s: BIN-PACKING - NewJob=%ds fits in Existing=%ds, Base=%d, Bonus=%d, Final=%d",
-			nodeInfo.Node().Name, newPodDuration, maxRemainingTime, baseScore, consolidationBonus, finalScore)
-		return finalScore
+		consolidationBonus := maxRemainingTime * 100 // Consolidation bonus - prefer longer existing work
+		finalScore = int64(binPackingPriority) + consolidationBonus
+		nodeStrategy = "BIN-PACKING"
+		completionTime = fmt.Sprintf("%ds", maxRemainingTime)
+		extensionDuration = 0
 
 	} else if maxRemainingTime > 0 {
 		// PRIORITY 2: Job extends beyond existing work - MINIMIZE EXTENSION
 		// Choose node that minimizes the extension of cluster resource commitments
-		baseScore := int64(extensionPriority)
-		extensionPenalty := (newPodDuration - maxRemainingTime) * 100 // Heavy penalty for extending commitments
-
-		finalScore := baseScore - extensionPenalty
-
-		klog.V(4).Infof("Node %s: EXTENSION - NewJob=%ds > Existing=%ds, Extension=%ds, Base=%d, Penalty=%d, Final=%d",
-			nodeInfo.Node().Name, newPodDuration, maxRemainingTime, newPodDuration-maxRemainingTime,
-			baseScore, extensionPenalty, finalScore)
-		return finalScore
+		extensionDuration = newPodDuration - maxRemainingTime
+		extensionPenalty := -(extensionDuration * 100) // Extension penalty - heavy penalty for extending commitments
+		finalScore = int64(extensionPriority) + extensionPenalty
+		nodeStrategy = "EXTENSION"
+		completionTime = fmt.Sprintf("%ds", newPodDuration)
 
 	} else {
 		// PRIORITY 3: Empty node - HEAVILY PENALIZED for cost optimization
 		// Avoid empty nodes to enable Karpenter termination and reduce costs
-		baseScore := int64(emptyNodePriority)
-
-		klog.V(4).Infof("Node %s: EMPTY NODE - Base=%d, Final=%d (penalized for cost optimization)",
-			nodeInfo.Node().Name, baseScore, baseScore)
-		return baseScore
+		finalScore = int64(emptyNodePriority)
+		nodeStrategy = "EMPTY-NODE"
+		completionTime = fmt.Sprintf("%ds", newPodDuration)
+		extensionDuration = newPodDuration
 	}
+
+	// Single consistent log format with essential scheduling details for easy parsing
+	klog.Infof("CHRONOS_SCORE: Pod=%s/%s, Node=%s, Strategy=%s, NewPodDuration=%ds, maxRemainingTime=%ds, ExtensionDuration=%ds, CompletionTime=%s, FinalScore=%d",
+		p.Namespace, p.Name, nodeInfo.Node().Name, nodeStrategy, newPodDuration, maxRemainingTime, extensionDuration, completionTime, finalScore)
+	return finalScore
 }
 
 // Resource calculation removed - NodeResourcesFit plugin handles all resource-aware tie-breaking

@@ -1,0 +1,19 @@
+views:
+  v1/pods:
+    columns:
+      - "NAMESPACE"
+      - "NAME"
+      - "PF"
+      - "READY"
+      - "STATUS"
+      - "RESTARTS"
+      - "CPU"
+      - "%CPU/R"
+      - "%CPU/L"
+      - "MEM"
+      - "%MEM/R"
+      - "%MEM/L"
+      - "DURATION:.metadata.annotations['scheduling\\.workload\\.io/expected-duration-seconds']|R"
+      - "IP"
+      - "NODE"
+      - "AGE"

@@ -16,9 +16,9 @@ Example:
     python3 audit/analyze-scheduler-logs.py ./scheduler.log
 
 Features:
-- Parses Chronos scheduler scoring decisions
+- Parses Chronos scheduler CHRONOS_SCORE log entries
 - Extracts BIN-PACKING, EXTENSION, and EMPTY NODE strategies  
-- Shows node completion times and raw/normalized scores
+- Shows node completion times, extension durations, and raw/normalized scores
 - Outputs structured JSON format for each pod scheduling decision
 - Provides cluster-wide scheduling pattern analysis
 - Saves full analysis to timestamped JSON file
@@ -40,19 +40,14 @@ def parse_scheduler_logs(log_file_path):
     scheduling_sessions = {}
     successful_bindings = {}
     
-    # Regex patterns
+    # Regex patterns for new CHRONOS_SCORE log format
     patterns = {
-        'scoring_start': r'Scoring pod ([^ ]+) for node (.+)',
+        'chronos_score': r'CHRONOS_SCORE: Pod=([^,]+),\s*Node=([^,]+),\s*Strategy=([^,]+),\s*NewPodDuration=(\d+)s,\s*maxRemainingTime=(\d+)s,\s*ExtensionDuration=(\d+)s,\s*CompletionTime=([^,]+),\s*FinalScore=(-?\d+)',
         'timestamp': r'^I(\d{4} \d{2}:\d{2}:\d{2}\.\d+)',
-        'strategy_bin_packing': r'Node ([^:]+): BIN-PACKING - NewJob=(\d+)s fits in Existing=(\d+)s.*Final=(-?\d+)',
-        'strategy_extension': r'Node ([^:]+): EXTENSION - NewJob=(\d+)s > Existing=(\d+)s, Extension=(\d+)s.*Final=(-?\d+)',
-        'strategy_empty': r'Node ([^:]+): EMPTY NODE.*Final=(-?\d+)',
         'final_score': r'Pod: ([^,]+), Node: ([^,]+), RawScore: (-?\d+), NormalizedScore: (\d+)',
-        'successful_binding': r'Successfully bound pod to node.*pod="([^"]+)".*node="([^"]+)"',
-        'pod_duration': r'NewJob=(\d+)s'
+        'successful_binding': r'Successfully bound pod to node.*pod="([^"]+)".*node="([^"]+)"'
     }
     
-    current_pod = None
     current_timestamp = None
     
     print("🔍 Analyzing scheduler logs...")
@@ -74,71 +69,56 @@ def parse_scheduler_logs(log_file_path):
                 successful_bindings[pod_name] = chosen_node
                 continue
             
-            # Check for scoring start (new pod being evaluated)
-            scoring_match = re.search(patterns['scoring_start'], line)
-            if scoring_match:
-                current_pod = scoring_match.group(1)
-                if current_pod not in scheduling_sessions:
-                    scheduling_sessions[current_pod] = {
-                        'pod_name': current_pod,
-                        'pod_duration': None,
+            # Parse CHRONOS_SCORE lines
+            chronos_match = re.search(patterns['chronos_score'], line)
+            if chronos_match:
+                pod_name = chronos_match.group(1)
+                node_name = chronos_match.group(2)
+                strategy = chronos_match.group(3)
+                new_job_duration = int(chronos_match.group(4))
+                existing_work = int(chronos_match.group(5))
+                extension_duration = int(chronos_match.group(6))
+                completion_time = chronos_match.group(7)
+                final_score = int(chronos_match.group(8))
+                
+                # Initialize pod session if not exists
+                if pod_name not in scheduling_sessions:
+                    scheduling_sessions[pod_name] = {
+                        'pod_name': pod_name,
+                        'pod_duration': f"{new_job_duration}s",
                         'nodes': {},
                         'chosen_node': None,
                         'timestamp': current_timestamp
                     }
-                continue
-            
-            if not current_pod:
-                continue
                 
-            # Extract pod duration from first strategy line
-            if scheduling_sessions[current_pod]['pod_duration'] is None:
-                duration_match = re.search(patterns['pod_duration'], line)
-                if duration_match:
-                    scheduling_sessions[current_pod]['pod_duration'] = f"{duration_match.group(1)}s"
-            
-            # Parse strategy lines
-            for strategy, pattern in [
-                ('BIN-PACKING', patterns['strategy_bin_packing']),
-                ('EXTENSION', patterns['strategy_extension']),
-                ('EMPTY NODE', patterns['strategy_empty'])
-            ]:
-                match = re.search(pattern, line)
-                if match:
-                    node_name = match.group(1)
-                    
-                    if strategy == 'BIN-PACKING':
-                        completion_time = f"{match.group(3)}s"
-                        raw_score = int(match.group(4))
-                        details = {
-                            'new_job_duration': f"{match.group(2)}s",
-                            'existing_completion': completion_time,
-                            'fits_in_existing': True
-                        }
-                    elif strategy == 'EXTENSION':
-                        completion_time = f"{match.group(3)}s" 
-                        raw_score = int(match.group(5))
-                        details = {
-                            'new_job_duration': f"{match.group(2)}s",
-                            'existing_completion': completion_time,
-                            'extension_needed': f"{match.group(4)}s",
-                            'fits_in_existing': False
-                        }
-                    else:  # EMPTY NODE
-                        completion_time = "0s"
-                        raw_score = int(match.group(2))
-                        details = {
-                            'existing_completion': completion_time,
-                            'is_empty': True
-                        }
-                    
-                    scheduling_sessions[current_pod]['nodes'][node_name] = {
-                        'completion_time': completion_time,
-                        'strategy': strategy,
-                        'raw_score': raw_score,
-                        'details': details
+                # Build details based on strategy (maintain same structure as before)
+                if strategy == 'BIN-PACKING':
+                    details = {
+                        'new_job_duration': f"{new_job_duration}s",
+                        'existing_completion': f"{existing_work}s",
+                        'fits_in_existing': True
                     }
-                    break
+                elif strategy == 'EXTENSION':
+                    details = {
+                        'new_job_duration': f"{new_job_duration}s",
+                        'existing_completion': f"{existing_work}s",
+                        'extension_needed': f"{extension_duration}s",
+                        'fits_in_existing': False
+                    }
+                else:  # EMPTY-NODE
+                    strategy = 'EMPTY NODE'  # Normalize name for output consistency
+                    details = {
+                        'existing_completion': "0s",
+                        'is_empty': True
+                    }
+                
+                scheduling_sessions[pod_name]['nodes'][node_name] = {
+                    'completion_time': completion_time,
+                    'strategy': strategy,
+                    'raw_score': final_score,
+                    'details': details
+                }
+                continue
             
             # Parse final normalized scores
             final_match = re.search(patterns['final_score'], line)
@@ -185,8 +165,8 @@ def generate_analysis_report(scheduling_sessions):
         print("❌ No scheduling sessions found!")
         return
     
-    print(f"\n📊 SCHEDULER PERFORMANCE ANALYSIS")
-    print(f"=" * 60)
+    print("\n📊 SCHEDULER PERFORMANCE ANALYSIS")
+    print("=" * 60)
     
     # Overall statistics
     total_sessions = len(scheduling_sessions)
@@ -215,20 +195,20 @@ def generate_analysis_report(scheduling_sessions):
             strategy_counts[strategy] += 1
             strategy_nodes[strategy].add(node_name)  # Track unique nodes per strategy
     
-    print(f"\n🎯 Strategy Distribution (All Evaluations):")
+    print("\n🎯 Strategy Distribution (All Evaluations):")
     for strategy, count in sorted(strategy_counts.items()):
         node_count = len(strategy_nodes[strategy])
         print(f"   {strategy}: {count} evaluations ({node_count} unique nodes)")
     
-    print(f"\n🏆 Chosen Node Strategies (Successful Bindings):")
+    print("\n🏆 Chosen Node Strategies (Successful Bindings):")
     for strategy, count in sorted(chosen_strategy_counts.items()):
         print(f"   {strategy}: {count} pods")
     
-    print(f"\n🏗️ Node Utilization (Top 10):")
+    print("\n🏗️ Node Utilization (Top 10):")
     for node, count in sorted(node_utilization.items(), key=lambda x: x[1], reverse=True)[:10]:
         print(f"   {node}: {count} pods")
     
-    print(f"\n" + "=" * 60)
+    print("\n" + "=" * 60)
     
 
 
