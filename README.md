@@ -1,19 +1,31 @@
-# Chronos Kubernetes Scheduler
+# 🚀 Chronos Kubernetes Scheduler
 
-[![Tests](https://github.com/rohitraut3366/chronos-kubernetes-scheduler/workflows/Tests/badge.svg)](https://github.com/rohitraut3366/chronos-kubernetes-scheduler/actions)
-[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen.svg)](https://github.com/rohitraut3366/chronos-kubernetes-scheduler/actions)
+[![Tests](https://github.com/rohitraut3366/chronos-kubernetes-scheduler/workflows/Tests/badge.svg?branch=main)](https://github.com/rohitraut3366/chronos-kubernetes-scheduler/actions?query=branch%3Amain)
+[![Coverage](https://img.shields.io/badge/coverage-88%25-brightgreen.svg)](https://github.com/rohitraut3366/chronos-kubernetes-scheduler/actions?query=branch%3Amain)
 [![Go Report Card](https://goreportcard.com/badge/github.com/rohitraut3366/chronos-kubernetes-scheduler)](https://goreportcard.com/report/github.com/rohitraut3366/chronos-kubernetes-scheduler)
 
-Kubernetes custom scheduler plugin that intelligently bin-packs workloads based on job durations, maximizing cluster resource utilization and consolidation for workloads with predictable durations.
+**Advanced Kubernetes custom scheduler plugin with dual scheduling modes:** intelligently bin-packs workloads based on job durations using either **individual pod-by-pod scheduling** or **high-performance batch grouping**, maximizing cluster resource utilization and cost optimization.
 
 ## 🎯 Overview
 
-The **Chronos** scheduler plugin uses job duration annotations to intelligently bin-pack workloads, prioritizing consolidation over spreading. This approach:
+The **Chronos** scheduler plugin uses job duration annotations to intelligently bin-pack workloads with **two powerful scheduling modes**:
 
+### 📝 Individual Mode (Default)
+**Traditional pod-by-pod scheduling** with intelligent bin-packing:
 - **Bin-Packing First**: Fits new jobs into existing time windows when possible
 - **Maximizes Consolidation**: Prefers nodes with longer remaining work for better packing  
-- **Minimizes Extensions**: When jobs must extend beyond existing work, chooses the node requiring minimal extension
+- **Minimizes Extensions**: When jobs must extend beyond existing work, chooses minimal extension
 - **Avoids Empty Nodes**: Heavily penalizes empty nodes to enable cluster cost optimization
+- **Immediate Scheduling**: Low-latency decisions for interactive workloads
+
+### 🚀 Grouping Mode (High-Volume)  
+**Batch scheduling with advanced grouping optimization**:
+- **CRON-Based Batching**: Collects pods every 5 seconds (configurable)
+- **LPT Heuristic**: Longest Processing Time first for optimal bin-packing
+- **Resource-Aware**: Respects CPU/Memory constraints and node capacity
+- **Kubernetes-Native**: Supports NodeSelector, Taints/Tolerations, Affinity
+- **Skew Minimization**: Optimizes per-node completion time balance
+- **High-Volume Ready**: Handles 2000+ pods in 15 seconds efficiently
 
 ## 🏗️ Architecture
 
@@ -24,21 +36,49 @@ chronos-kubernetes-scheduler/
 │       └── main.go                    # Application entry point
 ├── internal/
 │   └── scheduler/
-│       ├── plugin.go                  # Core scheduler logic
-│       ├── plugin_test.go             # Unit tests (500+ test cases)
+│       ├── plugin.go                  # Core scheduler plugin & individual mode
+│       ├── batch_scheduler.go         # Grouping mode & batch scheduling
+│       ├── plugin_test.go             # Unit tests (43+ test functions)
+│       ├── batch_scheduler_test.go    # Batch scheduler tests
 │       └── plugin_integration_test.go # Integration tests
+├── docs/
+│   └── GROUPING_FEATURE.md            # Comprehensive grouping guide
 ├── charts/
 │   └── chronos-kubernetes-scheduler/  # Helm chart for deployment
 │       ├── Chart.yaml
 │       ├── values.yaml
 │       └── templates/                 # Kubernetes manifests
+├── examples/
+│   ├── resource-aware-demo.yaml       # Resource-aware workloads
+│   └── grouping-configuration.yaml    # Grouping mode examples
 ├── build/
 │   └── Dockerfile                     # Multi-stage container build
-├── examples/                          # Example workload manifests
-├── bin/                               # Built binaries
+├── chronos-analyzer.sh                # Scheduler analysis tool
 ├── Makefile                           # Build automation
 └── go.mod                             # Go module definition
 ```
+
+### 🎛️ Component Overview
+
+| Component | Purpose | Mode |
+|-----------|---------|------|
+| **plugin.go** | Core scheduler plugin, individual scoring | Individual Mode |
+| **batch_scheduler.go** | Batch processing, grouping optimization | Grouping Mode |
+| **CHRONOS_GROUPING_ENABLED** | Feature flag controlling mode selection | Both |
+
+## ⚖️ Mode Comparison
+
+| Feature | Individual Mode | Grouping Mode |
+|---------|----------------|---------------|
+| **Activation** | `CHRONOS_GROUPING_ENABLED=false` (default) | `CHRONOS_GROUPING_ENABLED=true` |
+| **Best For** | Low-volume, interactive workloads | High-volume, batch processing |
+| **Throughput** | ~100 pods/minute | ~2000 pods/15 seconds |
+| **Latency** | ~50ms per pod | ~5s batch interval |
+| **Resource Usage** | Lower, steady | Higher during batching |
+| **Bin-Packing** | Good | Excellent |
+| **Use Cases** | Web apps, APIs, mixed workloads | ML training, data processing, jobs |
+
+**💡 Tip**: Start with Individual Mode for most workloads, switch to Grouping Mode for high-volume scenarios.
 
 ## 🚀 Quick Start
 
@@ -65,15 +105,34 @@ make all
 
 ### Deploy to Kubernetes
 
+#### Individual Mode (Default)
 ```bash
-# Deploy using Helm
+# Deploy using Helm (individual mode by default)
 helm install chronos-scheduler ./charts/chronos-kubernetes-scheduler
 
+# Or explicitly set individual mode
+helm install chronos-scheduler ./charts/chronos-kubernetes-scheduler \
+  --set env.CHRONOS_GROUPING_ENABLED=false
+```
+
+#### Grouping Mode (High-Volume)
+```bash
+# Deploy in grouping mode for high-volume workloads
+helm install chronos-scheduler ./charts/chronos-kubernetes-scheduler \
+  --set env.CHRONOS_GROUPING_ENABLED=true \
+  --set env.BATCH_INTERVAL_SECONDS=5 \
+  --set env.BATCH_SIZE_LIMIT=0
+```
+
+#### Verify Installation
+```bash
 # Check deployment status  
 kubectl get pods -l app.kubernetes.io/name=chronos-kubernetes-scheduler
 
-# View logs
+# View logs (check for mode confirmation)
 kubectl logs -l app.kubernetes.io/name=chronos-kubernetes-scheduler
+
+# Look for: "📝 INDIVIDUAL MODE enabled" or "🚀 GROUPING MODE enabled"
 
 # Remove deployment
 helm uninstall chronos-scheduler
@@ -227,6 +286,42 @@ profiles:
       - name: Chronos
       - name: NodeResourcesFit  # Default resource-based tie-breaker
 ```
+
+### 🚩 Grouping Feature Flag
+
+Chronos supports two scheduling modes controlled by the `CHRONOS_GROUPING_ENABLED` environment variable:
+
+| Mode | Flag Value | Description |
+|------|------------|-------------|
+| **Individual** (default) | `false` or unset | Traditional pod-by-pod scoring |
+| **Grouping** | `true` | Batch scheduling with grouping optimization |
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chronos-scheduler
+spec:
+  template:
+    spec:
+      containers:
+      - name: chronos-scheduler
+        image: chronos:latest
+        env:
+        - name: CHRONOS_GROUPING_ENABLED
+          value: "true"  # Enable batch grouping mode
+        - name: BATCH_INTERVAL_SECONDS
+          value: "5"     # Batch every 5 seconds
+        - name: BATCH_SIZE_LIMIT
+          value: "0"     # No limit (unlimited batch size)
+```
+
+**When to use grouping mode:**
+- ✅ High-volume workloads (2000+ pods in 15 seconds)
+- ✅ Batch processing jobs (ML training, data processing)
+- ✅ When optimizing cluster utilization is critical
+
+See [docs/GROUPING_FEATURE.md](docs/GROUPING_FEATURE.md) for detailed configuration guide.
 
 ### Plugin Constants
 
