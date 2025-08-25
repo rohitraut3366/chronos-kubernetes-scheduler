@@ -1,6 +1,4 @@
 mode: atomic
-chronos-kubernetes-scheduler/cmd/scheduler/main.go:29.13,34.42 2 0
-chronos-kubernetes-scheduler/cmd/scheduler/main.go:34.42,37.3 2 0
 chronos-kubernetes-scheduler/internal/scheduler/batch_scheduler.go:106.83,111.19 4 3
 chronos-kubernetes-scheduler/internal/scheduler/batch_scheduler.go:111.19,113.3 1 0
 chronos-kubernetes-scheduler/internal/scheduler/batch_scheduler.go:115.2,124.11 3 3
@@ -238,3 +236,5 @@ chronos-kubernetes-scheduler/internal/scheduler/plugin.go:221.3,221.13 1 2
 chronos-kubernetes-scheduler/internal/scheduler/plugin.go:223.2,223.35 1 6
 chronos-kubernetes-scheduler/internal/scheduler/plugin.go:223.35,225.3 1 14
 chronos-kubernetes-scheduler/internal/scheduler/plugin.go:226.2,226.12 1 6
+chronos-kubernetes-scheduler/cmd/scheduler/main.go:29.13,34.42 2 0
+chronos-kubernetes-scheduler/cmd/scheduler/main.go:34.42,37.3 2 0
