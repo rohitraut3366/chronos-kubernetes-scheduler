@@ -165,8 +165,8 @@ def generate_analysis_report(scheduling_sessions):
         print("❌ No scheduling sessions found!")
         return
     
-    print(f"\n📊 SCHEDULER PERFORMANCE ANALYSIS")
-    print(f"=" * 60)
+    print("\n📊 SCHEDULER PERFORMANCE ANALYSIS")
+    print("=" * 60)
     
     # Overall statistics
     total_sessions = len(scheduling_sessions)
@@ -195,20 +195,20 @@ def generate_analysis_report(scheduling_sessions):
             strategy_counts[strategy] += 1
             strategy_nodes[strategy].add(node_name)  # Track unique nodes per strategy
     
-    print(f"\n🎯 Strategy Distribution (All Evaluations):")
+    print("\n🎯 Strategy Distribution (All Evaluations):")
     for strategy, count in sorted(strategy_counts.items()):
         node_count = len(strategy_nodes[strategy])
         print(f"   {strategy}: {count} evaluations ({node_count} unique nodes)")
     
-    print(f"\n🏆 Chosen Node Strategies (Successful Bindings):")
+    print("\n🏆 Chosen Node Strategies (Successful Bindings):")
     for strategy, count in sorted(chosen_strategy_counts.items()):
         print(f"   {strategy}: {count} pods")
     
-    print(f"\n🏗️ Node Utilization (Top 10):")
+    print("\n🏗️ Node Utilization (Top 10):")
     for node, count in sorted(node_utilization.items(), key=lambda x: x[1], reverse=True)[:10]:
         print(f"   {node}: {count} pods")
     
-    print(f"\n" + "=" * 60)
+    print("\n" + "=" * 60)
     
 
 
