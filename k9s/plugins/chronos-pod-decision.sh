@@ -143,77 +143,89 @@ analyze_pod_decision() {
     printf "${BOLD}%-20s${NC} %s\n" "Chosen Node:" "${GREEN}$chosen_node${NC}"
     printf "${BOLD}%-20s${NC} %s\n" "Scheduled At:" "${BLUE}$timestamp${NC}"
     
-    # Count nodes evaluated from plugin output
-    local nodes_evaluated=$(echo "$logs" | grep "plugin.go.*Node:" | wc -l | tr -d ' ')
+    # Count nodes evaluated from CHRONOS_SCORE logs
+    local nodes_evaluated=$(echo "$logs" | grep "CHRONOS_SCORE:" | wc -l | tr -d ' ')
     printf "${BOLD}%-20s${NC} %s\n" "Nodes Evaluated:" "${CYAN}$nodes_evaluated${NC}"
     
     echo "════════════════════════════════════════════════════════════════════════════════"
     
     echo -e "\n${BOLD}🎯 NODE EVALUATION DETAILS:${NC}"
-    echo "┌─────────────────────────────────────┬─────────────┬─────────────────┬────────────┬────────────┐"
-    echo "│ Node Name                           │ Strategy    │ Completion Time │ Raw Score  │ Norm Score │"
-    echo "├─────────────────────────────────────┼─────────────┼─────────────────┼────────────┼────────────┤"
+    echo "┌─────────────────────────────────────┬─────────────┬─────────────────┬────────────┬────────────┬──────────────────────┐"
+    echo "│ Node Name                           │ Strategy    │ Completion Time │ Raw Score  │ Norm Score │ Calculation Details  │"
+    echo "├─────────────────────────────────────┼─────────────┼─────────────────┼────────────┼────────────┼──────────────────────┤"
     
-    # Parse node evaluations
-    echo "$logs" | while IFS= read -r line; do
-        # Parse strategy lines
-        if [[ "$line" =~ BIN-PACKING.*Final=(-?[0-9]+) ]]; then
-            node_name=$(echo "$line" | sed -n 's/.*Node \([^:]*\):.*/\1/p')
-            completion_time=$(echo "$line" | sed -n 's/.*Existing=\([0-9]*s\).*/\1/p')
-            raw_score="${BASH_REMATCH[1]}"
-            strategy="BIN-PACKING"
-            
-            # Look for normalized score in following lines
-            norm_score=$(echo "$logs" | grep "Node: $node_name" | grep "NormalizedScore:" | sed -n 's/.*NormalizedScore: \([0-9]*\).*/\1/p' | head -1)
-            norm_score=${norm_score:-"N/A"}
-            
-            # Highlight chosen node
-            if [[ "$node_name" == "$chosen_node" ]]; then
-                printf "│ ${GREEN}%-35s${NC} │ ${CYAN}%-11s${NC} │ ${YELLOW}%-15s${NC} │ ${MAGENTA}%-10s${NC} │ ${BOLD}%-10s${NC} │\n" "$node_name" "$strategy" "$completion_time" "$raw_score" "$norm_score"
-            else
-                printf "│ %-35s │ %-11s │ %-15s │ %-10s │ %-10s │\n" "$node_name" "$strategy" "$completion_time" "$raw_score" "$norm_score"
-            fi
-            
-        elif [[ "$line" =~ EXTENSION.*Final=(-?[0-9]+) ]]; then
-            node_name=$(echo "$line" | sed -n 's/.*Node \([^:]*\):.*/\1/p')
-            completion_time=$(echo "$line" | sed -n 's/.*Existing=\([0-9]*s\).*/\1/p')
-            raw_score="${BASH_REMATCH[1]}"
-            strategy="EXTENSION"
-            
-            norm_score=$(echo "$logs" | grep "Node: $node_name" | grep "NormalizedScore:" | sed -n 's/.*NormalizedScore: \([0-9]*\).*/\1/p' | head -1)
-            norm_score=${norm_score:-"N/A"}
-            
-            if [[ "$node_name" == "$chosen_node" ]]; then
-                printf "│ ${GREEN}%-35s${NC} │ ${YELLOW}%-11s${NC} │ ${YELLOW}%-15s${NC} │ ${MAGENTA}%-10s${NC} │ ${BOLD}%-10s${NC} │\n" "$node_name" "$strategy" "$completion_time" "$raw_score" "$norm_score"
-            else
-                printf "│ %-35s │ %-11s │ %-15s │ %-10s │ %-10s │\n" "$node_name" "$strategy" "$completion_time" "$raw_score" "$norm_score"
-            fi
-            
-        elif [[ "$line" =~ EMPTY.*Final=(-?[0-9]+) ]]; then
-            node_name=$(echo "$line" | sed -n 's/.*Node \([^:]*\):.*/\1/p')
-            completion_time="0s"
-            raw_score="${BASH_REMATCH[1]}"
-            strategy="EMPTY NODE"
-            
-            norm_score=$(echo "$logs" | grep "Node: $node_name" | grep "NormalizedScore:" | sed -n 's/.*NormalizedScore: \([0-9]*\).*/\1/p' | head -1)
-            norm_score=${norm_score:-"N/A"}
-            
-            if [[ "$node_name" == "$chosen_node" ]]; then
-                printf "│ ${GREEN}%-35s${NC} │ ${MAGENTA}%-11s${NC} │ ${YELLOW}%-15s${NC} │ ${MAGENTA}%-10s${NC} │ ${BOLD}%-10s${NC} │\n" "$node_name" "$strategy" "$completion_time" "$raw_score" "$norm_score"
-            else
-                printf "│ %-35s │ %-11s │ %-15s │ %-10s │ %-10s │\n" "$node_name" "$strategy" "$completion_time" "$raw_score" "$norm_score"
-            fi
+    # Parse node evaluations from detailed CHRONOS_SCORE format
+    echo "$logs" | grep "CHRONOS_SCORE:" | while IFS= read -r line; do
+        # Parse: CHRONOS_SCORE: Pod=namespace/podname, Node=nodename, Strategy=BIN-PACKING, NewJobDuration=300s, ExistingWork=120s, ExtensionDuration=0s, CompletionTime=120s, FinalScore=1012000
+        node_name=$(echo "$line" | sed -n 's/.*Node=\([^,]*\),.*/\1/p')
+        strategy=$(echo "$line" | sed -n 's/.*Strategy=\([^,]*\),.*/\1/p')
+        new_job_duration=$(echo "$line" | sed -n 's/.*NewJobDuration=\([^,]*\),.*/\1/p')
+        existing_work=$(echo "$line" | sed -n 's/.*ExistingWork=\([^,]*\),.*/\1/p')
+        extension_duration=$(echo "$line" | sed -n 's/.*ExtensionDuration=\([^,]*\),.*/\1/p')
+        completion_time=$(echo "$line" | sed -n 's/.*CompletionTime=\([^,]*\),.*/\1/p')
+        raw_score=$(echo "$line" | sed -n 's/.*FinalScore=\([0-9-]*\).*/\1/p')
+        
+        # Get normalized score from NormalizeScore log output
+        norm_score=$(echo "$logs" | grep "RawScore.*NormalizedScore" | grep "Node: $node_name," | sed -n 's/.*NormalizedScore: \([0-9]*\).*/\1/p' | head -1)
+        norm_score=${norm_score:-"N/A"}
+        
+        # Create detailed calculation info for display
+        if [[ "$strategy" == "BIN-PACKING" ]]; then
+            calc_info="Fits in ${existing_work}"
+        elif [[ "$strategy" == "EXTENSION" ]]; then
+            calc_info="Extends ${extension_duration}"
+        else
+            calc_info="Empty node"
+        fi
+        
+        # Highlight chosen node and color-code strategies
+        if [[ "$node_name" == "$chosen_node" ]]; then
+            case "$strategy" in
+                "BIN-PACKING")
+                    printf "│ ${GREEN}%-35s${NC} │ ${CYAN}%-11s${NC} │ ${YELLOW}%-15s${NC} │ ${MAGENTA}%-10s${NC} │ ${BOLD}%-10s${NC} │ ${CYAN}%-20s${NC} │\n" "$node_name" "$strategy" "$completion_time" "$raw_score" "$norm_score" "$calc_info"
+                    ;;
+                "EXTENSION")
+                    printf "│ ${GREEN}%-35s${NC} │ ${YELLOW}%-11s${NC} │ ${YELLOW}%-15s${NC} │ ${MAGENTA}%-10s${NC} │ ${BOLD}%-10s${NC} │ ${YELLOW}%-20s${NC} │\n" "$node_name" "$strategy" "$completion_time" "$raw_score" "$norm_score" "$calc_info"
+                    ;;
+                "EMPTY-NODE")
+                    printf "│ ${GREEN}%-35s${NC} │ ${MAGENTA}%-11s${NC} │ ${YELLOW}%-15s${NC} │ ${MAGENTA}%-10s${NC} │ ${BOLD}%-10s${NC} │ ${MAGENTA}%-20s${NC} │\n" "$node_name" "EMPTY NODE" "$completion_time" "$raw_score" "$norm_score" "$calc_info"
+                    ;;
+                *)
+                    printf "│ ${GREEN}%-35s${NC} │ %-11s │ ${YELLOW}%-15s${NC} │ ${MAGENTA}%-10s${NC} │ ${BOLD}%-10s${NC} │ %-20s │\n" "$node_name" "$strategy" "$completion_time" "$raw_score" "$norm_score" "$calc_info"
+                    ;;
+            esac
+        else
+            # Non-chosen nodes
+            display_strategy="$strategy"
+            [[ "$strategy" == "EMPTY-NODE" ]] && display_strategy="EMPTY NODE"
+            printf "│ %-35s │ %-11s │ %-15s │ %-10s │ %-10s │ %-20s │\n" "$node_name" "$display_strategy" "$completion_time" "$raw_score" "$norm_score" "$calc_info"
         fi
     done
     
-    echo "└─────────────────────────────────────┴─────────────┴─────────────────┴────────────┴────────────┘"
+    echo "└─────────────────────────────────────┴─────────────┴─────────────────┴────────────┴────────────┴──────────────────────┘"
     
     echo -e "\n${BOLD}${GREEN}✅ Chosen Node: $chosen_node${NC}"
     
-    # Determine strategy used
-    chosen_strategy=$(echo "$logs" | grep "$chosen_node" | grep -E "(BIN-PACKING|EXTENSION|EMPTY)" | head -1 | sed -n 's/.* \(BIN-PACKING\|EXTENSION\|EMPTY NODE\).*/\1/p')
-    if [[ -n "$chosen_strategy" ]]; then
-        echo -e "${BOLD}🎯 Strategy Used: ${CYAN}$chosen_strategy${NC}"
+    # Get detailed calculation info for chosen node from CHRONOS_SCORE logs
+    chosen_line=$(echo "$logs" | grep "CHRONOS_SCORE:" | grep "Node=$chosen_node," | head -1)
+    if [[ -n "$chosen_line" ]]; then
+        chosen_strategy=$(echo "$chosen_line" | sed -n 's/.*Strategy=\([^,]*\),.*/\1/p')
+        chosen_new_job=$(echo "$chosen_line" | sed -n 's/.*NewJobDuration=\([^,]*\),.*/\1/p')
+        chosen_existing=$(echo "$chosen_line" | sed -n 's/.*ExistingWork=\([^,]*\),.*/\1/p')
+        chosen_extension=$(echo "$chosen_line" | sed -n 's/.*ExtensionDuration=\([^,]*\),.*/\1/p')
+        chosen_final=$(echo "$chosen_line" | sed -n 's/.*FinalScore=\([0-9-]*\).*/\1/p')
+        
+        display_strategy="$chosen_strategy"
+        [[ "$chosen_strategy" == "EMPTY-NODE" ]] && display_strategy="EMPTY NODE"
+        echo -e "${BOLD}🎯 Strategy Used: ${CYAN}$display_strategy${NC}"
+        
+        echo -e "\n${BOLD}${CYAN}📊 Detailed Calculation:${NC}"
+        echo "• New Job Duration: ${YELLOW}$chosen_new_job${NC}"
+        echo "• Existing Work: ${BLUE}$chosen_existing${NC}"
+        if [[ "$chosen_extension" != "0s" ]]; then
+            echo "• Extension Duration: ${RED}$chosen_extension${NC}"
+        fi
+        echo "• Final Score: ${BOLD}${GREEN}$chosen_final${NC}"
     fi
     
     echo -e "\n${BOLD}${CYAN}📝 Legend:${NC}"
