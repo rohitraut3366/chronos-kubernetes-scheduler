@@ -136,12 +136,11 @@ jobs:
 
   # Build Docker image with caching and run security scanning
   docker-build:
-    name: Docker Build & Security Scan (Cached)
+    name: Docker Build & Security Scan
     runs-on: ubuntu-latest
-    # Removed needs: [quality] to run independently for faster feedback
     permissions:
       security-events: write
-      actions: read  # Required for cache access
+      actions: read
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -154,9 +153,9 @@ jobs:
       with:
         context: .
         file: build/Dockerfile
-        platforms: linux/amd64  # Single platform for CI speed
-        push: false  # Only build, don't push
-        load: true   # Load into local Docker for testing
+        platforms: linux/amd64,linux/arm64
+        push: false
+        load: true
         tags: chronos-kubernetes-scheduler:latest
         cache-from: type=gha
         cache-to: type=gha,mode=max
