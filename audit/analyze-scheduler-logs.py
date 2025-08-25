@@ -43,6 +43,7 @@ def parse_scheduler_logs(log_file_path):
     # Regex patterns
     patterns = {
         'scoring_start': r'Scoring pod ([^ ]+) for node (.+)',
+        'timestamp': r'^I(\d{4} \d{2}:\d{2}:\d{2}\.\d+)',
         'strategy_bin_packing': r'Node ([^:]+): BIN-PACKING - NewJob=(\d+)s fits in Existing=(\d+)s.*Final=(-?\d+)',
         'strategy_extension': r'Node ([^:]+): EXTENSION - NewJob=(\d+)s > Existing=(\d+)s, Extension=(\d+)s.*Final=(-?\d+)',
         'strategy_empty': r'Node ([^:]+): EMPTY NODE.*Final=(-?\d+)',
@@ -52,12 +53,18 @@ def parse_scheduler_logs(log_file_path):
     }
     
     current_pod = None
+    current_timestamp = None
     
     print("🔍 Analyzing scheduler logs...")
     
     with open(log_file_path, 'r') as file:
         for line_num, line in enumerate(file, 1):
             line = line.strip()
+            
+            # Extract timestamp from log line
+            timestamp_match = re.search(patterns['timestamp'], line)
+            if timestamp_match:
+                current_timestamp = timestamp_match.group(1)
             
             # Check for successful bindings
             binding_match = re.search(patterns['successful_binding'], line)
@@ -77,7 +84,7 @@ def parse_scheduler_logs(log_file_path):
                         'pod_duration': None,
                         'nodes': {},
                         'chosen_node': None,
-                        'timestamp': None
+                        'timestamp': current_timestamp
                     }
                 continue
             
@@ -144,10 +151,27 @@ def parse_scheduler_logs(log_file_path):
                 if pod_name in scheduling_sessions and node_name in scheduling_sessions[pod_name]['nodes']:
                     scheduling_sessions[pod_name]['nodes'][node_name]['normalized_score'] = normalized_score
     
-    # Add chosen nodes from successful bindings
+    # Add chosen nodes from successful bindings and determine their strategies
     for pod_name, chosen_node in successful_bindings.items():
         if pod_name in scheduling_sessions:
             scheduling_sessions[pod_name]['chosen_node'] = chosen_node
+            # Find the strategy used for the chosen node
+            if chosen_node in scheduling_sessions[pod_name]['nodes']:
+                chosen_strategy = scheduling_sessions[pod_name]['nodes'][chosen_node]['strategy']
+                scheduling_sessions[pod_name]['chosen_node_strategy'] = chosen_strategy
+            else:
+                scheduling_sessions[pod_name]['chosen_node_strategy'] = 'UNKNOWN'
+                
+            # Calculate unique node counts per strategy for this pod
+            pod_strategy_nodes = defaultdict(set)
+            for node_name, node_data in scheduling_sessions[pod_name]['nodes'].items():
+                strategy = node_data['strategy']
+                pod_strategy_nodes[strategy].add(node_name)
+            
+            # Add strategy node counts to the pod data
+            scheduling_sessions[pod_name]['strategy_node_counts'] = {
+                strategy: len(nodes) for strategy, nodes in pod_strategy_nodes.items()
+            }
     
     print(f"✅ Found {len(scheduling_sessions)} scheduling sessions")
     print(f"✅ Found {len(successful_bindings)} successful bindings")
@@ -174,18 +198,31 @@ def generate_analysis_report(scheduling_sessions):
     
     # Strategy distribution
     strategy_counts = defaultdict(int)
+    chosen_strategy_counts = defaultdict(int)
     node_utilization = defaultdict(int)
+    strategy_nodes = defaultdict(set)  # Track unique nodes per strategy
     
     for session in scheduling_sessions.values():
         if session['chosen_node']:
             node_utilization[session['chosen_node']] += 1
             
-        for node_data in session['nodes'].values():
-            strategy_counts[node_data['strategy']] += 1
+        # Count chosen node strategies
+        if session.get('chosen_node_strategy'):
+            chosen_strategy_counts[session['chosen_node_strategy']] += 1
+            
+        for node_name, node_data in session['nodes'].items():
+            strategy = node_data['strategy']
+            strategy_counts[strategy] += 1
+            strategy_nodes[strategy].add(node_name)  # Track unique nodes per strategy
     
-    print(f"\n🎯 Strategy Distribution:")
+    print(f"\n🎯 Strategy Distribution (All Evaluations):")
     for strategy, count in sorted(strategy_counts.items()):
-        print(f"   {strategy}: {count} evaluations")
+        node_count = len(strategy_nodes[strategy])
+        print(f"   {strategy}: {count} evaluations ({node_count} unique nodes)")
+    
+    print(f"\n🏆 Chosen Node Strategies (Successful Bindings):")
+    for strategy, count in sorted(chosen_strategy_counts.items()):
+        print(f"   {strategy}: {count} pods")
     
     print(f"\n🏗️ Node Utilization (Top 10):")
     for node, count in sorted(node_utilization.items(), key=lambda x: x[1], reverse=True)[:10]:

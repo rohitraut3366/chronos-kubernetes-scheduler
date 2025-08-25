@@ -286,14 +286,16 @@ python3 audit/analyze-scheduler-logs.py ./scheduler.log
 
 #### Features
 
-- **📊 Performance Analysis**: Shows total sessions, success rates, and strategy distribution
+- **📊 Performance Analysis**: Shows total sessions, success rates, strategy distribution with unique node counts
 - **🎯 Node Utilization**: Identifies which nodes are being chosen most frequently  
 - **📋 Clean Summary Output**: Shows key performance metrics and cluster utilization
 - **💾 Complete JSON Export**: Saves detailed analysis to timestamped JSON file with:
-  - Pod duration and chosen node for each scheduling decision
+  - Pod duration, chosen node, and chosen strategy for each scheduling decision
   - All evaluated nodes with completion times  
-  - Strategy used (BIN-PACKING/EXTENSION/EMPTY NODE)
+  - Strategy used for each node (BIN-PACKING/EXTENSION/EMPTY NODE)
   - Raw and normalized scores for each node
+  - Timestamps for tracking scheduling timeline
+  - Per-pod strategy node counts showing scheduling landscape for each individual pod
 - **🔍 Production Ready**: Handles real Kubernetes scheduler log formats
 
 #### Sample Console Output
@@ -309,10 +311,15 @@ python3 audit/analyze-scheduler-logs.py ./scheduler.log
 ✅ Successfully Bound: 107
 ❌ Failed to Bind: 0
 
-🎯 Strategy Distribution:
-   BIN-PACKING: 146 evaluations
-   EMPTY NODE: 953 evaluations
-   EXTENSION: 1557 evaluations
+🎯 Strategy Distribution (All Evaluations):
+   BIN-PACKING: 698 evaluations (52 unique nodes)
+   EMPTY NODE: 2416 evaluations (85 unique nodes)
+   EXTENSION: 1915 evaluations (78 unique nodes)
+
+🏆 Chosen Node Strategies (Successful Bindings):
+   BIN-PACKING: 500 pods
+   EMPTY NODE: 25 pods
+   EXTENSION: 317 pods
 
 🏗️ Node Utilization (Top 10):
    ip-10-10-165-191.us-west-2.compute.internal: 26 pods
@@ -340,7 +347,14 @@ The detailed JSON file contains comprehensive data for each pod:
       }
     },
     "chosen_node": "node-1",
-    "total_candidates": 15
+    "chosen_node_strategy": "BIN-PACKING",
+    "total_candidates": 15,
+    "timestamp": "0825 08:01:22.184686",
+    "strategy_node_counts": {
+      "BIN-PACKING": 12,
+      "EXTENSION": 25,
+      "EMPTY NODE": 8
+    }
   }
 }
 ```
