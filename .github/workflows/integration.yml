@@ -124,6 +124,11 @@ jobs:
             weight: 100
             jobDurationAnnotation: "scheduling.workload.io/expected-duration-seconds"
         
+        # Ensure we see our custom logs (klog.Infof requires level 2+)
+        logging:
+          level: 2
+          format: text
+        
         resources:
           requests:
             cpu: 50m
