@@ -119,6 +119,10 @@ jobs:
           name: chronos-kubernetes-scheduler
           leaderElection:
             enabled: false  # Single replica in CI
+          plugin:
+            name: Chronos
+            weight: 100
+            jobDurationAnnotation: "scheduling.workload.io/expected-duration-seconds"
         
         resources:
           requests:
@@ -148,7 +152,14 @@ jobs:
         sudo k3s ctr images list | grep -E "(chronos|scheduler)" || echo "No scheduler images found"
         echo "Helm values file:"
         cat values-ci.yaml
-        echo "Chart templates dry-run:"
+        
+        echo "=== GENERATED SCHEDULER CONFIGURATION ==="
+        helm template chronos-scheduler ./charts/chronos-kubernetes-scheduler --values values-ci.yaml --namespace chronos-system --show-only templates/configmap.yaml || {
+          echo "❌ Helm template generation failed!"
+          exit 1
+        }
+        
+        echo "=== FULL CHART TEMPLATES DRY-RUN ==="
         helm template chronos-scheduler ./charts/chronos-kubernetes-scheduler --values values-ci.yaml --namespace chronos-system || {
           echo "❌ Helm template validation failed!"
           exit 1
