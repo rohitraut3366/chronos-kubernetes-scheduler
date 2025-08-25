@@ -259,71 +259,7 @@ fi
 
 echo ""
 
-# ================================================================
-# 5. NODE DISTRIBUTION ANALYSIS
-# ================================================================
-echo "🏠 NODE DISTRIBUTION ANALYSIS"
-echo "============================="
 
-echo "📊 All pods per node (entire namespace):"
-NODE_DISTRIBUTION=$(kubectl get pods -n $POD_NAMESPACE -o wide --no-headers 2>/dev/null | awk '{print $7}' | sort | uniq -c | sort -nr)
-echo "$NODE_DISTRIBUTION"
-
-# Show pods with duration annotations per node
-if [ $WITH_ANNOTATION_ALL -gt 0 ]; then
-    echo ""
-    echo "🎯 Pods with duration annotations per node:"
-    ANNOTATED_DISTRIBUTION=$(kubectl get pods -n $POD_NAMESPACE -o json 2>/dev/null | jq -r '.items[] | select(.metadata.annotations["scheduling.workload.io/expected-duration-seconds"] != null) | .spec.nodeName' | sort | uniq -c | sort -nr)
-    if [ ! -z "$ANNOTATED_DISTRIBUTION" ]; then
-        echo "$ANNOTATED_DISTRIBUTION"
-        
-        # Calculate distribution metrics for annotated pods
-        ANNOTATED_NODES_WITH_PODS=$(echo "$ANNOTATED_DISTRIBUTION" | wc -l)
-        MAX_ANNOTATED_ON_NODE=$(echo "$ANNOTATED_DISTRIBUTION" | head -1 | awk '{print $1}')
-        MIN_ANNOTATED_ON_NODE=$(echo "$ANNOTATED_DISTRIBUTION" | tail -1 | awk '{print $1}')
-        ANNOTATED_DISTRIBUTION_RATIO=$((MAX_ANNOTATED_ON_NODE - MIN_ANNOTATED_ON_NODE))
-        
-        echo ""
-        echo "📈 Annotated Pod Distribution Quality:"
-        if [ $ANNOTATED_DISTRIBUTION_RATIO -le 2 ]; then
-            echo "✅ EXCELLENT: Even distribution of annotated pods (max: $MAX_ANNOTATED_ON_NODE, min: $MIN_ANNOTATED_ON_NODE)"
-        elif [ $ANNOTATED_DISTRIBUTION_RATIO -le 5 ]; then
-            echo "⚠️  GOOD: Moderate distribution of annotated pods (max: $MAX_ANNOTATED_ON_NODE, min: $MIN_ANNOTATED_ON_NODE)"
-        else
-            echo "❌ POOR: Uneven distribution of annotated pods (max: $MAX_ANNOTATED_ON_NODE, min: $MIN_ANNOTATED_ON_NODE)"
-        fi
-    else
-        echo "   No pods with duration annotations found"
-    fi
-fi
-
-TOTAL_NODES=$(kubectl get nodes --no-headers 2>/dev/null | wc -l)
-NODES_WITH_PODS=$(echo "$NODE_DISTRIBUTION" | wc -l)
-EMPTY_NODES=$((TOTAL_NODES - NODES_WITH_PODS))
-PODS_PER_NODE=$(calc_percentage $TOTAL_PODS $TOTAL_NODES)
-
-echo ""
-echo "📈 Overall Distribution Metrics (all pods):"
-echo "   Total cluster nodes: $TOTAL_NODES"
-echo "   Nodes with pods: $NODES_WITH_PODS"
-echo "   Empty nodes: $EMPTY_NODES"
-echo "   Average pods per node: $PODS_PER_NODE"
-
-# Check overall distribution quality
-MAX_PODS_ON_NODE=$(echo "$NODE_DISTRIBUTION" | head -1 | awk '{print $1}')
-MIN_PODS_ON_NODE=$(echo "$NODE_DISTRIBUTION" | tail -1 | awk '{print $1}')
-DISTRIBUTION_RATIO=$((MAX_PODS_ON_NODE - MIN_PODS_ON_NODE))
-
-echo "📊 Overall Distribution Quality:"
-if [ $DISTRIBUTION_RATIO -le 2 ]; then
-    echo "✅ EXCELLENT: Even overall pod distribution (max: $MAX_PODS_ON_NODE, min: $MIN_PODS_ON_NODE)"
-elif [ $DISTRIBUTION_RATIO -le 5 ]; then
-    echo "⚠️  GOOD: Moderate overall pod distribution (max: $MAX_PODS_ON_NODE, min: $MIN_PODS_ON_NODE)"
-else
-    echo "❌ POOR: Uneven overall pod distribution (max: $MAX_PODS_ON_NODE, min: $MIN_PODS_ON_NODE)"
-fi
-
-echo ""
 
 # ================================================================
 # 6. CHRONOS SCHEDULING PERFORMANCE ANALYSIS

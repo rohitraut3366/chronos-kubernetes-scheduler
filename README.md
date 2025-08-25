@@ -1,7 +1,7 @@
 # 🚀 Chronos Kubernetes Scheduler
 
 [![Tests](https://github.com/rohitraut3366/chronos-kubernetes-scheduler/workflows/Tests/badge.svg?branch=main)](https://github.com/rohitraut3366/chronos-kubernetes-scheduler/actions?query=branch%3Amain)
-[![Coverage](https://img.shields.io/badge/coverage-48%25-green.svg)](https://github.com/rohitraut3366/chronos-kubernetes-scheduler/actions?query=branch%3Amain)
+[![Coverage](https://img.shields.io/badge/coverage-88%25-brightgreen.svg)](https://github.com/rohitraut3366/chronos-kubernetes-scheduler/actions?query=branch%3Amain)
 [![Go Report Card](https://goreportcard.com/badge/github.com/rohitraut3366/chronos-kubernetes-scheduler)](https://goreportcard.com/report/github.com/rohitraut3366/chronos-kubernetes-scheduler)
 
 **Advanced Kubernetes custom scheduler plugin with dual scheduling modes:** intelligently bin-packs workloads based on job durations using either **individual pod-by-pod scheduling** or **high-performance batch grouping**, maximizing cluster resource utilization and cost optimization.

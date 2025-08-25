@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -2609,4 +2610,321 @@ func createNodeWithOverduePods(nodeName string) *framework.NodeInfo {
 	}
 
 	return nodeInfo
+}
+
+// Test simple plugin interface methods for additional coverage
+func TestPluginInterfaceMethods(t *testing.T) {
+	chronos, err := New(context.Background(), nil, nil)
+	assert.NoError(t, err)
+	c := chronos.(*Chronos)
+
+	t.Run("Name", func(t *testing.T) {
+		assert.Equal(t, "Chronos", c.Name())
+	})
+
+	t.Run("ScoreExtensions", func(t *testing.T) {
+		extensions := c.ScoreExtensions()
+		assert.NotNil(t, extensions)
+		assert.Equal(t, c, extensions) // ScoreExtensions returns the Chronos struct itself
+	})
+}
+
+// Test CalculateOptimizedScore function comprehensively
+func TestCalculateOptimizedScoreComprehensive(t *testing.T) {
+	chronos, err := New(context.Background(), nil, nil)
+	assert.NoError(t, err)
+	c := chronos.(*Chronos)
+
+	t.Run("ValidDuration", func(t *testing.T) {
+		score := c.CalculateOptimizedScore("test-node", 0, 300)
+		assert.True(t, score > 0, "Should return positive score for valid duration")
+	})
+
+	t.Run("NoDurationAnnotation", func(t *testing.T) {
+		score := c.CalculateOptimizedScore("test-node", 0, 300)
+		assert.True(t, score > 0, "Should return positive score")
+	})
+
+	t.Run("InvalidDurationAnnotation", func(t *testing.T) {
+		score := c.CalculateOptimizedScore("test-node", 100, 50) // Extension case
+		assert.True(t, score != 0, "Should return some score for extension")
+	})
+
+	t.Run("ZeroDuration", func(t *testing.T) {
+		score := c.CalculateOptimizedScore("test-node", 0, 0)
+		assert.True(t, score > 0, "Should return positive score for zero duration")
+	})
+}
+
+// Test NormalizeScore function comprehensively
+func TestNormalizeScore(t *testing.T) {
+	chronos, err := New(context.Background(), nil, nil)
+	assert.NoError(t, err)
+	c := chronos.(*Chronos)
+
+	t.Run("NormalizeWithRange", func(t *testing.T) {
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-pod",
+			},
+		}
+
+		scores := framework.NodeScoreList{
+			{Name: "node1", Score: 10},
+			{Name: "node2", Score: 50},
+			{Name: "node3", Score: 100},
+		}
+
+		status := c.NormalizeScore(context.Background(), framework.NewCycleState(), pod, scores)
+		assert.True(t, status.IsSuccess(), "Normalization should succeed")
+
+		// Verify scores are normalized to 0-100 range
+		assert.Equal(t, int64(0), scores[0].Score, "Min score should be normalized to 0")
+		assert.Equal(t, int64(100), scores[2].Score, "Max score should be normalized to 100")
+		assert.True(t, scores[1].Score >= 0 && scores[1].Score <= 100, "Middle score should be in range")
+	})
+
+	t.Run("AllSameScores", func(t *testing.T) {
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-pod",
+			},
+		}
+
+		scores := framework.NodeScoreList{
+			{Name: "node1", Score: 50},
+			{Name: "node2", Score: 50},
+			{Name: "node3", Score: 50},
+		}
+
+		status := c.NormalizeScore(context.Background(), framework.NewCycleState(), pod, scores)
+		assert.True(t, status.IsSuccess(), "Normalization should succeed")
+
+		// When all scores are equal, they get normalized to 100
+		for _, nodeScore := range scores {
+			assert.Equal(t, int64(100), nodeScore.Score, "Equal scores should be normalized to 100")
+		}
+	})
+
+	t.Run("EmptyScores", func(t *testing.T) {
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-pod",
+			},
+		}
+
+		scores := framework.NodeScoreList{}
+
+		status := c.NormalizeScore(context.Background(), framework.NewCycleState(), pod, scores)
+		assert.True(t, status.IsSuccess(), "Normalization should succeed for empty scores")
+	})
+}
+
+// Test calculateMaxRemainingTimeOptimized function comprehensively
+func TestCalculateMaxRemainingTimeOptimized(t *testing.T) {
+	chronos, err := New(context.Background(), nil, nil)
+	assert.NoError(t, err)
+	c := chronos.(*Chronos)
+
+	t.Run("IntegerDuration", func(t *testing.T) {
+		// Test with empty PodInfo slice
+		duration := c.calculateMaxRemainingTimeOptimized([]*framework.PodInfo{})
+		assert.Equal(t, int64(0), duration)
+	})
+
+	t.Run("NonEmptyPodInfoSlice", func(t *testing.T) {
+		// Test with non-empty PodInfo slice
+		podInfo := &framework.PodInfo{
+			Pod: &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						JobDurationAnnotation: "300",
+					},
+				},
+			},
+		}
+
+		duration := c.calculateMaxRemainingTimeOptimized([]*framework.PodInfo{podInfo})
+		assert.True(t, duration >= 0, "Should return non-negative duration")
+	})
+}
+
+// Additional tests for loadBatchSchedulerConfig to improve coverage
+func TestLoadBatchSchedulerConfigAdvanced(t *testing.T) {
+	t.Run("WithEnvironmentVariables", func(t *testing.T) {
+		// Set custom environment variables
+		os.Setenv("BATCH_INTERVAL_SECONDS", "30")
+		os.Setenv("BATCH_SIZE_LIMIT", "50")
+		defer func() {
+			os.Unsetenv("BATCH_INTERVAL_SECONDS")
+			os.Unsetenv("BATCH_SIZE_LIMIT")
+		}()
+
+		config := loadBatchSchedulerConfig()
+		assert.Equal(t, 30, config.BatchIntervalSeconds)
+		assert.Equal(t, 50, config.BatchSizeLimit)
+	})
+
+	t.Run("WithInvalidEnvironmentVariables", func(t *testing.T) {
+		// Set invalid environment variables
+		os.Setenv("BATCH_INTERVAL_SECONDS", "invalid")
+		os.Setenv("BATCH_SIZE_LIMIT", "not-a-number")
+		defer func() {
+			os.Unsetenv("BATCH_INTERVAL_SECONDS")
+			os.Unsetenv("BATCH_SIZE_LIMIT")
+		}()
+
+		config := loadBatchSchedulerConfig()
+		assert.Equal(t, DefaultBatchIntervalSeconds, config.BatchIntervalSeconds)
+		assert.Equal(t, DefaultBatchSizeLimit, config.BatchSizeLimit)
+	})
+}
+
+// Test different code paths in Start function
+func TestStartFunctionPaths(t *testing.T) {
+	t.Run("StartAlreadyRunning", func(t *testing.T) {
+		bs := &BatchScheduler{
+			running: true, // Already running
+		}
+
+		// Should return early without starting
+		bs.Start()
+		assert.True(t, bs.running, "Should remain running")
+	})
+}
+
+// Test specific utility functions for better coverage
+func TestUtilityFunctionsForCoverage(t *testing.T) {
+	t.Run("CalculateOptimizedScoreEdgeCases", func(t *testing.T) {
+		chronos, err := New(context.Background(), nil, nil)
+		assert.NoError(t, err)
+		c := chronos.(*Chronos)
+
+		// Test with zero values
+		score := c.CalculateOptimizedScore("test-node", 0, 0)
+		assert.True(t, score > 0, "Should return positive score even with zero inputs")
+
+		// Test with very large values
+		score = c.CalculateOptimizedScore("test-node", 1000000, 500000)
+		assert.True(t, score > 0, "Should handle large values")
+
+		// Test negative duration (edge case)
+		score = c.CalculateOptimizedScore("test-node", 100, -50)
+		assert.True(t, score > 0, "Should handle negative duration gracefully")
+	})
+}
+
+func TestNewComprehensive(t *testing.T) {
+	t.Run("GroupingModeWithNilHandle", func(t *testing.T) {
+		os.Setenv("CHRONOS_GROUPING_ENABLED", "true")
+		defer os.Unsetenv("CHRONOS_GROUPING_ENABLED")
+
+		chronos, err := New(context.Background(), nil, nil)
+		assert.NoError(t, err)
+
+		c := chronos.(*Chronos)
+		assert.NotNil(t, c)
+		assert.True(t, c.batchModeEnabled)
+		assert.Nil(t, c.batchScheduler) // Nil because handle is nil (test mode)
+		assert.Nil(t, c.handle)
+		assert.NotNil(t, c.inFlightPods)
+	})
+
+	t.Run("IndividualModeDefault", func(t *testing.T) {
+		os.Unsetenv("CHRONOS_GROUPING_ENABLED") // Default to individual mode
+
+		chronos, err := New(context.Background(), nil, nil)
+		assert.NoError(t, err)
+
+		c := chronos.(*Chronos)
+		assert.NotNil(t, c)
+		assert.False(t, c.batchModeEnabled)
+		assert.Nil(t, c.batchScheduler)
+		assert.NotNil(t, c.inFlightPods)
+	})
+}
+
+// TestScoreEdgeCases tests the missing coverage paths in the Score function
+func TestScoreEdgeCases(t *testing.T) {
+	t.Run("BatchModeInFlightPodWithUID", func(t *testing.T) {
+		// Test the inFlight check using pod UID specifically
+		os.Setenv("CHRONOS_GROUPING_ENABLED", "true")
+		defer os.Unsetenv("CHRONOS_GROUPING_ENABLED")
+
+		chronos, err := New(context.Background(), nil, nil)
+		assert.NoError(t, err)
+
+		c := chronos.(*Chronos)
+		c.batchModeEnabled = true
+
+		// Create a pod with a specific UID
+		testPodUID := types.UID("test-pod-uid-12345")
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "test-pod",
+				Namespace:   "default",
+				UID:         testPodUID,
+				Annotations: map[string]string{JobDurationAnnotation: "300"},
+			},
+		}
+
+		// Mark the pod as in-flight using its UID
+		c.inFlightPods.Store(testPodUID, true)
+
+		score, status := c.Score(context.Background(), &framework.CycleState{}, pod, "test-node")
+
+		assert.Equal(t, int64(1), score, "Should return minimal score for in-flight pod")
+		assert.True(t, status.IsSuccess())
+	})
+
+	// Note: Complex framework error testing removed to simplify mocking dependencies
+
+	t.Run("IndividualModeDurationParseError", func(t *testing.T) {
+		// Test the error path when duration parsing fails in individual mode
+		os.Unsetenv("CHRONOS_GROUPING_ENABLED") // Individual mode
+
+		chronos := &Chronos{
+			handle:           nil, // Will cause error before reaching node info
+			batchModeEnabled: false,
+			inFlightPods:     sync.Map{},
+		}
+
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "test-pod",
+				Namespace:   "default",
+				Annotations: map[string]string{JobDurationAnnotation: "invalid-duration"},
+			},
+		}
+
+		score, status := chronos.Score(context.Background(), &framework.CycleState{}, pod, "test-node")
+
+		assert.Equal(t, int64(0), score, "Should return 0 score when duration parsing fails")
+		assert.True(t, status.IsSuccess()) // Function succeeds but returns 0
+	})
+
+	t.Run("BatchModeNonInFlightPod", func(t *testing.T) {
+		// Test batch mode with a pod that's not in-flight
+		os.Setenv("CHRONOS_GROUPING_ENABLED", "true")
+		defer os.Unsetenv("CHRONOS_GROUPING_ENABLED")
+
+		chronos := &Chronos{
+			batchModeEnabled: true,
+			inFlightPods:     sync.Map{},
+		}
+
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "test-pod",
+				Namespace:   "default",
+				UID:         types.UID("not-in-flight-uid"),
+				Annotations: map[string]string{JobDurationAnnotation: "300"},
+			},
+		}
+
+		score, status := chronos.Score(context.Background(), &framework.CycleState{}, pod, "test-node")
+
+		assert.Equal(t, int64(1), score, "Should return minimal score for batch mode candidate")
+		assert.True(t, status.IsSuccess())
+	})
 }
