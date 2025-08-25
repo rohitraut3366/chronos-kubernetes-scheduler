@@ -34,7 +34,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/chronos-kubernetes-scheduler
           tags: |
-            type=raw,value={{sha}}
+            type=raw,value=${{ github.sha }}
             type=raw,value=latest
       
       - name: Build and push Docker image
