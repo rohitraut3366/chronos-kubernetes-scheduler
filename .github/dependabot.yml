@@ -6,6 +6,10 @@ updates:
   # Go modules dependency updates
   - package-ecosystem: "gomod"
     directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
     open-pull-requests-limit: 10
     commit-message:
       prefix: "deps"
@@ -15,6 +19,10 @@ updates:
   # Docker dependency updates for multi-stage builds
   - package-ecosystem: "docker" 
     directory: "/build"
+    schedule:
+      interval: "weekly"
+      day: "monday"  
+      time: "09:00"
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps(docker)"
@@ -22,6 +30,10 @@ updates:
   # GitHub Actions workflow dependency updates
   - package-ecosystem: "github-actions"
     directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps(actions)"
