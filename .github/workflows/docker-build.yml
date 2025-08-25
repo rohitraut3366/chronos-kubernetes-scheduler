@@ -1,10 +1,9 @@
-name: Docker Build & Push to GHCR
+name: Docker Build & Push to GHCR (Master Only)
 
 on:
   push:
     branches:
-      - master  # Push to GHCR on master branch
-  pull_request:  # Test build on PRs (no push)
+      - master  # Push to GHCR on master branch only
   workflow_dispatch:  # Allow manual triggering
 
 jobs:
@@ -43,7 +42,7 @@ jobs:
           context: .
           file: build/Dockerfile  # Specify the Dockerfile location
           platforms: linux/amd64,linux/arm64
-          push: true  # Push on both master and PR branches for testing
+          push: true  # Always push since we only run on master
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
