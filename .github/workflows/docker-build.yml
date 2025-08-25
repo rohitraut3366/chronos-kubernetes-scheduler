@@ -3,13 +3,13 @@ name: Docker Build & Push to GHCR
 on:
   push:
     branches:
-      - master  # Only run on master branch
+      - master  # Push to GHCR on master branch
+  pull_request:  # Test build on PRs (no push)
   workflow_dispatch:  # Allow manual triggering
 
 jobs:
   docker-build:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master'  # Double protection - only master branch
     permissions:
       contents: read
       packages: write  # Required for GHCR push
@@ -22,6 +22,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
         
       - name: Login to GitHub Container Registry
+        if: github.ref == 'refs/heads/master'  # Only login on master branch
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -42,7 +43,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
+          push: ${{ github.ref == 'refs/heads/master' }}  # Only push on master branch
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -50,7 +51,7 @@ jobs:
       
       - name: Docker Scout CVE scanning
         uses: docker/scout-action@v1
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/master'  # Only scan pushed images on master
         with:
           command: cves
           image: ghcr.io/${{ github.repository_owner }}/chronos-kubernetes-scheduler:${{ github.sha }}
