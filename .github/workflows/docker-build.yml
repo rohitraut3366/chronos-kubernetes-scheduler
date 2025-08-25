@@ -48,11 +48,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      
-      - name: Docker Scout CVE scanning
-        uses: docker/scout-action@v1
-        with:
-          command: cves
-          image: ghcr.io/${{ github.repository_owner }}/chronos-kubernetes-scheduler:${{ github.sha }}
-          only-severities: critical,high
-          only-fixed: true
