@@ -52,13 +52,20 @@ Only needed for building from source:
 - Docker (for building images)
 
 ```bash
-# Build and test
+# Essential commands
 make test          # All tests
+make build         # Build binary
+make docker-build  # Build Docker image
+
+# Additional targets
+make help          # Show all available targets
 make test-unit     # Unit tests only  
 make test-integration  # Integration tests only
 make bench         # Performance benchmarks
-make build         # Build binary
-make docker-build  # Build Docker image
+make clean         # Clean build artifacts
+make fmt           # Format code
+make lint          # Run linter
+make coverage      # Generate coverage report
 ```
 
 ### Deploy to Kubernetes
@@ -154,18 +161,6 @@ Real-time scheduling analysis directly in K9s. See [k9s/README.md](k9s/README.md
 - **📋 Production Ready**: Complete Kubernetes manifests included
 - **🔒 Secure Defaults**: Non-root container, minimal image, proper RBAC
 
-### Available Make Targets
-
-```bash
-make help          # Show all available targets
-make build         # Build binary
-make test          # Run all tests
-make docker-build  # Build container image
-make clean         # Clean build artifacts
-make fmt           # Format code
-make lint          # Run linter
-make coverage      # Generate coverage report
-```
 
 ## 🤝 Contributing
 
