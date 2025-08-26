@@ -145,40 +145,11 @@ kubectl logs -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=100
 kubectl apply -f examples/
 ```
 
-### 4. Scheduler Selection Logic
+### 4. How It Works
 
-The plugin uses a hierarchical scoring algorithm with three priorities:
-
-**Priority 1 (Highest): Bin-Packing** - Job fits within existing time windows
-```
-baseScore = 1,000,000 + (maxRemainingTime * 100)  // Consolidation bonus
-```
-
-**Priority 2 (Medium): Extension Minimization** - Job extends beyond existing work
-```
-baseScore = 100,000 - (extensionTime * 100)  // Penalty for extending
-```
-
-**Priority 3 (Lowest): Empty Nodes** - Heavily penalized for cost optimization
-```
-baseScore = 1,000  // Low score to avoid empty nodes
-```
-
-**Example Scoring:**
-- **Node with 600s remaining work, new 300s job**: `1,000,000 + (600 * 100) = 1,060,000` ✅ (Bin-packing)
-- **Node with 200s remaining work, new 300s job**: `100,000 - (100 * 100) = 90,000` (Extension)
-- **Empty Node**: `1,000` (Heavily penalized)
-- **Result**: Consolidation wins for optimal bin-packing! ✅
-
-## 🧪 Testing
-
-### Comprehensive Test Suite
-
-- **✅ 500+ Unit Tests**: Algorithm logic, edge cases, error handling
-- **✅ Integration Tests**: Real Kubernetes object interactions  
-- **✅ Performance Tests**: Nanosecond-level scoring benchmarks
-- **✅ Property Tests**: Randomized correctness validation
-- **✅ Realistic Scenarios**: Production cluster simulations
+- **Bin-Packing**: Fits new jobs into existing node time windows (highest priority)
+- **Extension**: Extends node completion time when necessary (medium priority)  
+- **Empty Node**: Avoids empty nodes to optimize costs (lowest priority)
 
 ### Run Specific Tests
 
