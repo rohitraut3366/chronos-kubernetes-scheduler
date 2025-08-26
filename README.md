@@ -52,14 +52,13 @@ Only needed for building from source:
 - Docker (for building images)
 
 ```bash
-# Run all tests
-make test
-
-# Build binary  
-make build
-
-# Build Docker image
-make docker-build
+# Build and test
+make test          # All tests
+make test-unit     # Unit tests only  
+make test-integration  # Integration tests only
+make bench         # Performance benchmarks
+make build         # Build binary
+make docker-build  # Build Docker image
 ```
 
 ### Deploy to Kubernetes
@@ -120,30 +119,6 @@ kubectl logs -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=100
 # Test with example workloads
 kubectl apply -f examples/
 ```
-
-### 4. How It Works
-
-- **Bin-Packing**: Fits new jobs into existing node time windows (highest priority)
-- **Extension**: Extends node completion time when necessary (medium priority)  
-- **Empty Node**: Avoids empty nodes to optimize costs (lowest priority)
-
-### Run Specific Tests
-
-```bash
-# Unit tests only
-make test-unit
-
-# Integration tests only  
-make test-integration
-
-# Performance benchmarks
-make bench
-
-# Test coverage report
-make coverage
-```
-
-
 
 ## 🔧 Configuration
 
