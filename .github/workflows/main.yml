@@ -60,7 +60,7 @@ jobs:
         EOF
 
     - name: Build Docker image with caching
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v6
       with:
         context: .
         file: build/Dockerfile
@@ -563,7 +563,7 @@ jobs:
             type=raw,value=latest
       
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: build/Dockerfile
