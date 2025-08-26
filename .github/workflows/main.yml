@@ -82,12 +82,20 @@ jobs:
         echo "Detected Kubernetes version from go.mod: v${K8S_VERSION}"
         echo "Using KIND image: ${KIND_IMAGE}"
         
-        # Verify the KIND image exists before creating cluster
+        # Verify the KIND image exists - FAIL if not available for consistency
+        echo "🔍 Verifying KIND image availability..."
         if docker pull ${KIND_IMAGE} >/dev/null 2>&1; then
           echo "✅ KIND image ${KIND_IMAGE} is available"
         else
-          echo "⚠️ KIND image ${KIND_IMAGE} not found, falling back to latest stable"
-          KIND_IMAGE="kindest/node:latest"
+          echo "❌ KIND image ${KIND_IMAGE} not found!"
+          echo "💡 This usually means:"
+          echo "   1. Network/registry issue (temporary)"  
+          echo "   2. KIND doesn't have image for v${K8S_VERSION}.0 yet"
+          echo "   3. Version detection logic needs update"
+          echo ""
+          echo "🔧 To fix: Check https://github.com/kubernetes-sigs/kind/releases"
+          echo "   and verify v${K8S_VERSION}.0 image exists, or update go.mod"
+          exit 1
         fi
         
         echo "Creating KIND multi-node cluster with ${KIND_IMAGE}..."
