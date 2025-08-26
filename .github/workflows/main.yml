@@ -2,7 +2,7 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ master ]
   pull_request:
   # Allow manual triggering
   workflow_dispatch:
