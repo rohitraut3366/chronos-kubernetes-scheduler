@@ -44,7 +44,7 @@ jobs:
 
     - name: Install KIND
       run: |
-        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
         chmod +x ./kind
         sudo mv ./kind /usr/local/bin/kind
         
@@ -75,8 +75,8 @@ jobs:
         
     - name: Set up KIND multi-node cluster
       run: |
-        echo "Creating KIND multi-node cluster..."
-        kind create cluster --config kind-config.yaml --name chronos-test
+        echo "Creating KIND multi-node cluster with Kubernetes v1.30.10..."
+        kind create cluster --config kind-config.yaml --name chronos-test --image kindest/node:v1.30.0
         
         kind get kubeconfig --name chronos-test > /tmp/kubeconfig
         export KUBECONFIG=/tmp/kubeconfig
