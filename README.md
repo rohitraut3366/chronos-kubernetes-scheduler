@@ -100,36 +100,12 @@ spec:
 
 ### 2. Deploy the Scheduler
 
-#### Option A: Quick Helm Install
 ```bash
-# Install directly from local chart
+# Install
 helm install chronos-scheduler ./charts/chronos-kubernetes-scheduler
 
 # Install with custom namespace
 helm install chronos-scheduler ./charts/chronos-kubernetes-scheduler -n scheduler-system --create-namespace
-```
-
-#### Option B: Custom Configuration
-```bash
-# Create custom values file
-cat > my-values.yaml <<EOF
-replicaCount: 3  # High availability
-
-scheduler:
-  leaderElection:
-    enabled: true
-
-resources:
-  requests:
-    cpu: 200m
-    memory: 256Mi
-  limits:
-    cpu: 1000m
-    memory: 1Gi
-EOF
-
-# Install with custom values
-helm install chronos-scheduler ./charts/chronos-kubernetes-scheduler -f my-values.yaml
 ```
 
 ### 3. Verify Installation
@@ -167,18 +143,7 @@ make bench
 make coverage
 ```
 
-### Example Test Output
 
-```
-🔗 Integration tests with realistic Kubernetes objects
-🎯 Realistic production web application cluster
-  📊 web-frontend: score=84 (bin-packing case)
-  📊 api-backend: score=75 (extension case)  
-  📊 database: score=91 (best consolidation)
-  📊 cache-redis: score=10 (empty node penalty)
-🏆 Winner: database with score 91 (optimal consolidation)
-✅ Integration test passed!
-```
 
 ## 🔧 Configuration
 
@@ -198,15 +163,7 @@ profiles:
       - name: NodeResourcesFit  # Default resource-based tie-breaker
 ```
 
-### Integration Testing
 
-```bash
-# Run full integration tests with K3s
-make integration-setup
-
-# Quick integration test in existing cluster
-make integration-quick
-```
 
 ## 📊 Live Analysis with K9s Plugin
 
