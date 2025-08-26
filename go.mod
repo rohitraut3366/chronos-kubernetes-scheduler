@@ -3,7 +3,7 @@ module chronos-kubernetes-scheduler
 go 1.25.0
 
 require (
-	github.com/go-logr/logr v1.4.1
+	github.com/go-logr/logr v1.4.3
 	github.com/stretchr/testify v1.8.4
 	k8s.io/api v0.30.0
 	k8s.io/apimachinery v0.30.0
