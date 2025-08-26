@@ -68,21 +68,7 @@ make lint          # Run linter
 make coverage      # Generate coverage report
 ```
 
-### Deploy to Kubernetes
 
-```bash
-# Deploy using Helm
-helm install chronos-scheduler ./charts/chronos-kubernetes-scheduler
-
-# Check deployment status  
-kubectl get pods -l app.kubernetes.io/name=chronos-kubernetes-scheduler
-
-# View logs
-kubectl logs -l app.kubernetes.io/name=chronos-kubernetes-scheduler
-
-# Remove deployment
-helm uninstall chronos-scheduler
-```
 
 ## 📋 Usage
 
@@ -144,7 +130,6 @@ profiles:
       - name: Chronos
       - name: NodeResourcesFit  # Default resource-based tie-breaker
 ```
-
 
 
 ## 📊 Live Analysis with K9s Plugin
