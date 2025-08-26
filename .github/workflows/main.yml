@@ -44,7 +44,7 @@ jobs:
 
     - name: Install KIND
       run: |
-        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
         chmod +x ./kind
         sudo mv ./kind /usr/local/bin/kind
         
@@ -75,8 +75,31 @@ jobs:
         
     - name: Set up KIND multi-node cluster
       run: |
-        echo "Creating KIND multi-node cluster..."
-        kind create cluster --config kind-config.yaml --name chronos-test
+        # Dynamically determine Kubernetes version from go.mod
+        K8S_VERSION=$(go list -m k8s.io/kubernetes | awk '{print $2}' | sed 's/^v//' | cut -d'.' -f1,2)
+        KIND_IMAGE="kindest/node:v${K8S_VERSION}.0"
+        
+        echo "Detected Kubernetes version from go.mod: v${K8S_VERSION}"
+        echo "Using KIND image: ${KIND_IMAGE}"
+        
+        # Verify the KIND image exists - FAIL if not available for consistency
+        echo "🔍 Verifying KIND image availability..."
+        if docker pull ${KIND_IMAGE} >/dev/null 2>&1; then
+          echo "✅ KIND image ${KIND_IMAGE} is available"
+        else
+          echo "❌ KIND image ${KIND_IMAGE} not found!"
+          echo "💡 This usually means:"
+          echo "   1. Network/registry issue (temporary)"  
+          echo "   2. KIND doesn't have image for v${K8S_VERSION}.0 yet"
+          echo "   3. Version detection logic needs update"
+          echo ""
+          echo "🔧 To fix: Check https://github.com/kubernetes-sigs/kind/releases"
+          echo "   and verify v${K8S_VERSION}.0 image exists, or update go.mod"
+          exit 1
+        fi
+        
+        echo "Creating KIND multi-node cluster with ${KIND_IMAGE}..."
+        kind create cluster --config kind-config.yaml --name chronos-test --image ${KIND_IMAGE}
         
         kind get kubeconfig --name chronos-test > /tmp/kubeconfig
         export KUBECONFIG=/tmp/kubeconfig
@@ -445,6 +468,19 @@ jobs:
         echo "🎉 All critical infrastructure checks passed!"
         echo "📊 Log metrics above are informational only and don't affect build status"
 
+    - name: Cache Python dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-scheduler-sim
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install Python dependencies
+      run: |
+        # Pre-install dependencies for speed
+        pip3 install --user PyYAML
+        
     - name: Run Scheduler Logic Simulations
       run: |
         export KUBECONFIG=/tmp/kubeconfig
@@ -454,15 +490,18 @@ jobs:
         
         cd test-workloads
         
-        # Install Python dependencies if needed
-        python3 -c "import yaml" || pip3 install PyYAML
+        # Add debug info before running simulations
+        echo "=== PRE-SIMULATION DEBUG INFO ==="
+        kubectl get nodes -o wide
+        kubectl get pods -A | grep -v "Completed\|Succeeded" | head -10
+        kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=10 || echo "No scheduler logs yet"
+        echo "=== STARTING SIMULATIONS ==="
         
-        # Run simulations with timeout
-        timeout 600s python3 run-simulations.py --config simulations.yaml --kubeconfig /tmp/kubeconfig || {
+        timeout 300s python3 run-simulations.py --config simulations.yaml --kubeconfig /tmp/kubeconfig || {
           EXIT_CODE=$?
           
           if [ $EXIT_CODE -eq 124 ]; then
-            echo "⚠️ Simulations timed out after 10 minutes"
+            echo "⚠️ Simulations timed out after 5 minutes"
             echo "This suggests scheduling decisions are taking too long"
           else
             echo "❌ Simulations failed with exit code: $EXIT_CODE"
@@ -472,9 +511,13 @@ jobs:
           echo "🔍 Recent scheduler logs for debugging:"
           kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=50
           
-          # Don't fail CI for simulation issues - treat as warnings for now
-          echo "⚠️ Continuing CI despite simulation failures (treat as warnings)"
-          # exit $EXIT_CODE  # Uncomment this line to make simulations block CI
+          echo "🔍 Simulation namespace pods status:"
+          kubectl get pods -n simulation-test -o wide || echo "No simulation pods found"
+          
+          echo "🔍 Recent events in simulation namespace:"
+          kubectl get events -n simulation-test --sort-by='.lastTimestamp' | tail -20 || echo "No simulation events found"
+          
+          exit $EXIT_CODE
         }
         
         echo "✅ Scheduler logic simulations completed successfully!"
