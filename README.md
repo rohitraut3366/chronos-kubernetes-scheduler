@@ -43,24 +43,23 @@ chronos-kubernetes-scheduler/
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Go 1.22+
-- Docker (for container builds)
-- Kubernetes 1.28+ (for deployment)
+- Kubernetes 1.28+
+- Helm 3.8+ (for installation)
 
-### Build & Test
+### Development Prerequisites (Optional)
+Only needed for building from source:
+- Go 1.25+
+- Docker (for building images)
 
 ```bash
-# Run all tests (unit + integration + performance)
+# Run all tests
 make test
 
-# Build binary
+# Build binary  
 make build
 
 # Build Docker image
 make docker-build
-
-# Run all checks (format, vet, lint, test, build)
-make all
 ```
 
 ### Deploy to Kubernetes
