@@ -1,13 +1,16 @@
 name: Docker Build & Push to GHCR (Master Only)
 
 on:
-  push:
-    branches:
-      - master  # Push to GHCR on master branch only
+  workflow_run:
+    workflows: ["Integration Tests"]
+    types: [completed]
+    branches: [master]
   workflow_dispatch:  # Allow manual triggering
 
 jobs:
   docker-build:
+    # Only run if the integration tests passed
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
