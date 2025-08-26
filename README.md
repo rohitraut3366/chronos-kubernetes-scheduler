@@ -43,41 +43,32 @@ chronos-kubernetes-scheduler/
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Go 1.22+
-- Docker (for container builds)
-- Kubernetes 1.28+ (for deployment)
+- Kubernetes 1.28+
+- Helm 3.8+ (for installation)
 
-### Build & Test
-
-```bash
-# Run all tests (unit + integration + performance)
-make test
-
-# Build binary
-make build
-
-# Build Docker image
-make docker-build
-
-# Run all checks (format, vet, lint, test, build)
-make all
-```
-
-### Deploy to Kubernetes
+### Development Prerequisites (Optional)
+Only needed for building from source:
+- Go 1.25+
+- Docker (for building images)
 
 ```bash
-# Deploy using Helm
-helm install chronos-scheduler ./charts/chronos-kubernetes-scheduler
+# Essential commands
+make test          # All tests
+make build         # Build binary
+make docker-build  # Build Docker image
 
-# Check deployment status  
-kubectl get pods -l app.kubernetes.io/name=chronos-kubernetes-scheduler
-
-# View logs
-kubectl logs -l app.kubernetes.io/name=chronos-kubernetes-scheduler
-
-# Remove deployment
-helm uninstall chronos-scheduler
+# Additional targets
+make help          # Show all available targets
+make test-unit     # Unit tests only  
+make test-integration  # Integration tests only
+make bench         # Performance benchmarks
+make clean         # Clean build artifacts
+make fmt           # Format code
+make lint          # Run linter
+make coverage      # Generate coverage report
 ```
+
+
 
 ## 📋 Usage
 
@@ -101,36 +92,12 @@ spec:
 
 ### 2. Deploy the Scheduler
 
-#### Option A: Quick Helm Install
 ```bash
-# Install directly from local chart
+# Install
 helm install chronos-scheduler ./charts/chronos-kubernetes-scheduler
 
 # Install with custom namespace
 helm install chronos-scheduler ./charts/chronos-kubernetes-scheduler -n scheduler-system --create-namespace
-```
-
-#### Option B: Custom Configuration
-```bash
-# Create custom values file
-cat > my-values.yaml <<EOF
-replicaCount: 3  # High availability
-
-scheduler:
-  leaderElection:
-    enabled: true
-
-resources:
-  requests:
-    cpu: 200m
-    memory: 256Mi
-  limits:
-    cpu: 1000m
-    memory: 1Gi
-EOF
-
-# Install with custom values
-helm install chronos-scheduler ./charts/chronos-kubernetes-scheduler -f my-values.yaml
 ```
 
 ### 3. Verify Installation
@@ -144,70 +111,6 @@ kubectl logs -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=100
 
 # Test with example workloads
 kubectl apply -f examples/
-```
-
-### 4. Scheduler Selection Logic
-
-The plugin uses a hierarchical scoring algorithm with three priorities:
-
-**Priority 1 (Highest): Bin-Packing** - Job fits within existing time windows
-```
-baseScore = 1,000,000 + (maxRemainingTime * 100)  // Consolidation bonus
-```
-
-**Priority 2 (Medium): Extension Minimization** - Job extends beyond existing work
-```
-baseScore = 100,000 - (extensionTime * 100)  // Penalty for extending
-```
-
-**Priority 3 (Lowest): Empty Nodes** - Heavily penalized for cost optimization
-```
-baseScore = 1,000  // Low score to avoid empty nodes
-```
-
-**Example Scoring:**
-- **Node with 600s remaining work, new 300s job**: `1,000,000 + (600 * 100) = 1,060,000` ✅ (Bin-packing)
-- **Node with 200s remaining work, new 300s job**: `100,000 - (100 * 100) = 90,000` (Extension)
-- **Empty Node**: `1,000` (Heavily penalized)
-- **Result**: Consolidation wins for optimal bin-packing! ✅
-
-## 🧪 Testing
-
-### Comprehensive Test Suite
-
-- **✅ 500+ Unit Tests**: Algorithm logic, edge cases, error handling
-- **✅ Integration Tests**: Real Kubernetes object interactions  
-- **✅ Performance Tests**: Nanosecond-level scoring benchmarks
-- **✅ Property Tests**: Randomized correctness validation
-- **✅ Realistic Scenarios**: Production cluster simulations
-
-### Run Specific Tests
-
-```bash
-# Unit tests only
-make test-unit
-
-# Integration tests only  
-make test-integration
-
-# Performance benchmarks
-make bench
-
-# Test coverage report
-make coverage
-```
-
-### Example Test Output
-
-```
-🔗 Integration tests with realistic Kubernetes objects
-🎯 Realistic production web application cluster
-  📊 web-frontend: score=84 (bin-packing case)
-  📊 api-backend: score=75 (extension case)  
-  📊 database: score=91 (best consolidation)
-  📊 cache-redis: score=10 (empty node penalty)
-🏆 Winner: database with score 91 (optimal consolidation)
-✅ Integration test passed!
 ```
 
 ## 🔧 Configuration
@@ -228,160 +131,10 @@ profiles:
       - name: NodeResourcesFit  # Default resource-based tie-breaker
 ```
 
-### Plugin Constants
 
-```go
-const (
-    PluginName            = "Chronos"
-    JobDurationAnnotation = "scheduling.workload.io/expected-duration-seconds"
-    maxPossibleScore      = 100000000  // ~3.17 years, excellent granularity
-)
-```
+## 📊 Live Analysis with K9s Plugin
 
-## 📈 Performance & Monitoring
-
-- **Scoring Speed**: ~800ns per node (tested up to 50 nodes)
-- **Memory Usage**: Minimal overhead over default scheduler
-- **Scalability**: Tested with 100 jobs across 20 nodes
-- **Accuracy**: 96%+ scheduling correctness in realistic scenarios
-
-### Performance Analysis Tools
-
-```bash
-# Comprehensive scheduler analysis
-./chronos-analyzer.sh <pod-namespace> [scheduler-namespace]
-
-# Monitor real-time scheduling
-kubectl logs -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=100 -f
-
-# Check scheduler metrics (if ServiceMonitor enabled)
-curl http://scheduler-service:10259/metrics
-```
-
-### Integration Testing
-
-```bash
-# Run full integration tests with K3s
-make integration-setup
-
-# Quick integration test in existing cluster
-make integration-quick
-```
-
-## 🔍 Analysis Tools
-
-### Scheduler Log Analyzer with v4 verbosity
-
-The repository includes a comprehensive log analysis tool for debugging scheduling decisions and understanding cluster patterns.
-
-#### Usage
-
-```bash
-# Analyze scheduler logs
-python3 audit/analyze-scheduler-logs.py /path/to/scheduler-logs
-
-# Example with local log file
-python3 audit/analyze-scheduler-logs.py ./scheduler.log
-```
-
-#### Features
-
-- **📊 Performance Analysis**: Shows total sessions, success rates, strategy distribution with unique node counts
-- **🎯 Node Utilization**: Identifies which nodes are being chosen most frequently  
-- **📋 Clean Summary Output**: Shows key performance metrics and cluster utilization
-- **💾 Complete JSON Export**: Saves detailed analysis to timestamped JSON file with:
-  - Pod duration, chosen node, and chosen strategy for each scheduling decision
-  - All evaluated nodes with completion times  
-  - Strategy used for each node (BIN-PACKING/EXTENSION/EMPTY NODE)
-  - Raw and normalized scores for each node
-  - Timestamps for tracking scheduling timeline
-  - Per-pod strategy node counts showing scheduling landscape for each individual pod
-- **🎯 Strategy-Specific Files**: Automatically creates separate JSON files for each chosen strategy:
-  - `scheduler_analysis_bin_packing_*.json` - All pods that used BIN-PACKING strategy
-  - `scheduler_analysis_extension_*.json` - All pods that used EXTENSION strategy
-  - `scheduler_analysis_empty_node_*.json` - All pods that used EMPTY NODE strategy
-- **🔍 Production Ready**: Handles real Kubernetes scheduler log formats
-
-#### Sample Console Output
-
-```
-🔍 Analyzing scheduler logs...
-✅ Found 107 scheduling sessions
-✅ Found 107 successful bindings
-
-📊 SCHEDULER PERFORMANCE ANALYSIS
-============================================================
-📈 Total Scheduling Sessions: 107
-✅ Successfully Bound: 107
-❌ Failed to Bind: 0
-
-🎯 Strategy Distribution (All Evaluations):
-   BIN-PACKING: 698 evaluations (52 unique nodes)
-   EMPTY NODE: 2416 evaluations (85 unique nodes)
-   EXTENSION: 1915 evaluations (78 unique nodes)
-
-🏆 Chosen Node Strategies (Successful Bindings):
-   BIN-PACKING: 500 pods
-   EMPTY NODE: 25 pods
-   EXTENSION: 317 pods
-
-🏗️ Node Utilization (Top 10):
-   ip-10-10-165-191.us-west-2.compute.internal: 26 pods
-   ip-10-10-166-61.us-west-2.compute.internal: 23 pods
-   ip-10-10-164-166.us-west-2.compute.internal: 19 pods
-
-💾 Full analysis saved to: scheduler_analysis_20250825_140629.json
-📊 BIN-PACKING pods (619): scheduler_analysis_bin_packing_20250825_140629.json
-📊 EXTENSION pods (318): scheduler_analysis_extension_20250825_140629.json
-📊 EMPTY NODE pods (26): scheduler_analysis_empty_node_20250825_140629.json
-
-🎯 Strategy-specific files created: 3
-📋 Total pods in strategy files: 963
-```
-
-#### Sample JSON File Content
-
-The detailed JSON file contains comprehensive data for each pod:
-
-```json
-{
-  "my-namespace/my-pod-xyz": {
-    "pod_name": "my-namespace/my-pod-xyz",
-    "pod_duration": "1200s",
-    "nodes": {
-      "node-1": {
-        "completion_time": "800s",
-        "strategy": "BIN-PACKING",
-        "raw_score": 120000,
-        "normalized_score": 100
-      }
-    },
-    "chosen_node": "node-1",
-    "chosen_node_strategy": "BIN-PACKING",
-    "total_candidates": 15,
-    "timestamp": "0825 08:01:22.184686",
-    "strategy_node_counts": {
-      "BIN-PACKING": 12,
-      "EXTENSION": 25,
-      "EMPTY NODE": 8
-    }
-  }
-}
-```
-
-This tool is invaluable for:
-- **🐛 Debugging** scheduling decisions
-- **📈 Analyzing** cluster utilization patterns  
-- **🎯 Optimizing** scheduler parameters
-- **📊 Understanding** production workload behaviors
-
-#### Strategy-Specific Analysis Benefits
-
-The separate JSON files enable targeted analysis:
-- **BIN-PACKING Analysis**: Study optimal scheduling patterns and identify time window utilization
-- **EXTENSION Analysis**: Understand when and why workloads extend node completion times
-- **EMPTY NODE Analysis**: Identify pods that go to empty nodes (potential cost optimization opportunities)
-- **Comparative Analysis**: Compare scheduling contexts across different strategy outcomes
+Real-time scheduling analysis directly in K9s. See [k9s/README.md](k9s/README.md) for setup.
 
 ## 🛠️ Development
 
@@ -393,18 +146,6 @@ The separate JSON files enable targeted analysis:
 - **📋 Production Ready**: Complete Kubernetes manifests included
 - **🔒 Secure Defaults**: Non-root container, minimal image, proper RBAC
 
-### Available Make Targets
-
-```bash
-make help          # Show all available targets
-make build         # Build binary
-make test          # Run all tests
-make docker-build  # Build container image
-make clean         # Clean build artifacts
-make fmt           # Format code
-make lint          # Run linter
-make coverage      # Generate coverage report
-```
 
 ## 🤝 Contributing
 
@@ -423,4 +164,3 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for detai
 
 - Built using the [Kubernetes Scheduler Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/)
 - Inspired by production workload optimization needs
-- Tested with comprehensive Go testing best practices
