@@ -496,9 +496,7 @@ jobs:
           echo "🔍 Recent scheduler logs for debugging:"
           kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=50
           
-          # Don't fail CI for simulation issues - treat as warnings for now
-          echo "⚠️ Continuing CI despite simulation failures (treat as warnings)"
-          # exit $EXIT_CODE  # Uncomment this line to make simulations block CI
+          exit $EXIT_CODE
         }
         
         echo "✅ Scheduler logic simulations completed successfully!"
