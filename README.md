@@ -228,36 +228,6 @@ profiles:
       - name: NodeResourcesFit  # Default resource-based tie-breaker
 ```
 
-### Plugin Constants
-
-```go
-const (
-    PluginName            = "Chronos"
-    JobDurationAnnotation = "scheduling.workload.io/expected-duration-seconds"
-    maxPossibleScore      = 100000000  // ~3.17 years, excellent granularity
-)
-```
-
-## 📈 Performance & Monitoring
-
-- **Scoring Speed**: ~800ns per node (tested up to 50 nodes)
-- **Memory Usage**: Minimal overhead over default scheduler
-- **Scalability**: Tested with 100 jobs across 20 nodes
-- **Accuracy**: 96%+ scheduling correctness in realistic scenarios
-
-### Performance Analysis Tools
-
-```bash
-# Comprehensive scheduler analysis
-./chronos-analyzer.sh <pod-namespace> [scheduler-namespace]
-
-# Monitor real-time scheduling
-kubectl logs -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=100 -f
-
-# Check scheduler metrics (if ServiceMonitor enabled)
-curl http://scheduler-service:10259/metrics
-```
-
 ### Integration Testing
 
 ```bash
@@ -268,120 +238,9 @@ make integration-setup
 make integration-quick
 ```
 
-## 🔍 Analysis Tools
+## 📊 Live Analysis with K9s Plugin
 
-### Scheduler Log Analyzer with v4 verbosity
-
-The repository includes a comprehensive log analysis tool for debugging scheduling decisions and understanding cluster patterns.
-
-#### Usage
-
-```bash
-# Analyze scheduler logs
-python3 audit/analyze-scheduler-logs.py /path/to/scheduler-logs
-
-# Example with local log file
-python3 audit/analyze-scheduler-logs.py ./scheduler.log
-```
-
-#### Features
-
-- **📊 Performance Analysis**: Shows total sessions, success rates, strategy distribution with unique node counts
-- **🎯 Node Utilization**: Identifies which nodes are being chosen most frequently  
-- **📋 Clean Summary Output**: Shows key performance metrics and cluster utilization
-- **💾 Complete JSON Export**: Saves detailed analysis to timestamped JSON file with:
-  - Pod duration, chosen node, and chosen strategy for each scheduling decision
-  - All evaluated nodes with completion times  
-  - Strategy used for each node (BIN-PACKING/EXTENSION/EMPTY NODE)
-  - Raw and normalized scores for each node
-  - Timestamps for tracking scheduling timeline
-  - Per-pod strategy node counts showing scheduling landscape for each individual pod
-- **🎯 Strategy-Specific Files**: Automatically creates separate JSON files for each chosen strategy:
-  - `scheduler_analysis_bin_packing_*.json` - All pods that used BIN-PACKING strategy
-  - `scheduler_analysis_extension_*.json` - All pods that used EXTENSION strategy
-  - `scheduler_analysis_empty_node_*.json` - All pods that used EMPTY NODE strategy
-- **🔍 Production Ready**: Handles real Kubernetes scheduler log formats
-
-#### Sample Console Output
-
-```
-🔍 Analyzing scheduler logs...
-✅ Found 107 scheduling sessions
-✅ Found 107 successful bindings
-
-📊 SCHEDULER PERFORMANCE ANALYSIS
-============================================================
-📈 Total Scheduling Sessions: 107
-✅ Successfully Bound: 107
-❌ Failed to Bind: 0
-
-🎯 Strategy Distribution (All Evaluations):
-   BIN-PACKING: 698 evaluations (52 unique nodes)
-   EMPTY NODE: 2416 evaluations (85 unique nodes)
-   EXTENSION: 1915 evaluations (78 unique nodes)
-
-🏆 Chosen Node Strategies (Successful Bindings):
-   BIN-PACKING: 500 pods
-   EMPTY NODE: 25 pods
-   EXTENSION: 317 pods
-
-🏗️ Node Utilization (Top 10):
-   ip-10-10-165-191.us-west-2.compute.internal: 26 pods
-   ip-10-10-166-61.us-west-2.compute.internal: 23 pods
-   ip-10-10-164-166.us-west-2.compute.internal: 19 pods
-
-💾 Full analysis saved to: scheduler_analysis_20250825_140629.json
-📊 BIN-PACKING pods (619): scheduler_analysis_bin_packing_20250825_140629.json
-📊 EXTENSION pods (318): scheduler_analysis_extension_20250825_140629.json
-📊 EMPTY NODE pods (26): scheduler_analysis_empty_node_20250825_140629.json
-
-🎯 Strategy-specific files created: 3
-📋 Total pods in strategy files: 963
-```
-
-#### Sample JSON File Content
-
-The detailed JSON file contains comprehensive data for each pod:
-
-```json
-{
-  "my-namespace/my-pod-xyz": {
-    "pod_name": "my-namespace/my-pod-xyz",
-    "pod_duration": "1200s",
-    "nodes": {
-      "node-1": {
-        "completion_time": "800s",
-        "strategy": "BIN-PACKING",
-        "raw_score": 120000,
-        "normalized_score": 100
-      }
-    },
-    "chosen_node": "node-1",
-    "chosen_node_strategy": "BIN-PACKING",
-    "total_candidates": 15,
-    "timestamp": "0825 08:01:22.184686",
-    "strategy_node_counts": {
-      "BIN-PACKING": 12,
-      "EXTENSION": 25,
-      "EMPTY NODE": 8
-    }
-  }
-}
-```
-
-This tool is invaluable for:
-- **🐛 Debugging** scheduling decisions
-- **📈 Analyzing** cluster utilization patterns  
-- **🎯 Optimizing** scheduler parameters
-- **📊 Understanding** production workload behaviors
-
-#### Strategy-Specific Analysis Benefits
-
-The separate JSON files enable targeted analysis:
-- **BIN-PACKING Analysis**: Study optimal scheduling patterns and identify time window utilization
-- **EXTENSION Analysis**: Understand when and why workloads extend node completion times
-- **EMPTY NODE Analysis**: Identify pods that go to empty nodes (potential cost optimization opportunities)
-- **Comparative Analysis**: Compare scheduling contexts across different strategy outcomes
+Real-time scheduling analysis directly in K9s. See [k9s/README.md](k9s/README.md) for setup.
 
 ## 🛠️ Development
 
@@ -423,4 +282,3 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for detai
 
 - Built using the [Kubernetes Scheduler Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/)
 - Inspired by production workload optimization needs
-- Tested with comprehensive Go testing best practices
