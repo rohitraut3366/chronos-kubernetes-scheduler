@@ -75,8 +75,23 @@ jobs:
         
     - name: Set up KIND multi-node cluster
       run: |
-        echo "Creating KIND multi-node cluster with Kubernetes v1.30.10..."
-        kind create cluster --config kind-config.yaml --name chronos-test --image kindest/node:v1.30.0
+        # Dynamically determine Kubernetes version from go.mod
+        K8S_VERSION=$(go list -m k8s.io/kubernetes | awk '{print $2}' | sed 's/^v//' | cut -d'.' -f1,2)
+        KIND_IMAGE="kindest/node:v${K8S_VERSION}.0"
+        
+        echo "Detected Kubernetes version from go.mod: v${K8S_VERSION}"
+        echo "Using KIND image: ${KIND_IMAGE}"
+        
+        # Verify the KIND image exists before creating cluster
+        if docker pull ${KIND_IMAGE} >/dev/null 2>&1; then
+          echo "✅ KIND image ${KIND_IMAGE} is available"
+        else
+          echo "⚠️ KIND image ${KIND_IMAGE} not found, falling back to latest stable"
+          KIND_IMAGE="kindest/node:latest"
+        fi
+        
+        echo "Creating KIND multi-node cluster with ${KIND_IMAGE}..."
+        kind create cluster --config kind-config.yaml --name chronos-test --image ${KIND_IMAGE}
         
         kind get kubeconfig --name chronos-test > /tmp/kubeconfig
         export KUBECONFIG=/tmp/kubeconfig
