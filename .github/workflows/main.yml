@@ -460,6 +460,19 @@ jobs:
         echo "🎉 All critical infrastructure checks passed!"
         echo "📊 Log metrics above are informational only and don't affect build status"
 
+    - name: Cache Python dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-scheduler-sim
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install Python dependencies
+      run: |
+        # Pre-install dependencies for speed
+        pip3 install --user PyYAML
+        
     - name: Run Scheduler Logic Simulations
       run: |
         export KUBECONFIG=/tmp/kubeconfig
@@ -469,15 +482,11 @@ jobs:
         
         cd test-workloads
         
-        # Install Python dependencies if needed
-        python3 -c "import yaml" || pip3 install PyYAML
-        
-        # Run simulations with timeout
-        timeout 600s python3 run-simulations.py --config simulations.yaml --kubeconfig /tmp/kubeconfig || {
+        timeout 180s python3 run-simulations.py --config simulations.yaml --kubeconfig /tmp/kubeconfig || {
           EXIT_CODE=$?
           
           if [ $EXIT_CODE -eq 124 ]; then
-            echo "⚠️ Simulations timed out after 10 minutes"
+            echo "⚠️ Simulations timed out after 3 minutes"
             echo "This suggests scheduling decisions are taking too long"
           else
             echo "❌ Simulations failed with exit code: $EXIT_CODE"

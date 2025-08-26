@@ -16,7 +16,8 @@ class ChronosSimulator:
         with open(config_file, 'r') as f:
             self.config = yaml.safe_load(f)
         self.kubeconfig = kubeconfig
-        self.namespace = self.config['execution']['namespace']
+        self.exec_config = self.config['execution']
+        self.namespace = self.exec_config['namespace']
         
     def kubectl(self, args: List[str]) -> tuple[str, int]:
         """Execute kubectl command and return output, exit_code"""
@@ -41,7 +42,8 @@ class ChronosSimulator:
         """Clean up test namespace"""
         print(f"🧹 Cleaning up namespace: {self.namespace}")
         self.kubectl(['delete', 'namespace', self.namespace, '--ignore-not-found=true'])
-        time.sleep(5)  # Wait for cleanup
+        cleanup_wait = self.exec_config.get('cleanup_wait', 5)
+        time.sleep(cleanup_wait)  # Wait for cleanup
     
     def get_nodes(self) -> List[str]:
         """Get available worker nodes"""
@@ -143,7 +145,8 @@ spec:
                 print(f"✅ Pod {pod_name} scheduled on: {output}")
                 return output
                 
-            time.sleep(2)
+            polling_interval = self.exec_config.get('polling_interval', 2)
+            time.sleep(polling_interval)
         
         print(f"❌ Timeout waiting for pod {pod_name} to be scheduled")
         return None
@@ -241,13 +244,13 @@ spec:
                     return False
         
         # Wait for setup pods to be running
-        setup_wait = self.config['execution']['setup_wait_time']
+        setup_wait = self.exec_config['setup_wait_time']
         print(f"⏳ Waiting {setup_wait}s for setup pods to be running...")
         time.sleep(setup_wait)
         
         # Create test pod
         new_pod = scenario['new_pod']
-        test_wait = self.config['execution']['test_wait_time']
+        test_wait = self.exec_config['test_wait_time']
         print(f"⏳ Waiting {test_wait}s before scheduling test pod...")
         time.sleep(test_wait)
         
@@ -255,7 +258,7 @@ spec:
             return False
         
         # Wait for scheduling
-        timeout = self.config['execution']['timeout']
+        timeout = self.exec_config['timeout']
         actual_node = self.wait_for_pod_scheduled(new_pod['name'], timeout)
         if not actual_node:
             return False
@@ -308,7 +311,8 @@ spec:
                 
                 # Cleanup between scenarios
                 self.kubectl(['delete', 'pods', '--all', '-n', self.namespace])
-                time.sleep(5)
+                cleanup_wait = self.exec_config.get('cleanup_wait', 5)
+                time.sleep(cleanup_wait)
                 
         finally:
             self.cleanup_namespace()
@@ -324,7 +328,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='Run Chronos scheduler simulations')
     parser.add_argument('--config', default='simulations.yaml', help='Simulation config file')
-    parser.add_argument('--kubeconfig', help='Path to kubeconfig file')
+    parser.add_argument('--kubeconfig', help='Path to kubeconfig file')  
     parser.add_argument('--scenario', help='Run specific scenario only')
     
     args = parser.parse_args()
