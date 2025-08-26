@@ -295,6 +295,7 @@ spec:
     
     def run_all_scenarios(self) -> bool:
         """Run all configured scenarios"""
+        start_time = time.time()
         print("🚀 Starting Chronos Scheduler Simulation Tests")
         
         if not self.create_namespace():
@@ -318,7 +319,9 @@ spec:
             self.cleanup_namespace()
         
         print(f"\n{'='*80}")
+        elapsed_time = time.time() - start_time
         print(f"🏁 SIMULATION RESULTS: {passed}/{total} scenarios passed")
+        print(f"⏱️  Total execution time: {elapsed_time:.1f}s")
         print(f"{'='*80}")
         
         return passed == total

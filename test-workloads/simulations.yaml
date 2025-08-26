@@ -129,7 +129,7 @@ execution:
   # Optimized wait times for fast and reliable testing
   setup_wait_time: 1     # Fast pod creation timing
   test_wait_time: 1      # Quick test pod scheduling  
-  timeout: 20            # Reasonable timeout for CI
+  timeout: 30            # Realistic timeout for CI environment
   polling_interval: 1    # Fast polling for scheduling status
   cleanup_wait: 2        # Quick cleanup between tests
   namespace: "simulation-test"

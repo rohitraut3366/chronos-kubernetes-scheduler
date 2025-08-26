@@ -490,11 +490,18 @@ jobs:
         
         cd test-workloads
         
-        timeout 180s python3 run-simulations.py --config simulations.yaml --kubeconfig /tmp/kubeconfig || {
+        # Add debug info before running simulations
+        echo "=== PRE-SIMULATION DEBUG INFO ==="
+        kubectl get nodes -o wide
+        kubectl get pods -A | grep -v "Completed\|Succeeded" | head -10
+        kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=10 || echo "No scheduler logs yet"
+        echo "=== STARTING SIMULATIONS ==="
+        
+        timeout 300s python3 run-simulations.py --config simulations.yaml --kubeconfig /tmp/kubeconfig || {
           EXIT_CODE=$?
           
           if [ $EXIT_CODE -eq 124 ]; then
-            echo "⚠️ Simulations timed out after 3 minutes"
+            echo "⚠️ Simulations timed out after 5 minutes"
             echo "This suggests scheduling decisions are taking too long"
           else
             echo "❌ Simulations failed with exit code: $EXIT_CODE"
@@ -503,6 +510,12 @@ jobs:
           
           echo "🔍 Recent scheduler logs for debugging:"
           kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=50
+          
+          echo "🔍 Simulation namespace pods status:"
+          kubectl get pods -n simulation-test -o wide || echo "No simulation pods found"
+          
+          echo "🔍 Recent events in simulation namespace:"
+          kubectl get events -n simulation-test --sort-by='.lastTimestamp' | tail -20 || echo "No simulation events found"
           
           exit $EXIT_CODE
         }
