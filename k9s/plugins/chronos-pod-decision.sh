@@ -2,7 +2,7 @@
 # K9s Plugin: Show Chronos scheduling decision for specific pod
 # Usage: Called from K9s when Ctrl-D is pressed on a pod
 
-set -e  # Exit on error (but no debug output)
+set +e  # Don't exit on error - let user control exit
 
 # Colors for terminal output
 RED='\033[0;31m'
@@ -124,10 +124,26 @@ analyze_pod_decision() {
     
     if [[ -z "$logs" ]]; then
         echo -e "${RED}❌ No scheduling logs found for pod: $pod_name${NC}"
-        echo "This could mean:"
-        echo "• Pod was not scheduled by Chronos"
-        echo "• Pod name doesn't match logs exactly"
-        echo "• Logs have rotated out"
+        echo -e "\n${BOLD}${YELLOW}🔍 Most likely reasons:${NC}"
+        echo "• 🔄 Logs have rotated out - try more recent pods"
+        echo "• 📋 Pod was not scheduled by Chronos (using default scheduler instead)"
+        echo "• ⏳ Pod is still pending and hasn't been processed yet"
+        echo "• 🔄 Scheduler restarted recently (logs cleared)"
+        echo "• 📅 Pod missing required duration annotation (Chronos skipped it)"
+        
+        echo -e "\n${BOLD}${CYAN}🛠️  What to check:${NC}"
+        echo "1. Verify pod details:"
+        echo "   kubectl get pod $pod_name -n $pod_namespace -o yaml | head -20"
+        echo ""
+        echo "2. Check scheduler name:"
+        echo "   kubectl get pod $pod_name -n $pod_namespace -o jsonpath='{.spec.schedulerName}'"
+        echo ""
+        echo "3. Look for duration annotation:"
+        echo "   kubectl get pod $pod_name -n $pod_namespace -o jsonpath='{.metadata.annotations.scheduling\.workload\.io/expected-duration-seconds}'"
+        echo ""
+        echo "4. Check pod status and events:"
+        echo "   kubectl describe pod $pod_name -n $pod_namespace | tail -20"
+        
         return 1
     fi
     
@@ -318,9 +334,16 @@ main() {
     if [[ -z "$scheduler_pod" || "$scheduler_pod" == *"No Chronos scheduler pods found"* ]]; then
         echo -e "${RED}❌ Could not find Chronos scheduler pod${NC}"
         echo "Make sure the scheduler is running with label: app.kubernetes.io/name=chronos-kubernetes-scheduler in namespace: codeship-custom-scheduler-eks"
+        echo -e "\n${BOLD}${CYAN}🔧 Debug Information:${NC}"
+        echo "• Check if scheduler is running:"
+        echo "  kubectl get pods -n codeship-custom-scheduler-eks -l app.kubernetes.io/name=chronos-kubernetes-scheduler"
+        echo "• Check if namespace exists:"
+        echo "  kubectl get namespace codeship-custom-scheduler-eks"
+        echo "• Check current context:"
+        echo "  kubectl config current-context"
         echo -e "\n${YELLOW}Press any key to return to K9s...${NC}"
         read -n 1 -s
-        exit 1
+        return 1  # Return instead of exit to allow cleanup
     fi
     
     # Show the scheduler identification results (excluding the final line)
@@ -333,16 +356,32 @@ main() {
     if [[ -z "$pod_name" ]]; then
         echo -e "${RED}❌ No pod name provided${NC}"
         echo "This script should be called with a pod name as argument from k9s"
+        echo -e "\n${BOLD}${CYAN}🔧 Debug Information:${NC}"
+        echo "• This script expects arguments: pod_name namespace"
+        echo "• Current arguments received: '$1' '$2'"
+        echo "• Make sure the k9s plugin is configured correctly"
+        echo "• Check plugin configuration in: ~/.config/k9s/plugins.yaml"
         echo -e "\n${YELLOW}Press any key to return to K9s...${NC}"
         read -n 1 -s
-        exit 1
+        return 1  # Return instead of exit to allow cleanup
     fi
     
     echo -e "${GREEN}📊 Analyzing scheduling decision for: $pod_name (ns: $namespace)${NC}\n"
     
     # Analyze the pod's scheduling decision
-    analyze_pod_decision "$pod_name" "$scheduler_pod" "$namespace"
+    if ! analyze_pod_decision "$pod_name" "$scheduler_pod" "$namespace"; then
+        echo -e "\n${BOLD}${CYAN}🔧 Troubleshooting Tips:${NC}"
+        echo "• Pod might not have been scheduled by Chronos"
+        echo "• Try checking if pod has the duration annotation:"
+        echo "  kubectl get pod $pod_name -n $namespace -o jsonpath='{.metadata.annotations}'"
+        echo "• Check if Chronos is the active scheduler:"
+        echo "  kubectl get pod $pod_name -n $namespace -o jsonpath='{.spec.schedulerName}'"
+        echo "• Look at recent scheduler logs manually:"
+        echo "  kubectl logs -n codeship-custom-scheduler-eks $(echo '$scheduler_pod' | cut -d'/' -f2) | grep $pod_name"
+        echo -e "\n${YELLOW}Even if analysis failed, you can still investigate manually using the commands above.${NC}"
+    fi
     
+    # Always show help information and exit prompt, regardless of success/failure
     echo -e "\n${BOLD}${CYAN}📝 Legend:${NC}"
     echo -e "${GREEN}• * = Chosen node${NC}"
     echo -e "${CYAN}• BIN-PACKING${NC} = Job fits in existing completion time"
@@ -356,6 +395,9 @@ main() {
     
     echo -e "\n${YELLOW}Press any key to return to K9s...${NC}"
     read -n 1 -s
+    
+    # Always return 0 so k9s plugin doesn't show errors
+    return 0
 }
 
 main "$@"
