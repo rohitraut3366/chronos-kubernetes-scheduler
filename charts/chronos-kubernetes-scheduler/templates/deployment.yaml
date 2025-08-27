@@ -131,6 +131,14 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        {{- if .Values.scheduler.batchMode.enabled }}
+        - name: CHRONOS_BATCH_MODE_ENABLED
+          value: "true"
+        - name: BATCH_INTERVAL_SECONDS
+          value: {{ .Values.scheduler.batchMode.intervalSeconds | quote }}
+        - name: BATCH_SIZE_LIMIT
+          value: {{ .Values.scheduler.batchMode.sizeLimit | quote }}
+        {{- end }}
         {{- with .Values.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

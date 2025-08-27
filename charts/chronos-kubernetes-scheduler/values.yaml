@@ -74,6 +74,15 @@ scheduler:
     # -- Retry period
     retryPeriod: 2s
 
+  # -- Batch scheduling mode configuration
+  batchMode:
+    # -- Enable batch scheduling mode for high-throughput scenarios
+    enabled: false
+    # -- Batch collection interval in seconds
+    intervalSeconds: 5
+    # -- Maximum batch size (0 = unlimited)
+    sizeLimit: 100
+
 # -- Service account configuration
 serviceAccount:
   # -- Specifies whether a service account should be created

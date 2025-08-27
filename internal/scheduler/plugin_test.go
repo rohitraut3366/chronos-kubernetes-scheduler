@@ -611,31 +611,31 @@ func TestEdgeCaseCoverage(t *testing.T) {
 	})
 
 	t.Run("OptimizedScoreEdgeCases", func(t *testing.T) {
-		// Test edge case: node at full resource utilization (extension case: 600 > 300)
-		nodeInfo := mockNodeInfo("full-node", 20, 20) // 20 pods, each using 100m CPU = 2000m total
+		// Test edge case: extension penalty calculation (600s job > 300s existing work)
+		nodeInfo := mockNodeInfo("test-node", 20, 2000)
 		testPod := mockPodWithDuration("test-pod", 600)
 		score := plugin.CalculateOptimizedScore(testPod, nodeInfo, 300, 600)
-		// Node has 2000m CPU allocated, 20 pods * 100m = 2000m used = 100% utilized, ResourceScore = 0
-		// Extension: 100000 - (600-300)*100 + 0*5 = 100000 - 30000 + 0 = 70000
+		// Pure time-based extension scoring (resource scoring handled by NodeResourcesFit plugin)
+		// Extension: 100000 - (600-300)*100 = 100000 - 30000 = 70000
 		expectedScore := int64(70000)
-		assert.Equal(t, expectedScore, score, "Full resource utilization gets base extension score with no resource bonus")
+		assert.Equal(t, expectedScore, score, "Extension case gets base extension score with time-based penalty")
 
-		// Test edge case: node over capacity (shouldn't happen but test robustness)
-		nodeInfoOver := mockNodeInfo("over-node", 25, 20) // Over capacity: 25 pods * 100m = 2500m used on 2000m node
+		// Test edge case: same extension logic with different node configuration (same result expected)
+		nodeInfoOver := mockNodeInfo("over-node", 25, 20) // Different node config but same time-based logic
 		testPodOver := mockPodWithDuration("test-pod-over", 600)
 		scoreOver := plugin.CalculateOptimizedScore(testPodOver, nodeInfoOver, 300, 600)
-		// Over 100% utilized, ResourceScore clamped to 0, same calculation as above
-		assert.Equal(t, expectedScore, scoreOver, "Over capacity should have same score as full capacity")
+		// Same time-based extension calculation regardless of node resource configuration
+		assert.Equal(t, expectedScore, scoreOver, "Extension scoring is purely time-based, independent of node resource config")
 
-		// Test edge case: very large capacity with low utilization (bin-packing case: 100 <= 300)
-		nodeInfoLarge := mockNodeInfo("large-node", 5, 1000) // 5 pods on huge capacity
+		// Test edge case: bin-packing case (100s job <= 300s existing work)
+		nodeInfoLarge := mockNodeInfo("large-node", 5, 1000) // Different node config
 		testPodLarge := mockPodWithDuration("test-pod-large", 100)
 		scoreLarge := plugin.CalculateOptimizedScore(testPodLarge, nodeInfoLarge, 300, 100)
 		// This is bin-packing case (100 <= 300), so Priority 1
-		// Pure time-based scoring: baseScore + consolidationBonus (no resource bonus)
+		// Pure time-based scoring: baseScore + consolidationBonus
 		const binPackingPriority = 1000000
 		expectedLarge := int64(binPackingPriority) + 300*100 // Pure time-based score
-		assert.Equal(t, expectedLarge, scoreLarge, "Large capacity bin-packing score (pure time-based)")
+		assert.Equal(t, expectedLarge, scoreLarge, "Bin-packing case gets high priority score plus consolidation bonus")
 
 		t.Logf("✅ Optimized score edge cases covered")
 	})
@@ -1049,7 +1049,7 @@ func TestMainEntryPoints(t *testing.T) {
 			}
 		}()
 
-		score, status := pluginNilHandle.Score(context.TODO(), nil, podWithAnnotation, "test-node")
+		score, status := pluginNilHandle.Score(context.Background(), nil, podWithAnnotation, "test-node")
 
 		// If we get here without panic, check for error status
 		if !status.IsSuccess() {
@@ -1075,7 +1075,7 @@ func TestMainEntryPoints(t *testing.T) {
 		}
 
 		// Call NormalizeScore function
-		status := plugin.NormalizeScore(context.TODO(), nil, pod, scores)
+		status := plugin.NormalizeScore(context.Background(), nil, pod, scores)
 
 		assert.Nil(t, status, "NormalizeScore should return nil on success")
 
@@ -1104,7 +1104,7 @@ func TestMainEntryPoints(t *testing.T) {
 		}
 
 		// Call NormalizeScore function
-		status := plugin.NormalizeScore(context.TODO(), nil, pod, scores)
+		status := plugin.NormalizeScore(context.Background(), nil, pod, scores)
 
 		assert.Nil(t, status, "NormalizeScore should return nil on success")
 
@@ -1456,7 +1456,7 @@ func TestMaximumCoveragePush(t *testing.T) {
 			},
 		}
 
-		status := plugin.NormalizeScore(context.TODO(), nil, pod, negativeScores)
+		status := plugin.NormalizeScore(context.Background(), nil, pod, negativeScores)
 		assert.Nil(t, status, "Should handle negative scores")
 		assert.Equal(t, int64(0), negativeScores[0].Score, "Most negative should normalize to 0")
 		assert.Equal(t, int64(100), negativeScores[2].Score, "Highest should normalize to 100")
@@ -1473,7 +1473,7 @@ func TestMaximumCoveragePush(t *testing.T) {
 			},
 		}
 
-		status2 := plugin.NormalizeScore(context.TODO(), nil, pod2, largeScores)
+		status2 := plugin.NormalizeScore(context.Background(), nil, pod2, largeScores)
 		assert.Nil(t, status2, "Should handle large differences")
 		assert.Equal(t, int64(0), largeScores[0].Score, "Smallest should be 0")
 		assert.Equal(t, int64(100), largeScores[1].Score, "Largest should be 100")
@@ -1945,7 +1945,7 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 		// Test New function with different contexts and parameters
 		contexts := []context.Context{
 			context.Background(),
-			context.TODO(),
+			context.Background(),
 			context.WithValue(context.Background(), testContextKey("test-key"), "test-value"),
 		}
 
