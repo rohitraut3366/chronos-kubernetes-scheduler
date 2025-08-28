@@ -9,7 +9,7 @@ scenarios:
     new_pod:
       name: "test-bin-packing"
       duration: 30
-      expected_node: "chronos-test-worker2"  # Node with 120s remaining (better consolidation)
+      expected_node: "chronos-test-worker2"
       expected_strategy: "BIN-PACKING"
     setup_pods:
       chronos-test-worker:
@@ -17,14 +17,11 @@ scenarios:
           duration: 60
         - name: "existing-job-2" 
           duration: 80
-        # Max remaining: 80s, consolidation score: 1,008,000
       chronos-test-worker2:
         - name: "existing-job-3"
           duration: 120
         - name: "existing-job-4"
           duration: 90
-        # Max remaining: 120s, consolidation score: 1,012,000 (WINNER!)
-      # control-plane: empty (should be avoided due to empty node penalty)
 
   # Test 2: Extension minimization - new job extends completion time
   extension_minimal:
@@ -32,7 +29,7 @@ scenarios:
     new_pod:
       name: "test-extension"
       duration: 100
-      expected_node: "chronos-test-worker2"  # Extension: 100-80=20s (minimal)
+      expected_node: "chronos-test-worker2"
       expected_strategy: "EXTENSION"
     setup_pods:
       chronos-test-worker:
@@ -40,13 +37,11 @@ scenarios:
           duration: 60
         - name: "existing-job-2"
           duration: 40  
-        # Max remaining: 60s, extension needed: 100-60=40s
       chronos-test-worker2:
         - name: "existing-job-3"
           duration: 80
         - name: "existing-job-4"
           duration: 70
-        # Max remaining: 80s, extension needed: 100-80=20s (better)
 
   # Test 3: Consolidation preference - choose longer remaining work
   consolidation_preference:
@@ -54,17 +49,16 @@ scenarios:
     new_pod:
       name: "test-consolidation" 
       duration: 40
-      expected_node: "chronos-test-worker2"  # 90s > 60s remaining
+      expected_node: "chronos-test-worker2"
       expected_strategy: "BIN-PACKING"
     setup_pods:
       chronos-test-worker:
         - name: "existing-job-1"
           duration: 60
-        # Max remaining: 60s, new job (40s) fits
       chronos-test-worker2:
         - name: "existing-job-2"
           duration: 90  
-        # Max remaining: 90s, new job (40s) fits, better consolidation
+
 
   # Test 4: Empty node avoidance - heavily penalized
   empty_node_avoidance:
@@ -72,15 +66,13 @@ scenarios:
     new_pod:
       name: "test-empty-avoidance"
       duration: 50
-      expected_node: "chronos-test-worker"  # Should prefer node with existing work
+      expected_node: "chronos-test-worker"
       expected_strategy: "BIN-PACKING"
     setup_pods:
       chronos-test-worker:
         - name: "existing-job-1"
           duration: 80
-        # Max remaining: 80s, new job (50s) fits
-      # chronos-test-worker2: empty - should be heavily penalized
-      # control-plane: empty - should be avoided
+
 
   # Test 5: Extension job - choose minimal extension
   extension_job:
@@ -123,22 +115,17 @@ scenarios:
         - name: "existing-job-2"
           duration: 70
         # Max remaining: 70s (equal)
-
-  # ===== QUEUE SORT PLUGIN TESTS =====
-  # These tests validate the QueueSort plugin functionality (LPT heuristic)
-  
+        
   # Test 7: Queue Sort LPT - Longest Processing Time First
   queuesort_longest_first:
     description: "Submit pods short->long->medium; expect them to be scheduled long->medium->short"
     test_pods:
-      # These will be created in this specific order
       - name: "test-pod-short"
-        duration: 60  # 1 minute
+        duration: 60
       - name: "test-pod-long"
-        duration: 300 # 5 minutes
+        duration: 300
       - name: "test-pod-medium"
-        duration: 120 # 2 minutes
-    # This is the expected outcome of the QueueSort plugin
+        duration: 120
     expected_scheduling_order:
       - "test-pod-long"
       - "test-pod-medium"
@@ -149,51 +136,51 @@ scenarios:
     description: "Priority should override duration-based sorting in queue"
     test_pods:
       - name: "low-priority-long"
-        duration: 600  # Long duration but low priority
+        duration: 600
         priority: 100
       - name: "high-priority-short"
-        duration: 60   # Short duration but high priority
+        duration: 60
         priority: 1000
       - name: "no-priority-medium"
-        duration: 300  # Medium duration, no priority
+        duration: 300
         priority: null
     expected_scheduling_order:
-      - "high-priority-short"  # High priority wins
-      - "low-priority-long"    # Low priority but still has priority
-      - "no-priority-medium"   # No priority comes last
+      - "high-priority-short" 
+      - "low-priority-long"  
+      - "no-priority-medium" 
     
   # Test 9: Queue Sort with Missing Duration Annotations  
   queuesort_missing_duration:
     description: "Pods without duration annotation should be scheduled last"
     test_pods:
       - name: "with-duration-long"
-        duration: 300  # Has duration
+        duration: 300
       - name: "with-duration-short" 
-        duration: 120  # Has shorter duration
+        duration: 120 
       - name: "no-duration-1"
-        duration: null  # No annotation
+        duration: null  
       - name: "no-duration-2"
-        duration: null  # No annotation
+        duration: null  
     expected_scheduling_order:
-      - "with-duration-long"   # Longest duration first
-      - "with-duration-short"  # Shorter but still has duration
-      - "no-duration-1"        # No duration (FIFO among missing)
-      - "no-duration-2"        # No duration (FIFO among missing)
+      - "with-duration-long"  
+      - "with-duration-short" 
+      - "no-duration-1"       
+      - "no-duration-2"       
         
   # Test 10: Queue Sort FIFO Tie-breaking
   queuesort_fifo_tiebreaker:
     description: "Equal durations should use FIFO (creation time) ordering"
     test_pods:
       - name: "equal-duration-first"
-        duration: 300  # Same duration
+        duration: 300
       - name: "equal-duration-second"
-        duration: 300  # Same duration
+        duration: 300
       - name: "equal-duration-third"
-        duration: 300  # Same duration
+        duration: 300
     expected_scheduling_order:
-      - "equal-duration-first"   # First created
-      - "equal-duration-second"  # Second created
-      - "equal-duration-third"   # Third created
+      - "equal-duration-first"
+      - "equal-duration-second"
+      - "equal-duration-third"
         
   # Test 11: Queue Sort Comprehensive Test
   queuesort_comprehensive:
@@ -201,59 +188,52 @@ scenarios:
     test_pods:
       - name: "critical-short"
         duration: 30
-        priority: 2000  # Highest priority
+        priority: 2000
       - name: "high-long"
         duration: 3600
-        priority: 1000  # High priority, long duration
+        priority: 1000
       - name: "high-medium"
         duration: 1800
-        priority: 1000  # High priority, medium duration
+        priority: 1000
       - name: "normal-very-long"
         duration: 7200
-        priority: 500   # Normal priority, very long
+        priority: 500
       - name: "normal-medium"
         duration: 900
-        priority: 500   # Normal priority, medium
+        priority: 500
       - name: "no-priority-long"
         duration: 2400
-        priority: null  # No priority, long duration
+        priority: null
       - name: "no-priority-short"
         duration: 300
-        priority: null  # No priority, short duration
+        priority: null
       - name: "no-annotation"
-        duration: null  # No duration annotation
+        duration: null
         priority: null
     expected_scheduling_order:
-      - "critical-short"        # Priority 2000 wins
-      - "high-long"            # Priority 1000, longer duration
-      - "high-medium"          # Priority 1000, shorter duration
-      - "normal-very-long"     # Priority 500, longest duration
-      - "normal-medium"        # Priority 500, shorter duration  
-      - "no-priority-long"     # No priority, longer duration
-      - "no-priority-short"    # No priority, shorter duration
-      - "no-annotation"        # No annotation comes last
+      - "critical-short"     
+      - "high-long"
+      - "high-medium"
+      - "normal-very-long"
+      - "normal-medium"
+      - "no-priority-long"
+      - "no-priority-short"
+      - "no-annotation"
 
-# Test execution configuration - optimized for speed and reliability
+# Test execution configuration
 execution:
-  # Optimized wait times for fast and reliable testing
-  setup_wait_time: 2     # Slightly longer for burst pod creation
-  test_wait_time: 3      # More time for queue sort to process multiple pods
-  timeout: 180           # Extended timeout for comprehensive queue sort tests
-  polling_interval: 1    # Fast polling for scheduling status
-  cleanup_wait: 3        # More cleanup time for burst tests
+  setup_wait_time: 2           # Wait for setup pods to start
+  test_wait_time: 3            # Wait before creating test pods
+  timeout: 180                 # Max wait for pod scheduling
+  polling_interval: 1          # How often to check pod status
+  cleanup_wait: 3              # Wait between test cleanup
   namespace: "simulation-test"
   
-  # Queue sort specific settings
-  burst_creation_interval: 0.5  # Delay between burst pod creation (seconds)
-  queue_sort_wait_time: 3       # Wait time for QueueSort plugin to sort the queue
-  max_burst_pods: 15            # Maximum number of pods in burst tests
+  burst_creation_interval: 0.5  # Delay between burst pods
+  queue_sort_wait_time: 3       # Wait for queue sorting
+  max_burst_pods: 15            # Max pods in burst tests
   
-  # QueueSort testing uses node cordoning (100% reliable method)
+  log_level: 4                  # Scheduler log verbosity
+  validate_queue_order: true    # Check scheduling order
   
-  # Logging and validation settings  
-  enable_verbose_logging: true  # Enable v4+ logging for queue sort validation
-  log_level: 4                  # Set klog verbosity level to 4 for debugging
-  validate_queue_order: true    # Validate that pods are scheduled in expected order
-  
-  # Overall execution timeout
-  overall_timeout_minutes: 10   # Maximum time for all scenarios (default: 10 minutes)
+  overall_timeout_minutes: 10   # Total test time limit
