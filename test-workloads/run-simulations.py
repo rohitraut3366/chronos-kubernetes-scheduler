@@ -135,8 +135,63 @@ spec:
         print(f"🎯 Created test pod: {pod_name} ({duration}s)")
         return True
 
-    def create_priority_class(self, priority_name: str, priority_value: int) -> bool:
+    def create_priority_class(self, priority_name: str, priority_value: int, is_default: bool = False) -> bool:
         """Create a PriorityClass resource"""
+        priority_class_yaml = f"""
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {priority_name}
+value: {priority_value}
+globalDefault: {str(is_default).lower()}
+description: "Priority class for QueueSort testing"
+"""
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write(priority_class_yaml)
+            yaml_file = f.name
+
+        try:
+            output, code = self.kubectl([
+                "apply", "-f", yaml_file, "--kubeconfig", "/tmp/kubeconfig"
+            ])
+            if code == 0:
+                default_msg = " (GLOBAL DEFAULT)" if is_default else ""
+                print(f"✅ Created PriorityClass: {priority_name} (value={priority_value}){default_msg}")
+                return True
+            else:
+                print(f"⚠️ Failed to create PriorityClass {priority_name}: {output}")
+                return False
+        finally:
+            os.unlink(yaml_file)
+
+    def setup_standard_priority_classes(self) -> bool:
+        """Setup comprehensive priority classes including default for better QueueSort visibility"""
+        print("🎯 Setting up standard priority classes for enhanced QueueSort testing...")
+        
+        # Define priority classes from highest to lowest
+        priority_classes = [
+            {"name": "critical-priority", "value": 2000, "default": False},
+            {"name": "high-priority", "value": 1000, "default": False}, 
+            {"name": "default-user-priority", "value": 250, "default": True},  # This becomes default for all pods
+            {"name": "low-priority", "value": 100, "default": False},
+            {"name": "batch-priority", "value": 50, "default": False},
+        ]
+        
+        for pc in priority_classes:
+            if not self.create_priority_class(pc["name"], pc["value"], pc["default"]):
+                print(f"❌ Failed to create priority class {pc['name']}")
+                return False
+        
+        print("✅ Standard priority classes created successfully!")
+        print("📊 Impact on QueueSort:")
+        print("   - Pods without priorityClassName will now get priority 250 (instead of 0)")
+        print("   - This creates clearer priority distinctions for testing")
+        print("   - QueueSort debug logs should be much more visible")
+        return True
+
+    def create_original_priority_class(self, priority_name: str, priority_value: int) -> bool:
+        """Create a PriorityClass resource (original method for backward compatibility)"""
         priority_class_yaml = f"""
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass
@@ -176,7 +231,13 @@ description: "Priority class for QueueSort testing"
             priority_classes = [
                 pc.strip()
                 for pc in output.split("\n")
-                if pc.strip() and "test-priority-" in pc
+                if pc.strip() and ("test-priority-" in pc or 
+                                  "high-priority" in pc or 
+                                  "medium-priority" in pc or 
+                                  "low-priority" in pc or
+                                  "critical-priority" in pc or
+                                  "batch-priority" in pc or
+                                  "default-user-priority" in pc)
             ]
             for pc in priority_classes:
                 self.kubectl(["delete", pc, "--kubeconfig", "/tmp/kubeconfig"])
@@ -778,6 +839,11 @@ spec:
 
         if not self.create_namespace():
             return False
+
+        # Setup standard priority classes for enhanced QueueSort visibility
+        if not self.setup_standard_priority_classes():
+            print("❌ Failed to setup priority classes - continuing with basic testing")
+            # Don't fail the entire test run, but note this issue
 
         scenarios = self.config["scenarios"]
         passed = 0
