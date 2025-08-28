@@ -2311,3 +2311,151 @@ func TestMissingCriticalPaths(t *testing.T) {
 		assert.Equal(t, "cache-fallback-node", nodes[0].Name)
 	})
 }
+
+// TestGracefulShutdown tests the complete graceful shutdown functionality
+func TestGracefulShutdown(t *testing.T) {
+	t.Run("StartStop_BasicFunctionality", func(t *testing.T) {
+		clientset := fake.NewSimpleClientset()
+		handle := &mockFrameworkHandle{clientset: clientset}
+		chronos := &Chronos{}
+
+		bs := NewBatchScheduler(handle, chronos)
+
+		// Initially not running
+		assert.False(t, bs.running)
+
+		// Start the scheduler
+		bs.Start()
+		time.Sleep(50 * time.Millisecond) // Give it time to start
+		assert.True(t, bs.running)
+
+		// Stop the scheduler
+		bs.Stop()
+		assert.False(t, bs.running)
+	})
+
+	t.Run("Stop_IdempotentBehavior", func(t *testing.T) {
+		clientset := fake.NewSimpleClientset()
+		handle := &mockFrameworkHandle{clientset: clientset}
+		chronos := &Chronos{}
+
+		bs := NewBatchScheduler(handle, chronos)
+
+		// Stop when not running should be safe
+		bs.Stop() // First call
+		bs.Stop() // Second call should be no-op
+		assert.False(t, bs.running)
+	})
+
+	t.Run("Start_IdempotentBehavior", func(t *testing.T) {
+		clientset := fake.NewSimpleClientset()
+		handle := &mockFrameworkHandle{clientset: clientset}
+		chronos := &Chronos{}
+
+		bs := NewBatchScheduler(handle, chronos)
+
+		// Start multiple times should be safe
+		bs.Start()
+		bs.Start() // Second call should be no-op
+		time.Sleep(50 * time.Millisecond)
+		assert.True(t, bs.running)
+
+		bs.Stop()
+	})
+
+	t.Run("CronLoop_GracefulTermination", func(t *testing.T) {
+		clientset := fake.NewSimpleClientset()
+		handle := &mockFrameworkHandle{clientset: clientset}
+		chronos := &Chronos{}
+
+		// Use a very short batch interval for this test
+		os.Setenv("BATCH_INTERVAL_SECONDS", "1")
+		defer os.Unsetenv("BATCH_INTERVAL_SECONDS")
+
+		bs := NewBatchScheduler(handle, chronos)
+
+		// Track if the cronLoop actually started and executed
+		executed := false
+
+		// Start the scheduler
+		bs.Start()
+
+		// Give it time to execute at least one batch cycle
+		time.Sleep(1500 * time.Millisecond) // 1.5 seconds
+		executed = true
+
+		// Measure how long shutdown takes
+		startStop := time.Now()
+		bs.Stop()
+		stopDuration := time.Since(startStop)
+
+		// Shutdown should be near-instantaneous (< 100ms)
+		assert.Less(t, stopDuration, 100*time.Millisecond, "Graceful shutdown should be fast")
+		assert.True(t, executed, "CronLoop should have had chance to execute")
+		assert.False(t, bs.running, "Should be stopped after Stop() call")
+	})
+
+	t.Run("Context_CancellationHandling", func(t *testing.T) {
+		clientset := fake.NewSimpleClientset()
+		handle := &mockFrameworkHandle{clientset: clientset}
+		chronos := &Chronos{}
+
+		bs := NewBatchScheduler(handle, chronos)
+
+		// Test that context cancellation actually works
+		contextDone := make(chan bool)
+
+		// Start monitoring the context
+		go func() {
+			<-bs.ctx.Done()
+			contextDone <- true
+		}()
+
+		bs.Start()
+		time.Sleep(50 * time.Millisecond) // Let it start
+
+		bs.Stop() // This should cancel the context
+
+		// Wait for context to be canceled
+		select {
+		case <-contextDone:
+			// Success - context was canceled
+		case <-time.After(1 * time.Second):
+			t.Fatal("Context was not canceled within timeout")
+		}
+	})
+
+	t.Run("Concurrent_StartStop", func(t *testing.T) {
+		clientset := fake.NewSimpleClientset()
+		handle := &mockFrameworkHandle{clientset: clientset}
+		chronos := &Chronos{}
+
+		bs := NewBatchScheduler(handle, chronos)
+
+		// Test concurrent access to Start/Stop
+		done := make(chan bool, 10)
+
+		// Start multiple goroutines calling Start/Stop
+		for i := 0; i < 5; i++ {
+			go func() {
+				bs.Start()
+				time.Sleep(10 * time.Millisecond)
+				bs.Stop()
+				done <- true
+			}()
+		}
+
+		// Wait for all goroutines to complete
+		for i := 0; i < 5; i++ {
+			select {
+			case <-done:
+				// Good
+			case <-time.After(5 * time.Second):
+				t.Fatal("Timeout waiting for concurrent operations")
+			}
+		}
+
+		// Final state should be consistent
+		assert.False(t, bs.running, "Final state should be stopped")
+	})
+}

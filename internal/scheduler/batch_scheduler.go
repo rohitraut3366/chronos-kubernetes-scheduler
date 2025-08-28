@@ -309,12 +309,30 @@ func (bs *BatchScheduler) Start() {
 	go bs.cronLoop()
 }
 
+// GRACEFUL SHUTDOWN: Stop method to cleanly terminate the batch scheduler
+func (bs *BatchScheduler) Stop() {
+	bs.mu.Lock()
+	defer bs.mu.Unlock()
+
+	if !bs.running {
+		return
+	}
+	bs.running = false
+	bs.cancel() // Signal the cronLoop to exit
+	klog.Infof("🛑 BatchScheduler stopped")
+}
+
+// GRACEFUL SHUTDOWN: Updated cronLoop to handle context cancellation
 func (bs *BatchScheduler) cronLoop() {
 	ticker := time.NewTicker(time.Duration(bs.config.BatchIntervalSeconds) * time.Second)
 	defer ticker.Stop()
+
+	klog.Infof("⏰ CRON loop started")
+
 	for {
 		select {
 		case <-bs.ctx.Done():
+			klog.Infof("📴 CRON loop terminated gracefully")
 			return
 		case <-ticker.C:
 			batchRunCounter.Inc()
