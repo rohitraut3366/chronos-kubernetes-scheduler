@@ -234,14 +234,30 @@ func (s *Chronos) ScoreExtensions() framework.ScoreExtensions {
 // It returns true if podInfo1 should be scheduled before podInfo2.
 // We sort by duration (longest first) to implement Longest Processing Time (LPT) heuristic.
 func (s *Chronos) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
+	// Extract priority values for logging
+	var priority1, priority2 int32
+	if podInfo1.Pod.Spec.Priority != nil {
+		priority1 = *podInfo1.Pod.Spec.Priority
+	}
+	if podInfo2.Pod.Spec.Priority != nil {
+		priority2 = *podInfo2.Pod.Spec.Priority
+	}
+
 	// Priority 1: Respect existing pod priorities (higher priority first)
 	if podInfo1.Pod.Spec.Priority != nil && podInfo2.Pod.Spec.Priority != nil {
 		if *podInfo1.Pod.Spec.Priority != *podInfo2.Pod.Spec.Priority {
-			return *podInfo1.Pod.Spec.Priority > *podInfo2.Pod.Spec.Priority
+			result := *podInfo1.Pod.Spec.Priority > *podInfo2.Pod.Spec.Priority
+			klog.V(5).Infof("QueueSort: Less(%s, %s): priority_decision - p1_priority=%d, p2_priority=%d, result=%t",
+				podInfo1.Pod.Name, podInfo2.Pod.Name, priority1, priority2, result)
+			return result
 		}
 	} else if podInfo1.Pod.Spec.Priority != nil && podInfo2.Pod.Spec.Priority == nil {
+		klog.V(5).Infof("QueueSort: Less(%s, %s): priority_decision - p1_priority=%d, p2_priority=nil, result=true",
+			podInfo1.Pod.Name, podInfo2.Pod.Name, priority1)
 		return true // Pod with priority comes before pod without priority
 	} else if podInfo1.Pod.Spec.Priority == nil && podInfo2.Pod.Spec.Priority != nil {
+		klog.V(5).Infof("QueueSort: Less(%s, %s): priority_decision - p1_priority=nil, p2_priority=%d, result=false",
+			podInfo1.Pod.Name, podInfo2.Pod.Name, priority2)
 		return false // Pod without priority comes after pod with priority
 	}
 
@@ -250,11 +266,18 @@ func (s *Chronos) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 	duration2 := s.getPodDuration(podInfo2.Pod)
 
 	if duration1 != duration2 {
-		return duration1 > duration2 // Longest job first (LPT heuristic)
+		result := duration1 > duration2 // Longest job first (LPT heuristic)
+		klog.V(5).Infof("QueueSort: Less(%s, %s): duration_decision - p1_priority=%d, p2_priority=%d, p1_duration=%d, p2_duration=%d, result=%t",
+			podInfo1.Pod.Name, podInfo2.Pod.Name, priority1, priority2, duration1, duration2, result)
+		return result
 	}
 
 	// Priority 3: If durations are equal, fall back to creation time (FIFO)
-	return podInfo1.Pod.CreationTimestamp.Before(&podInfo2.Pod.CreationTimestamp)
+	result := podInfo1.Pod.CreationTimestamp.Before(&podInfo2.Pod.CreationTimestamp)
+	klog.V(5).Infof("QueueSort: Less(%s, %s): fifo_decision - p1_priority=%d, p2_priority=%d, p1_duration=%d, p2_duration=%d, p1_created=%s, p2_created=%s, result=%t",
+		podInfo1.Pod.Name, podInfo2.Pod.Name, priority1, priority2, duration1, duration2,
+		podInfo1.Pod.CreationTimestamp.Time.Format("15:04:05"), podInfo2.Pod.CreationTimestamp.Time.Format("15:04:05"), result)
+	return result
 }
 
 // getPodDuration extracts and parses the duration annotation from a pod.
@@ -300,9 +323,12 @@ func (s *Chronos) NormalizeScore(ctx context.Context, state *framework.CycleStat
 
 	for i, nodeScore := range scores {
 		// Formula to scale a value from one range [min, max] to another [0, 100].
+		rawScore := nodeScore.Score // Store original score for logging
 		normalized := (nodeScore.Score - minScore) * framework.MaxNodeScore / (maxScore - minScore)
 		scores[i].Score = normalized
-		klog.Infof("Pod: %s/%s, Node: %s, RawScore: %d, NormalizedScore: %d", pod.Namespace, pod.Name, nodeScore.Name, nodeScore.Score, normalized)
+		// Only log if verbosity is high enough to avoid flooding production logs
+		klog.V(4).Infof("NormalizeScore: Pod=%s/%s, Node=%s, RawScore=%d, NormalizedScore=%d, Range=[%d,%d]",
+			pod.Namespace, pod.Name, nodeScore.Name, rawScore, normalized, minScore, maxScore)
 	}
 
 	return nil
