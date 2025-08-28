@@ -2820,3 +2820,240 @@ func createQueuedPodInfoWithTimestamp(name string, duration int64, timestamp tim
 		PodInfo: &framework.PodInfo{Pod: pod},
 	}
 }
+
+func TestLessFunctionComprehensive(t *testing.T) {
+	t.Log("🧪 Comprehensive unit tests for Less() function decision paths")
+
+	chronos := &Chronos{handle: createComprehensiveMockHandle()}
+
+	// Test cases organized by decision path
+	testSuites := []struct {
+		suiteName string
+		tests     []struct {
+			name            string
+			pod1            *framework.QueuedPodInfo
+			pod2            *framework.QueuedPodInfo
+			expectPod1First bool
+			description     string
+		}
+	}{
+		{
+			suiteName: "Priority Decision Paths",
+			tests: []struct {
+				name            string
+				pod1            *framework.QueuedPodInfo
+				pod2            *framework.QueuedPodInfo
+				expectPod1First bool
+				description     string
+			}{
+				{
+					name:            "HighPriorityBeatsLowPriority",
+					pod1:            createQueuedPodInfoWithPriority("high-priority", 300, 1000),
+					pod2:            createQueuedPodInfoWithPriority("low-priority", 600, 500),
+					expectPod1First: true,
+					description:     "Pod with higher priority (1000) should come before lower priority (500), regardless of duration",
+				},
+				{
+					name:            "SamePriorityDifferentDurations",
+					pod1:            createQueuedPodInfoWithPriority("same-pri-long", 600, 500),
+					pod2:            createQueuedPodInfoWithPriority("same-pri-short", 300, 500),
+					expectPod1First: true,
+					description:     "Same priority (500), longer duration should come first",
+				},
+				{
+					name:            "PriorityPodBeatsNoPriority",
+					pod1:            createQueuedPodInfoWithPriority("has-priority", 100, 100),
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("no-priority", 1000)}},
+					expectPod1First: true,
+					description:     "Pod with any priority should come before pod with no priority, even if duration is much shorter",
+				},
+				{
+					name:            "NoPriorityLosesToPriority",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("no-priority", 1000)}},
+					pod2:            createQueuedPodInfoWithPriority("has-priority", 100, 100),
+					expectPod1First: false,
+					description:     "Pod without priority should come after pod with priority",
+				},
+				{
+					name:            "ZeroPriorityBeatsNoPriority",
+					pod1:            createQueuedPodInfoWithPriority("zero-priority", 300, 0),
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("no-priority", 600)}},
+					expectPod1First: true,
+					description:     "Pod with explicit zero priority should beat pod with no priority",
+				},
+			},
+		},
+		{
+			suiteName: "Duration Decision Paths",
+			tests: []struct {
+				name            string
+				pod1            *framework.QueuedPodInfo
+				pod2            *framework.QueuedPodInfo
+				expectPod1First bool
+				description     string
+			}{
+				{
+					name:            "LongerDurationFirst",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("long-600s", 600)}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("medium-400s", 400)}},
+					expectPod1First: true,
+					description:     "Longer duration (600s) should come before shorter duration (400s)",
+				},
+				{
+					name:            "PositiveBeatsZeroDuration",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("positive-100s", 100)}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationString("zero-duration", "0")}},
+					expectPod1First: true,
+					description:     "Positive duration should come before zero duration",
+				},
+				{
+					name:            "ZeroBeatsNegativeDuration",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationString("zero-duration", "0")}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationString("negative", "-100")}},
+					expectPod1First: true,
+					description:     "Zero duration should come before negative duration",
+				},
+				{
+					name:            "AnyDurationBeatsMissingAnnotation",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationString("zero-duration", "0")}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "no-annotation", Namespace: "default"}}}},
+					expectPod1First: true,
+					description:     "Pod with explicit 0 duration should come before pod with missing annotation (-1)",
+				},
+				{
+					name:            "ValidDurationBeatsInvalidAnnotation",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("valid-100s", 100)}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationString("invalid", "not-a-number")}},
+					expectPod1First: true,
+					description:     "Valid duration should come before invalid duration annotation",
+				},
+			},
+		},
+		{
+			suiteName: "FIFO Fallback Decision Paths",
+			tests: []struct {
+				name            string
+				pod1            *framework.QueuedPodInfo
+				pod2            *framework.QueuedPodInfo
+				expectPod1First bool
+				description     string
+			}{
+				{
+					name:            "EarlierCreationTimeWins",
+					pod1:            createQueuedPodInfoWithTimestamp("created-first", 300, time.Now().Add(-10*time.Second)),
+					pod2:            createQueuedPodInfoWithTimestamp("created-second", 300, time.Now().Add(-5*time.Second)),
+					expectPod1First: true,
+					description:     "Earlier creation time should win when priority and duration are identical",
+				},
+				{
+					name:            "CreationTimeFallbackWithZeroDuration",
+					pod1:            createQueuedPodInfoWithTimestampAndDuration("zero-first", 0, time.Now().Add(-10*time.Second)),
+					pod2:            createQueuedPodInfoWithTimestampAndDuration("zero-second", 0, time.Now().Add(-5*time.Second)),
+					expectPod1First: true,
+					description:     "FIFO should work correctly even with zero duration pods",
+				},
+				{
+					name:            "CreationTimeFallbackWithSamePriorityAndDuration",
+					pod1:            createQueuedPodInfoWithPriorityAndTimestamp("same-pri-first", 300, 1000, time.Now().Add(-10*time.Second)),
+					pod2:            createQueuedPodInfoWithPriorityAndTimestamp("same-pri-second", 300, 1000, time.Now().Add(-5*time.Second)),
+					expectPod1First: true,
+					description:     "FIFO should be the final tiebreaker when both priority and duration are identical",
+				},
+			},
+		},
+		{
+			suiteName: "Edge Cases and Special Scenarios",
+			tests: []struct {
+				name            string
+				pod1            *framework.QueuedPodInfo
+				pod2            *framework.QueuedPodInfo
+				expectPod1First bool
+				description     string
+			}{
+				{
+					name:            "DecimalDurationRounding",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationString("decimal-high", "300.7")}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationString("decimal-low", "300.2")}},
+					expectPod1First: true,
+					description:     "Decimal durations should be rounded (301 > 300) and sorted correctly",
+				},
+				{
+					name:            "VeryLargeDurations",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("large-job", 86400)}}, // 1 day
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("medium-job", 3600)}}, // 1 hour
+					expectPod1First: true,
+					description:     "Very large durations (1 day vs 1 hour) should be handled correctly",
+				},
+				{
+					name:            "BothPodsHaveMissingAnnotations",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "no-ann-1", Namespace: "default", CreationTimestamp: metav1.Time{Time: time.Now().Add(-10 * time.Second)}}}}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "no-ann-2", Namespace: "default", CreationTimestamp: metav1.Time{Time: time.Now().Add(-5 * time.Second)}}}}},
+					expectPod1First: true,
+					description:     "When both pods have missing annotations (-1 duration), FIFO should apply",
+				},
+				{
+					name:            "BothPodsHaveInvalidAnnotations",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationStringAndTimestamp("invalid-1", "invalid", time.Now().Add(-10*time.Second))}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationStringAndTimestamp("invalid-2", "also-invalid", time.Now().Add(-5*time.Second))}},
+					expectPod1First: true,
+					description:     "When both pods have invalid annotations (-1 duration), FIFO should apply",
+				},
+			},
+		},
+	}
+
+	// Execute all test suites
+	for _, suite := range testSuites {
+		t.Run(suite.suiteName, func(t *testing.T) {
+			for _, tt := range suite.tests {
+				t.Run(tt.name, func(t *testing.T) {
+					result := chronos.Less(tt.pod1, tt.pod2)
+					assert.Equal(t, tt.expectPod1First, result,
+						"Less(%s, %s): %s", tt.pod1.PodInfo.Pod.Name, tt.pod2.PodInfo.Pod.Name, tt.description)
+					t.Logf("✅ %s: Pod1=%s, Pod2=%s, Pod1First=%v (%s)",
+						tt.name, tt.pod1.PodInfo.Pod.Name, tt.pod2.PodInfo.Pod.Name, result, tt.description)
+				})
+			}
+		})
+	}
+}
+
+// Helper functions for creating test pods with various combinations
+func mockPodWithDurationString(name string, durationStr string) *v1.Pod {
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              name,
+			Namespace:         "default",
+			CreationTimestamp: metav1.Time{Time: time.Now()},
+		},
+	}
+	if durationStr != "" {
+		pod.ObjectMeta.Annotations = map[string]string{
+			JobDurationAnnotation: durationStr,
+		}
+	}
+	return pod
+}
+
+func mockPodWithDurationStringAndTimestamp(name, durationStr string, timestamp time.Time) *v1.Pod {
+	pod := mockPodWithDurationString(name, durationStr)
+	pod.ObjectMeta.CreationTimestamp = metav1.Time{Time: timestamp}
+	return pod
+}
+
+func createQueuedPodInfoWithTimestampAndDuration(name string, duration int64, timestamp time.Time) *framework.QueuedPodInfo {
+	pod := mockPodWithDuration(name, duration)
+	pod.CreationTimestamp = metav1.Time{Time: timestamp}
+	return &framework.QueuedPodInfo{
+		PodInfo: &framework.PodInfo{Pod: pod},
+	}
+}
+
+func createQueuedPodInfoWithPriorityAndTimestamp(name string, duration int64, priority int32, timestamp time.Time) *framework.QueuedPodInfo {
+	pod := mockPodWithDuration(name, duration)
+	pod.Spec.Priority = &priority
+	pod.CreationTimestamp = metav1.Time{Time: timestamp}
+	return &framework.QueuedPodInfo{
+		PodInfo: &framework.PodInfo{Pod: pod},
+	}
+}
