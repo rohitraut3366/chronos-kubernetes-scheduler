@@ -323,12 +323,8 @@ func (s *Chronos) NormalizeScore(ctx context.Context, state *framework.CycleStat
 
 	for i, nodeScore := range scores {
 		// Formula to scale a value from one range [min, max] to another [0, 100].
-		rawScore := nodeScore.Score // Store original score for logging
 		normalized := (nodeScore.Score - minScore) * framework.MaxNodeScore / (maxScore - minScore)
 		scores[i].Score = normalized
-		// Only log if verbosity is high enough to avoid flooding production logs
-		klog.V(4).Infof("NormalizeScore: Pod=%s/%s, Node=%s, RawScore=%d, NormalizedScore=%d, Range=[%d,%d]",
-			pod.Namespace, pod.Name, nodeScore.Name, rawScore, normalized, minScore, maxScore)
 	}
 
 	return nil
