@@ -434,16 +434,16 @@ scenarios:
 
 # Test execution configuration - optimized for comprehensive testing
 execution:
-  # Timing settings optimized for CI reliability
-  setup_wait_time: 1     # Fast pod creation timing
-  test_wait_time: 1      # Quick test pod scheduling  
-  timeout: 60            # Timeout for individual tests
-  polling_interval: 1    # Fast polling for scheduling status
-  cleanup_wait: 2        # Quick cleanup between tests
+  # Timing settings optimized for CI reliability with batch processing
+  setup_wait_time: 2     # Allow setup pods to start
+  test_wait_time: 3      # Wait for batch cycle to start
+  timeout: 120           # Extended timeout for batch processing (2 minutes)
+  polling_interval: 2    # Reasonable polling interval
+  cleanup_wait: 3        # Allow cleanup to complete
   
-  # Batch scheduling settings
-  batch_wait_time: 8     # Wait for batch processing cycle
-  batch_timeout: 90      # Extended timeout for batch tests
+  # Batch scheduling settings - aligned with 5-second batch intervals
+  batch_wait_time: 10    # Wait for 2 batch cycles (2 * 5s + buffer)
+  batch_timeout: 180     # Extended timeout for batch tests (3 minutes)
   
   # Test environment
   namespace: "simulation-test"

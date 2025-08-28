@@ -157,21 +157,13 @@ jobs:
             enabled: true
             intervalSeconds: 5
             sizeLimit: 25
-          env:
-            - name: CHRONOS_BATCH_MODE_ENABLED
-              value: "true"
-            - name: BATCH_INTERVAL_SECONDS
-              value: "5"
-            - name: BATCH_SIZE_LIMIT
-              value: "25"
-            - name: MAX_CONCURRENT_BINDS
-              value: "10"
-            - name: COOLDOWN_SECONDS
-              value: "30"
-            - name: BIND_TIMEOUT_SECONDS
-              value: "15"
-            - name: MAX_UNSCHEDULED_ATTEMPTS
-              value: "5"
+            maxUnscheduledAttempts: 5
+            cooldownSeconds: 30
+            maxConcurrentBinds: 10
+            bindRetryMax: 3
+            bindTimeoutSeconds: 15
+            bindQPS: 0
+            labelPatchTimeoutSec: 10
         
         resources:
           requests:
@@ -209,10 +201,16 @@ jobs:
         }
         
         echo "=== FULL CHART TEMPLATES DRY-RUN ==="
-        helm template chronos-scheduler ./charts/chronos-kubernetes-scheduler --values values-ci.yaml --namespace chronos-system || {
+        helm template chronos-scheduler ./charts/chronos-kubernetes-scheduler --values values-ci.yaml --namespace chronos-system > helm-template-output.yaml
+        
+        echo "=== VERIFYING BATCH MODE ENV VARS IN TEMPLATE ==="
+        grep -A 20 "env:" helm-template-output.yaml | grep -E "(CHRONOS_BATCH_MODE_ENABLED|BATCH_)" || echo "⚠️ Warning: No batch env vars found in template"
+        
+        # Validate template
+        if ! helm template chronos-scheduler ./charts/chronos-kubernetes-scheduler --values values-ci.yaml --namespace chronos-system >/dev/null; then
           echo "❌ Helm template validation failed!"
           exit 1
-        }
+        fi
         
         # Install Helm chart with detailed logging
         echo "🚀 Installing Helm chart..."
@@ -340,6 +338,17 @@ jobs:
         # Get all scheduler pod names
         SCHEDULER_PODS=$(kubectl get pods -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler -o jsonpath='{.items[*].metadata.name}')
         echo "Scheduler pods found: $SCHEDULER_PODS"
+        
+        # Verify batch mode is enabled
+        echo "=== BATCH MODE VERIFICATION ==="
+        for POD in $SCHEDULER_PODS; do
+          echo "Checking environment variables for pod: $POD"
+          kubectl exec -n chronos-system $POD -- env | grep -E "(CHRONOS_BATCH_MODE_ENABLED|BATCH_)" || echo "No batch env vars found in $POD"
+          echo "Checking batch mode initialization logs:"
+          kubectl logs -n chronos-system $POD | grep -E "(BATCH MODE|BatchScheduler|Starting batch|Batch completed|🚀.*BATCH)" | head -10 || echo "No batch initialization logs found"
+          echo "All startup logs for $POD:"
+          kubectl logs -n chronos-system $POD | head -15
+        done
         
         # Find the leader by checking the lease resource or fallback to single pod
         echo "=== IDENTIFYING SCHEDULER LEADER ==="
@@ -554,7 +563,7 @@ jobs:
           kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=50
           
           echo "🔍 Batch scheduling activity:"
-          kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler | grep -E "(Starting batch|Batch completed)" | tail -10
+          kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler | grep -E "(Starting batch|Batch completed|BatchScheduler|📦.*batch|BATCH MODE)" | tail -15 || echo "No batch scheduling activity found - possible issue with batch mode activation"
           
           echo "🔍 Simulation namespace pods status:"
           kubectl get pods -n simulation-test -o wide || echo "No simulation pods found"
@@ -586,7 +595,7 @@ jobs:
         fi
         
         echo "🔍 Final batch scheduling activity summary:"
-        kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler | grep -E "(Starting batch|Batch completed)" | tail -5 || echo "No batch activity logged"
+        kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler | grep -E "(Starting batch|Batch completed|BatchScheduler|📦.*batch|BATCH MODE)" | tail -10 || echo "No batch activity logged - batch mode may not be working"
         
         echo "=== SCHEDULER DECISION ANALYSIS ==="
         echo "📖 Analyzing scheduler logs to understand placement decisions..."

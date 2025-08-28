@@ -138,6 +138,20 @@ spec:
           value: {{ .Values.scheduler.batchMode.intervalSeconds | quote }}
         - name: BATCH_SIZE_LIMIT
           value: {{ .Values.scheduler.batchMode.sizeLimit | quote }}
+        - name: MAX_UNSCHEDULED_ATTEMPTS
+          value: {{ .Values.scheduler.batchMode.maxUnscheduledAttempts | default "24" | quote }}
+        - name: COOLDOWN_SECONDS
+          value: {{ .Values.scheduler.batchMode.cooldownSeconds | default "120" | quote }}
+        - name: MAX_CONCURRENT_BINDS
+          value: {{ .Values.scheduler.batchMode.maxConcurrentBinds | default "10" | quote }}
+        - name: BIND_RETRY_MAX
+          value: {{ .Values.scheduler.batchMode.bindRetryMax | default "3" | quote }}
+        - name: BIND_TIMEOUT_SECONDS
+          value: {{ .Values.scheduler.batchMode.bindTimeoutSeconds | default "30" | quote }}
+        - name: BIND_QPS
+          value: {{ .Values.scheduler.batchMode.bindQPS | default "0" | quote }}
+        - name: LABEL_PATCH_TIMEOUT_SEC
+          value: {{ .Values.scheduler.batchMode.labelPatchTimeoutSec | default "10" | quote }}
         {{- end }}
         {{- with .Values.extraEnv }}
         {{- toYaml . | nindent 8 }}

@@ -82,6 +82,20 @@ scheduler:
     intervalSeconds: 5
     # -- Maximum batch size (0 = unlimited)
     sizeLimit: 100
+    # -- Maximum scheduling attempts before marking pod as failed
+    maxUnscheduledAttempts: 24
+    # -- Cooldown period (seconds) before reconsidering failed pods (30-900s)
+    cooldownSeconds: 120
+    # -- Maximum concurrent pod binding operations
+    maxConcurrentBinds: 10
+    # -- Maximum retry attempts for failed binding operations
+    bindRetryMax: 3
+    # -- Timeout for binding operations in seconds
+    bindTimeoutSeconds: 30
+    # -- Rate limiting for binding operations (QPS, 0 = disabled)
+    bindQPS: 0
+    # -- Timeout for label patching operations in seconds
+    labelPatchTimeoutSec: 10
 
 # -- Service account configuration
 serviceAccount:
