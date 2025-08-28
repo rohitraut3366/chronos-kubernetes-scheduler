@@ -26,6 +26,14 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework/parallelize"
 )
 
+// Test constants matching the actual scoring algorithm values
+const (
+	// Core scoring constants from CalculateOptimizedScore function
+	binPackingPriority = 1000000 // Highest priority: jobs that fit within existing windows
+	extensionPriority  = 100000  // Medium priority: jobs that extend commitments
+	emptyNodePriority  = 1000    // Lowest priority: empty nodes
+)
+
 // =================================================================
 // Test Fixtures and Mock Helpers
 // =================================================================
@@ -634,7 +642,6 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		scoreLarge := plugin.CalculateOptimizedScore(testPodLarge, nodeInfoLarge, 300, 100)
 		// This is bin-packing case (100 <= 300), so Priority 1
 		// Pure time-based scoring: baseScore + consolidationBonus (no resource bonus)
-		const binPackingPriority = 1000000
 		expectedLarge := int64(binPackingPriority) + 300*100 // Pure time-based score
 		assert.Equal(t, expectedLarge, scoreLarge, "Large capacity bin-packing score (pure time-based)")
 
@@ -1227,24 +1234,21 @@ func TestCalculateOptimizedScore(t *testing.T) {
 			switch tc.expectedStrategy {
 			case "extension-utilization":
 				// Updated for new extension minimization priority: strong penalty for extension
-				const extensionPriority = 100000
 				extensionPenalty := (tc.newPodDuration - tc.maxRemainingTime) * 100 // Extension minimization dominates
 				expectedScore := int64(extensionPriority) - extensionPenalty        // Pure time-based score
 				assert.Equal(t, expectedScore, score, "Extension case should prioritize extension minimization")
-				assert.Greater(t, score, int64(1000), "Extension case should score higher than empty nodes")
+				assert.Greater(t, score, int64(emptyNodePriority), "Extension case should score higher than empty nodes")
 
 			case "consolidation":
 				// Updated for new hierarchical scoring: bin-packing case (renamed from consolidation)
-				const binPackingPriority = 1000000
 				baseScore := int64(binPackingPriority)
 				consolidationBonus := tc.maxRemainingTime * 100
 				expectedTotal := baseScore + consolidationBonus // Pure time-based score
 				assert.Equal(t, expectedTotal, score, "Bin-packing case should use hierarchical scoring")
-				assert.Greater(t, score, int64(100000), "Bin-packing case should score highest")
+				assert.Greater(t, score, int64(extensionPriority), "Bin-packing case should score highest")
 
 			case "empty-penalty":
 				// Updated for new hierarchical scoring: empty node case
-				const emptyNodePriority = 1000
 				expectedScore := int64(emptyNodePriority) // Pure time-based score
 				assert.Equal(t, expectedScore, score, "Empty node should have lowest priority score")
 				// Empty nodes should have much lower scores than active nodes
@@ -1591,7 +1595,6 @@ func TestMaximumCoveragePush(t *testing.T) {
 				// With hierarchical scoring, even zero-slot nodes get base priority score
 				// This is bin-packing case (300 <= 400), so gets Priority 1 base score
 				// Node is 100% utilized (15 pods * 100m = 1500m used / 1500m total), ResourceScore = 0
-				const binPackingPriority = 1000000
 				expectedZeroSlot := int64(binPackingPriority) + 400*100 + 0*10 // ResourceScore = 0, so bonus = 0
 				assert.Equal(t, expectedZeroSlot, score, "%s should get base bin-packing score with no resource bonus", tc.name)
 			}
@@ -1865,7 +1868,7 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 					// Verify score ranges based on priority
 					switch scenario.expectedPriority {
 					case "bin-packing-fit":
-						assert.GreaterOrEqual(t, score, int64(1000000), "Bin-packing should have highest priority")
+						assert.GreaterOrEqual(t, score, int64(binPackingPriority), "Bin-packing should have highest priority")
 					case "extension-minimization":
 						// Large extension jobs can have negative scores due to heavy penalties - this is correct
 						if scenario.name == "ExtensionLarge" {
@@ -1875,7 +1878,7 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 							assert.Less(t, score, int64(200000), "Extension should be less than bin-packing")
 						}
 					case "empty-node-penalty":
-						assert.GreaterOrEqual(t, score, int64(1000), "Empty node should have lowest priority")
+						assert.GreaterOrEqual(t, score, int64(emptyNodePriority), "Empty node should have lowest priority")
 						assert.Less(t, score, int64(10000), "Empty node should be significantly lower")
 					}
 
@@ -2685,76 +2688,26 @@ func TestQueueSortPluginFunctionality(t *testing.T) {
 func TestGetPodDurationFunction(t *testing.T) {
 	t.Log("🎯 Testing getPodDuration utility function")
 
-	chronos := &Chronos{handle: createComprehensiveMockHandle()}
+	chronos := &Chronos{}
 
-	tests := []struct {
+	testCases := []struct {
 		name     string
 		pod      *v1.Pod
 		expected int64
 	}{
-		{
-			name:     "ValidIntegerDuration",
-			pod:      mockPodWithDuration("test", 600),
-			expected: 600,
-		},
-		{
-			name: "ValidDecimalDuration",
-			pod: &v1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "test",
-					Namespace:   "default",
-					Annotations: map[string]string{JobDurationAnnotation: "600.75"},
-				},
-			},
-			expected: 601, // Rounded
-		},
-		{
-			name: "NoDurationAnnotation",
-			pod: &v1.Pod{
-				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
-			},
-			expected: -1,
-		},
-		{
-			name: "InvalidDurationAnnotation",
-			pod: &v1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "test",
-					Namespace:   "default",
-					Annotations: map[string]string{JobDurationAnnotation: "invalid"},
-				},
-			},
-			expected: -1,
-		},
-		{
-			name: "ZeroDuration",
-			pod: &v1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "test",
-					Namespace:   "default",
-					Annotations: map[string]string{JobDurationAnnotation: "0"},
-				},
-			},
-			expected: 0,
-		},
-		{
-			name: "NegativeDuration",
-			pod: &v1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "test",
-					Namespace:   "default",
-					Annotations: map[string]string{JobDurationAnnotation: "-100"},
-				},
-			},
-			expected: -100,
-		},
+		{"ValidInteger", mockPodWithDuration("test", 600), 600},
+		{"ValidDecimal", mockPodWithDurationString("test", "600.75"), 601},
+		{"NoAnnotation", &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"}}, -1},
+		{"InvalidAnnotation", mockPodWithDurationString("test", "invalid"), -1},
+		{"ZeroDuration", mockPodWithDurationString("test", "0"), 0},
+		{"NegativeDuration", mockPodWithDurationString("test", "-100"), -100},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := chronos.getPodDuration(tt.pod)
-			assert.Equal(t, tt.expected, result)
-			t.Logf("✅ %s: Duration=%d", tt.name, result)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := chronos.getPodDuration(tc.pod)
+			assert.Equal(t, tc.expected, result)
+			t.Logf("✅ %s: Duration=%d", tc.name, result)
 		})
 	}
 }
