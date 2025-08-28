@@ -258,7 +258,6 @@ spec:
             return False
         
         print(f"🚧 Cordoning {len(worker_nodes)} worker nodes to block scheduling...")
-        cordon_timeout = self.exec_config.get('cordon_timeout', 30)
         
         for node in worker_nodes:
             output, code = self.kubectl(['cordon', node])
@@ -289,22 +288,22 @@ spec:
             else:
                 print(f"✅ Uncordoned node: {node}")
         
-        print(f"🔓 All nodes are now schedulable")
+        print("🔓 All nodes are now schedulable")
         return True
 
     def run_queuesort_scenario(self, scenario_name: str, scenario: Dict[str, Any]) -> bool:
         """Runs a QueueSort test scenario using the reliable Node Cordoning method."""
         use_cordon = self.exec_config.get('use_cordon_method', True)
         
-        print(f"\n{'='*80}")
+        print("\n" + "="*80)
         print(f"🎯 Running QueueSort scenario: {scenario_name}")
         print(f"📝 Description: {scenario['description']}")
         
         if use_cordon:
-            print(f"🚧 Using Node Cordoning method (100% reliable)")
+            print("🚧 Using Node Cordoning method (100% reliable)")
         else:
-            print(f"⚡ Using original rapid creation method")
-        print(f"{'='*80}")
+            print("⚡ Using original rapid creation method")
+        print("=" * 80)
 
         pod_names = [p['name'] for p in scenario['test_pods']]
 
@@ -351,7 +350,7 @@ spec:
             print(f"✅ {pending_count}/{len(pod_names)} pods are in Pending state (queued)")
             
             if pending_count < len(pod_names):
-                print(f"⚠️ Expected all pods to be Pending with cordoned nodes - this may indicate an issue")
+                print("⚠️ Expected all pods to be Pending with cordoned nodes - this may indicate an issue")
 
             # 4. Wait for QueueSort plugin to sort the queue
             queue_sort_wait = self.exec_config.get('queue_sort_wait_time', 3)
@@ -453,17 +452,17 @@ spec:
             print("4. FIFO ordering should break ties")
             
             if "Cordoning" in method:
-                print(f"\n🚧 Node Cordoning method ensures:")
-                print(f"- Eliminates race conditions completely")
-                print(f"- All pods guaranteed to be Pending simultaneously")  
-                print(f"- No resource calculations needed")
-                print(f"- Uses Kubernetes built-in scheduling control")
-                print(f"- Most reliable method for QueueSort testing")
+                print("\n🚧 Node Cordoning method ensures:")
+                print("- Eliminates race conditions completely")
+                print("- All pods guaranteed to be Pending simultaneously")  
+                print("- No resource calculations needed")
+                print("- Uses Kubernetes built-in scheduling control")
+                print("- Most reliable method for QueueSort testing")
             else:
-                print(f"\n⚡ Original method limitations:")
-                print(f"- May have race conditions if pods are scheduled immediately")
-                print(f"- Less reliable in fast scheduling environments")
-                print(f"- Consider enabling 'use_cordon_method: true' for most reliable testing")
+                print("\n⚡ Original method limitations:")
+                print("- May have race conditions if pods are scheduled immediately")
+                print("- Less reliable in fast scheduling environments")
+                print("- Consider enabling 'use_cordon_method: true' for most reliable testing")
         
         return success
 
@@ -580,10 +579,10 @@ spec:
     
     def run_scenario(self, scenario_name: str, scenario: Dict[str, Any]) -> bool:
         """Run a single test scenario"""
-        print(f"\n{'='*80}")
+        print("\n" + "="*80)
         print(f"🎯 Running scenario: {scenario_name}")
         print(f"📝 Description: {scenario['description']}")
-        print(f"{'='*80}")
+        print("="*80)
         
         # Setup initial conditions
         print("\n📋 Setting up initial conditions...")
@@ -690,11 +689,11 @@ spec:
         finally:
             self.cleanup_namespace()
         
-        print(f"\n{'='*80}")
+        print("\n" + "="*80)
         elapsed_time = time.time() - start_time
         print(f"🏁 SIMULATION RESULTS: {passed}/{total} scenarios passed")
         print(f"⏱️  Total execution time: {elapsed_time:.1f}s")
-        print(f"{'='*80}")
+        print("="*80)
         
         return passed == total
 
