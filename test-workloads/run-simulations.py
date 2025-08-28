@@ -8,6 +8,8 @@ import yaml  # type: ignore
 import subprocess
 import time
 import sys
+import os
+import tempfile
 import re
 from typing import Dict, List, Any, Optional
 
@@ -133,6 +135,51 @@ spec:
         print(f"🎯 Created test pod: {pod_name} ({duration}s)")
         return True
 
+    def create_priority_class(self, priority_name: str, priority_value: int) -> bool:
+        """Create a PriorityClass resource"""
+        priority_class_yaml = f"""
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {priority_name}
+value: {priority_value}
+globalDefault: false
+description: "Priority class for QueueSort testing"
+"""
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            f.write(priority_class_yaml)
+            yaml_file = f.name
+
+        try:
+            output, code = self.kubectl([
+                "apply", "-f", yaml_file, "--kubeconfig", "/tmp/kubeconfig"
+            ])
+            if code == 0:
+                print(f"✅ Created PriorityClass: {priority_name} (value={priority_value})")
+                return True
+            else:
+                print(f"❌ Failed to create PriorityClass {priority_name}: {output}")
+                return False
+        finally:
+            os.unlink(yaml_file)
+
+    def cleanup_priority_classes(self) -> bool:
+        """Clean up all test priority classes"""
+        output, code = self.kubectl([
+            "get", "priorityclasses", "-o", "name", "--kubeconfig", "/tmp/kubeconfig"
+        ])
+        
+        if code == 0:
+            priority_classes = [pc.strip() for pc in output.split('\n') if pc.strip() and 'test-priority-' in pc]
+            for pc in priority_classes:
+                self.kubectl([
+                    "delete", pc, "--kubeconfig", "/tmp/kubeconfig"
+                ])
+                print(f"🧹 Deleted {pc}")
+        
+        return True
+
     def create_queuesort_test_pod(
         self, pod_name: str, duration: Optional[int], priority: Optional[int] = None
     ) -> bool:
@@ -145,7 +192,10 @@ spec:
 
         priority_spec = ""
         if priority is not None:
-            priority_spec = f"\n  priority: {priority}"
+            priority_class_name = f"test-priority-{priority}"
+            # Create the priority class if it doesn't exist
+            self.create_priority_class(priority_class_name, priority)
+            priority_spec = f"\n  priorityClassName: {priority_class_name}"
 
         pod_yaml = f"""
 apiVersion: v1
@@ -753,6 +803,7 @@ spec:
                 # Cleanup between scenarios
                 print(f"🧹 Cleaning up pods from scenario: {scenario_name}")
                 self.kubectl(["delete", "pods", "--all", "-n", self.namespace])
+                self.cleanup_priority_classes()  # Clean up priority classes too
                 cleanup_wait = self.exec_config.get("cleanup_wait", 5)
                 time.sleep(cleanup_wait)
 

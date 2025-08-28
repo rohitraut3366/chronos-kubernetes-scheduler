@@ -233,7 +233,7 @@ execution:
   queue_sort_wait_time: 3       # Wait for queue sorting
   max_burst_pods: 15            # Max pods in burst tests
   
-  log_level: 4                  # Scheduler log verbosity
+  log_level: 5                  # Scheduler log verbosity
   validate_queue_order: true    # Check scheduling order
   
   overall_timeout_minutes: 10   # Total test time limit

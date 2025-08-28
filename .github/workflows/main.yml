@@ -157,11 +157,11 @@ jobs:
             queueSort:
               enabled: true  # Enable custom queue sorting (LPT heuristic)
           # Enable verbose logging for queue sort validation
-          verbosity: 4  # Set klog verbosity to level 4 for Less() function debugging
+          verbosity: 5  # Set klog verbosity to level 5 for Less() function debugging
           
         # Additional container args for enhanced logging
         extraArgs:
-          - "--v=4"  # Enable v4 logging
+          - "--v=5"  # Enable v5 logging
           - "--logtostderr=true"  # Log to stderr for easier capture
           - "--stderrthreshold=INFO"  # Lower threshold for comprehensive logging
         

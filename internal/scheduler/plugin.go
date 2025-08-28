@@ -266,6 +266,21 @@ func (s *Chronos) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 	duration2 := s.getPodDuration(podInfo2.Pod)
 
 	if duration1 != duration2 {
+		// Handle pods without duration annotations explicitly
+		// Pods with -1 duration (no annotation) should be scheduled LAST
+		if duration1 == -1 && duration2 >= 0 {
+			// Pod1 has no annotation, Pod2 has annotation -> Pod2 first
+			klog.V(5).Infof("QueueSort: Less(%s, %s): duration_decision - p1_priority=%d, p2_priority=%d, p1_duration=%d(no-annotation), p2_duration=%d, result=false",
+				podInfo1.Pod.Name, podInfo2.Pod.Name, priority1, priority2, duration1, duration2)
+			return false
+		}
+		if duration2 == -1 && duration1 >= 0 {
+			// Pod1 has annotation, Pod2 has no annotation -> Pod1 first
+			klog.V(5).Infof("QueueSort: Less(%s, %s): duration_decision - p1_priority=%d, p2_priority=%d, p1_duration=%d, p2_duration=%d(no-annotation), result=true",
+				podInfo1.Pod.Name, podInfo2.Pod.Name, priority1, priority2, duration1, duration2)
+			return true
+		}
+		// Both pods have valid durations (>= 0) or both have no annotation (-1)
 		result := duration1 > duration2 // Longest job first (LPT heuristic)
 		klog.V(5).Infof("QueueSort: Less(%s, %s): duration_decision - p1_priority=%d, p2_priority=%d, p1_duration=%d, p2_duration=%d, result=%t",
 			podInfo1.Pod.Name, podInfo2.Pod.Name, priority1, priority2, duration1, duration2, result)
