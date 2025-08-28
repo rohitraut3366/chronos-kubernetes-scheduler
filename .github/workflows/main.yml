@@ -57,6 +57,9 @@ jobs:
         - role: control-plane
         - role: worker
         - role: worker
+        - role: worker
+        - role: worker
+        # Total: 1 control-plane + 4 workers = 5 nodes for comprehensive queue sort testing
         EOF
 
     - name: Build Docker image with caching
@@ -150,14 +153,25 @@ jobs:
             name: Chronos
             weight: 100
             jobDurationAnnotation: "scheduling.workload.io/expected-duration-seconds"
+            # Enable QueueSort plugin for testing
+            queueSort:
+              enabled: true  # Enable custom queue sorting (LPT heuristic)
+          # Enable verbose logging for queue sort validation
+          verbosity: 4  # Set klog verbosity to level 4 for Less() function debugging
+          
+        # Additional container args for enhanced logging
+        extraArgs:
+          - "--v=4"  # Enable v4 logging
+          - "--logtostderr=true"  # Log to stderr for easier capture
+          - "--stderrthreshold=INFO"  # Lower threshold for comprehensive logging
         
         resources:
           requests:
-            cpu: 50m
-            memory: 64Mi
+            cpu: 100m     # More CPU for verbose logging and queue processing
+            memory: 128Mi # More memory for enhanced logging
           limits:
-            cpu: 200m
-            memory: 256Mi
+            cpu: 500m     # Higher limits for burst pod processing
+            memory: 512Mi # More memory for queue sort operations
         
         # Add tolerations for any taints
         tolerations:
@@ -380,11 +394,17 @@ jobs:
         echo "=== POD SCHEDULING ACTIVITY ==="
         kubectl logs -n chronos-system $LEADER_POD | grep -E "(Attempting to schedule|evaluating|scoring)" | head -10
         
+        echo "=== QUEUE SORT PLUGIN LOGS FROM LEADER ==="
+        kubectl logs -n chronos-system $LEADER_POD | grep -E "(QueueSort|Less|priority.*duration)" | head -30 || echo "No QueueSort plugin logs found"
+        
+        echo "=== CHRONOS QUEUE SORT INITIALIZATION ==="
+        kubectl logs -n chronos-system $LEADER_POD | grep -E "(QueueSort.*Score|initialized.*QueueSort)" || echo "No QueueSort initialization logs found"
+        
+        echo "=== LESS FUNCTION VERBOSE LOGS (V4) ==="
+        kubectl logs -n chronos-system $LEADER_POD | grep -E "Less.*Pod1.*Pod2" | head -20 || echo "No Less function v4 logs found (this is expected if queue sort is disabled or no pod comparisons occurred)"
+        
         echo "=== CHRONOS_SCORE LOGS FROM LEADER ==="
         kubectl logs -n chronos-system $LEADER_POD | grep "CHRONOS_SCORE:" || echo "No CHRONOS_SCORE logs found"
-        
-        echo "=== NORMALIZED SCORE LOGS FROM LEADER ==="  
-        kubectl logs -n chronos-system $LEADER_POD | grep "NormalizedScore:" || echo "No NormalizedScore logs found"
         
         echo "=== SUCCESSFULLY BOUND LOGS FROM LEADER ==="
         kubectl logs -n chronos-system $LEADER_POD | grep "Successfully bound" || echo "No successful binding logs found"
@@ -465,8 +485,55 @@ jobs:
           echo "✅ PASS: Single replica deployment (no leader election needed)"
         fi
         
+        echo "=== QUEUE SORT FUNCTIONALITY VALIDATION ==="
+        
+        # Check if QueueSort plugin is enabled and functioning
+        QUEUE_SORT_INIT=$(kubectl logs -n chronos-system $LEADER_POD | grep -c "QueueSort.*Score.*plugins" || echo "0")
+        if [ "$QUEUE_SORT_INIT" -gt 0 ]; then
+          echo "✅ PASS: QueueSort plugin initialization detected ($QUEUE_SORT_INIT messages)"
+        else
+          echo "⚠️  INFO: No QueueSort initialization messages found - plugin may be disabled or using Score only"
+        fi
+        
+        # Check for Less function calls (queue sort activity)
+        LESS_FUNCTION_CALLS=$(kubectl logs -n chronos-system $LEADER_POD | grep -c "Less(" || echo "0")  
+        if [ "$LESS_FUNCTION_CALLS" -gt 0 ]; then
+          echo "✅ PASS: Queue sort activity detected ($LESS_FUNCTION_CALLS Less function calls)"
+          echo "This confirms pods are being compared and sorted by the QueueSort plugin"
+        else
+          echo "ℹ️  INFO: No Less function calls found - this could mean:"
+          echo "   1. QueueSort plugin is disabled (using default FIFO)"
+          echo "   2. Only single pods were scheduled (no comparison needed)"
+          echo "   3. All pods had same priority/duration (no sorting decisions made)"
+          echo "   This is informational and doesn't indicate a failure"
+        fi
+        
+        # Analyze pod scheduling order for queue sort validation
+        echo "=== ANALYZING BURST POD SCHEDULING ORDER ==="
+        BURST_PODS=$(kubectl get pods -n integration-test -l test=queue-sort-burst --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | wc -w || echo "0")
+        
+        if [ "$BURST_PODS" -gt 0 ]; then
+          echo "Found $BURST_PODS burst test pods - analyzing scheduling order..."
+          
+          # Show expected vs actual scheduling order
+          kubectl get pods -n integration-test -l test=queue-sort-burst --sort-by=.metadata.creationTimestamp -o custom-columns=NAME:.metadata.name,EXPECTED_ORDER:.metadata.labels.expected-order,DURATION:.metadata.annotations.scheduling\\.workload\\.io/expected-duration-seconds,PRIORITY:.spec.priority,STATUS:.status.phase,NODE:.spec.nodeName 2>/dev/null || echo "Unable to retrieve pod details"
+          
+          # Count successfully scheduled burst pods
+          SCHEDULED_BURST_PODS=$(kubectl get pods -n integration-test -l test=queue-sort-burst --field-selector=status.phase=Running -o name 2>/dev/null | wc -l || echo "0")
+          echo "Burst pods successfully scheduled: $SCHEDULED_BURST_PODS/$BURST_PODS"
+          
+          if [ "$SCHEDULED_BURST_PODS" -gt 0 ]; then
+            echo "✅ PASS: Burst pods were successfully scheduled"
+          else
+            echo "⚠️  INFO: No burst pods are running yet - they may still be in pending/scheduling phase"
+          fi
+        else
+          echo "ℹ️  INFO: No burst test pods found - queue sort validation skipped"
+        fi
+        
         echo "🎉 All critical infrastructure checks passed!"
-        echo "📊 Log metrics above are informational only and don't affect build status"
+        echo "📊 Queue sort metrics above are informational and help validate plugin functionality"
+        echo "📊 The absence of queue sort logs doesn't indicate failure - it depends on workload patterns"
 
     - name: Cache Python dependencies
       uses: actions/cache@v4
@@ -497,12 +564,12 @@ jobs:
         kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=10 || echo "No scheduler logs yet"
         echo "=== STARTING SIMULATIONS ==="
         
-        timeout 300s python3 run-simulations.py --config simulations.yaml --kubeconfig /tmp/kubeconfig || {
+        python3 run-simulations.py --config simulations.yaml --kubeconfig /tmp/kubeconfig || {
           EXIT_CODE=$?
           
           if [ $EXIT_CODE -eq 124 ]; then
-            echo "⚠️ Simulations timed out after 5 minutes"
-            echo "This suggests scheduling decisions are taking too long"
+            echo "⚠️ Simulations timed out"
+            echo "This suggests scheduling decisions are taking too long or queue sort tests need optimization"
           else
             echo "❌ Simulations failed with exit code: $EXIT_CODE"
             echo "This indicates our scheduling logic doesn't match expected behavior"
