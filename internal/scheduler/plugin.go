@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"strconv"
 	"time"
 
@@ -22,16 +23,40 @@ const (
 
 // Chronos is a scheduler plugin that uses bin-packing logic with extension minimization
 // to optimize resource utilization and minimize cluster commitment extensions.
+// Supports both individual pod-by-pod scheduling and batch scheduling modes.
 type Chronos struct {
-	handle framework.Handle
+	handle           framework.Handle
+	batchScheduler   *BatchScheduler
+	batchModeEnabled bool
 }
 
 // New initializes a new plugin and returns it.
 func New(ctx context.Context, _ runtime.Object, h framework.Handle) (framework.Plugin, error) {
-	klog.Infof("Initializing Chronos plugin with bin-packing + extension minimization + utilization optimization")
-	return &Chronos{
+	chronos := &Chronos{
 		handle: h,
-	}, nil
+	}
+
+	// Check if batch mode is enabled via environment variable
+	batchModeEnabled := os.Getenv("CHRONOS_BATCH_MODE_ENABLED")
+	testModeEnabled := os.Getenv("CHRONOS_TEST_MODE")
+
+	if batchModeEnabled == "true" && testModeEnabled == "true" {
+		// Test mode: enable batch mode flag but don't create actual batch scheduler
+		chronos.batchModeEnabled = true
+		klog.Infof("🧪 Chronos BATCH MODE enabled - Test mode (no actual scheduler)")
+	} else if batchModeEnabled == "true" && h != nil {
+		// Production mode: create and start batch scheduler
+		chronos.batchModeEnabled = true
+		chronos.batchScheduler = NewBatchScheduler(h, chronos)
+		chronos.batchScheduler.Start()
+		klog.Infof("🚀 Chronos BATCH MODE enabled - Simple batch scheduling active")
+	} else {
+		// Individual mode (default)
+		chronos.batchModeEnabled = false
+		klog.Infof("📝 Chronos INDIVIDUAL MODE enabled (default) - Pod-by-pod scheduling")
+	}
+
+	return chronos, nil
 }
 
 // Name returns the name of the plugin.
@@ -42,15 +67,21 @@ func (s *Chronos) Name() string {
 // Score is the core scheduling logic. It calculates a score for each node based on
 // when the node is expected to become idle.
 func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.Pod, nodeName string) (int64, *framework.Status) {
-	// Only log at debug level to reduce hot path overhead
 	klog.V(4).Infof("Scoring pod %s/%s for node %s", p.Namespace, p.Name, nodeName)
 
 	// 1. Get the expected duration of the pod being scheduled.
 	newPodDurationStr, ok := p.Annotations[JobDurationAnnotation]
 	if !ok {
-		klog.Infof("Pod %s/%s is missing annotation %s, skipping.", p.Namespace, p.Name, JobDurationAnnotation)
+		// Pods without duration annotation get zero score in both modes
 		return 0, framework.NewStatus(framework.Success)
 	}
+
+	// Both individual and batch modes use the same scoring logic
+	// In batch mode: batch scheduler sets priorities, framework handles binding via our scoring
+	// In individual mode: framework processes pods individually via our scoring
+	klog.V(4).Infof("Pod %s/%s being scored (mode: %s)", p.Namespace, p.Name,
+		map[bool]string{true: "batch", false: "individual"}[s.batchModeEnabled])
+
 	// Parse duration - support both integer and decimal values
 	newPodDurationFloat, err := strconv.ParseFloat(newPodDurationStr, 64)
 	if err != nil {
