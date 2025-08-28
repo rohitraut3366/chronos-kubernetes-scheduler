@@ -248,7 +248,12 @@ spec:
         print(f"⏳ Waiting {setup_wait}s for setup pods to be running...")
         time.sleep(setup_wait)
         
-        # Create test pod
+        # Check if this is a batch scenario or individual scenario
+        if 'batch_pods' in scenario:
+            # Handle batch scenario
+            return self.run_batch_scenario(scenario)
+        
+        # Handle individual scenario
         new_pod = scenario['new_pod']
         test_wait = self.exec_config['test_wait_time']
         print(f"⏳ Waiting {test_wait}s before scheduling test pod...")
@@ -292,6 +297,59 @@ spec:
         print(f"\n{status}")
         
         return success
+    
+    def run_batch_scenario(self, scenario):
+        """Handle batch scheduling scenarios with multiple pods"""
+        print(f"📦 Running BATCH scenario")
+        
+        batch_pods = scenario['batch_pods']
+        batch_wait = self.exec_config.get('batch_wait_time', 8)
+        batch_timeout = self.exec_config.get('batch_timeout', 90)
+        
+        print(f"⏳ Waiting {batch_wait}s before creating batch pods...")
+        time.sleep(batch_wait)
+        
+        # Create all batch pods at roughly the same time
+        created_pods = []
+        for pod_config in batch_pods:
+            if self.create_test_pod(pod_config['name'], pod_config['duration']):
+                created_pods.append(pod_config)
+                time.sleep(0.5)  # Small delay between pods
+            else:
+                print(f"❌ Failed to create pod: {pod_config['name']}")
+                return False
+        
+        print(f"📦 Created {len(created_pods)} batch pods, waiting for scheduling...")
+        
+        # Wait for all pods to be scheduled
+        scheduled_pods = {}
+        for pod_config in created_pods:
+            actual_node = self.wait_for_pod_scheduled(pod_config['name'], batch_timeout)
+            if actual_node:
+                scheduled_pods[pod_config['name']] = actual_node
+                print(f"✅ Pod '{pod_config['name']}' scheduled to: {actual_node}")
+            else:
+                print(f"❌ Pod '{pod_config['name']}' failed to schedule within {batch_timeout}s")
+                return False
+        
+        # Validate expectations for each pod
+        all_correct = True
+        print(f"\n📊 BATCH RESULTS:")
+        for pod_config in batch_pods:
+            pod_name = pod_config['name']
+            expected_node = pod_config.get('expected_node')
+            actual_node = scheduled_pods.get(pod_name)
+            
+            if expected_node and actual_node:
+                if actual_node == expected_node:
+                    print(f"✅ {pod_name}: Expected {expected_node}, got {actual_node}")
+                else:
+                    print(f"❌ {pod_name}: Expected {expected_node}, got {actual_node}")
+                    all_correct = False
+            else:
+                print(f"ℹ️  {pod_name}: No expected_node specified, got {actual_node}")
+        
+        return all_correct
     
     def run_all_scenarios(self) -> bool:
         """Run all configured scenarios"""
