@@ -293,10 +293,10 @@ func TestPodFitsNodeSelector(t *testing.T) {
 
 func TestOptimizeBatchAssignment_PrioritySorting(t *testing.T) {
 	requests := []PodSchedulingRequest{
-		{Pod: mockBatchPod("low-prio-long", "default", 0, 600, "", ""), ExpectedDuration: 600},
-		{Pod: mockBatchPod("high-prio-short", "default", 100, 300, "", ""), ExpectedDuration: 300},
-		{Pod: mockBatchPod("high-prio-long", "default", 100, 900, "", ""), ExpectedDuration: 900},
-		{Pod: mockBatchPod("low-prio-short", "default", 0, 180, "", ""), ExpectedDuration: 180},
+		{Pod: mockBatchPod("low-prio-long", "default", 0, 600, "", ""), ExpectedDuration: 600, EquivalenceClassKey: "test-class-1"},
+		{Pod: mockBatchPod("high-prio-short", "default", 100, 300, "", ""), ExpectedDuration: 300, EquivalenceClassKey: "test-class-2"},
+		{Pod: mockBatchPod("high-prio-long", "default", 100, 900, "", ""), ExpectedDuration: 900, EquivalenceClassKey: "test-class-3"},
+		{Pod: mockBatchPod("low-prio-short", "default", 0, 180, "", ""), ExpectedDuration: 180, EquivalenceClassKey: "test-class-4"},
 	}
 
 	// This is the sorting logic extracted from optimizeBatchAssignment
@@ -1328,7 +1328,7 @@ func TestOptimizeBatchAssignment_ResourceConstraints(t *testing.T) {
 	t.Run("AvailableSlots_Constraint", func(t *testing.T) {
 		// Create pod request
 		pod := mockBatchPod("slots-constrained", "default", 100, 300, "100m", "128Mi")
-		requests := []PodSchedulingRequest{{Pod: pod, ExpectedDuration: 300}}
+		requests := []PodSchedulingRequest{{Pod: pod, ExpectedDuration: 300, EquivalenceClassKey: "test-class"}}
 
 		// Create node state with zero available slots
 		nodeStates := map[string]*EnhancedNodeState{
@@ -1354,7 +1354,7 @@ func TestOptimizeBatchAssignment_ResourceConstraints(t *testing.T) {
 	t.Run("CPU_Constraint", func(t *testing.T) {
 		// Create pod requiring more CPU than available
 		pod := mockBatchPod("cpu-heavy", "default", 100, 300, "16", "1Gi") // 16 CPU
-		requests := []PodSchedulingRequest{{Pod: pod, ExpectedDuration: 300}}
+		requests := []PodSchedulingRequest{{Pod: pod, ExpectedDuration: 300, EquivalenceClassKey: "test-class"}}
 
 		// Create node state with insufficient CPU
 		nodeStates := map[string]*EnhancedNodeState{
@@ -1380,7 +1380,7 @@ func TestOptimizeBatchAssignment_ResourceConstraints(t *testing.T) {
 	t.Run("Memory_Constraint", func(t *testing.T) {
 		// Create pod requiring more memory than available
 		pod := mockBatchPod("mem-heavy", "default", 100, 300, "1", "32Gi") // 32Gi memory
-		requests := []PodSchedulingRequest{{Pod: pod, ExpectedDuration: 300}}
+		requests := []PodSchedulingRequest{{Pod: pod, ExpectedDuration: 300, EquivalenceClassKey: "test-class"}}
 
 		// Create node state with insufficient memory
 		nodeStates := map[string]*EnhancedNodeState{
@@ -1529,7 +1529,7 @@ func TestNodePrefilteringOptimizations(t *testing.T) {
 			pod := mockBatchPod("test-pod", "default", 100, 300, "100m", "128Mi")
 			pod.Spec.NodeSelector = map[string]string{"gpu": "nvidia"}
 
-			requests := []PodSchedulingRequest{{Pod: pod, ExpectedDuration: 300}}
+			requests := []PodSchedulingRequest{{Pod: pod, ExpectedDuration: 300, EquivalenceClassKey: "test-class"}}
 			selectors := bs.getUniqueNodeSelectors(requests)
 
 			assert.Len(t, selectors, 1, "Should have one unique selector")
@@ -1547,9 +1547,9 @@ func TestNodePrefilteringOptimizations(t *testing.T) {
 			// No nodeSelector
 
 			requests := []PodSchedulingRequest{
-				{Pod: pod1, ExpectedDuration: 300},
-				{Pod: pod2, ExpectedDuration: 300},
-				{Pod: pod3, ExpectedDuration: 300},
+				{Pod: pod1, ExpectedDuration: 300, EquivalenceClassKey: "test-class-1"},
+				{Pod: pod2, ExpectedDuration: 300, EquivalenceClassKey: "test-class-2"},
+				{Pod: pod3, ExpectedDuration: 300, EquivalenceClassKey: "test-class-3"},
 			}
 			selectors := bs.getUniqueNodeSelectors(requests)
 
@@ -1567,8 +1567,8 @@ func TestNodePrefilteringOptimizations(t *testing.T) {
 			pod2.Spec.NodeSelector = map[string]string{"gpu": "nvidia"}
 
 			requests := []PodSchedulingRequest{
-				{Pod: pod1, ExpectedDuration: 300},
-				{Pod: pod2, ExpectedDuration: 300},
+				{Pod: pod1, ExpectedDuration: 300, EquivalenceClassKey: "test-class-1"},
+				{Pod: pod2, ExpectedDuration: 300, EquivalenceClassKey: "test-class-1"},
 			}
 			selectors := bs.getUniqueNodeSelectors(requests)
 
@@ -2690,5 +2690,290 @@ func TestCooldownSystem(t *testing.T) {
 		// Validate cooldown range
 		assert.GreaterOrEqual(t, config.CooldownSeconds, 30, "Cooldown should be at least 30 seconds")
 		assert.LessOrEqual(t, config.CooldownSeconds, 900, "Cooldown should be at most 15 minutes (900s)")
+	})
+}
+
+func TestClassifyError(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected string
+	}{
+		{
+			name:     "NilError",
+			err:      nil,
+			expected: "none",
+		},
+		{
+			name:     "TimeoutError",
+			err:      fmt.Errorf("connection timeout occurred"),
+			expected: "timeout",
+		},
+		{
+			name:     "ConflictError",
+			err:      fmt.Errorf("resource conflict detected"),
+			expected: "conflict",
+		},
+		{
+			name:     "NotFoundError",
+			err:      fmt.Errorf("resource not found"),
+			expected: "not_found",
+		},
+		{
+			name:     "ForbiddenError",
+			err:      fmt.Errorf("action forbidden"),
+			expected: "forbidden",
+		},
+		{
+			name:     "UnauthorizedError",
+			err:      fmt.Errorf("unauthorized access"),
+			expected: "unauthorized",
+		},
+		{
+			name:     "UnknownError",
+			err:      fmt.Errorf("some random error"),
+			expected: "unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := classifyError(tt.err)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestBindPodWithRetry(t *testing.T) {
+	// Create test pod
+	testPod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+		Status: v1.PodStatus{
+			Phase: v1.PodPending,
+		},
+	}
+
+	// Mock clientset for testing with the test pod
+	clientset := fake.NewSimpleClientset(testPod)
+
+	// Create test scheduler
+	chronos := &Chronos{}
+	bs := &BatchScheduler{
+		config: BatchSchedulerConfig{
+			BindRetryMax:       3,
+			BindTimeoutSeconds: 5,
+		},
+		clientset: clientset,
+		chronos:   chronos,
+		ctx:       context.Background(),
+	}
+
+	t.Run("SuccessfulBind", func(t *testing.T) {
+		// Should succeed without retries
+		err := bs.bindPodWithRetry(testPod, "test-node")
+		assert.NoError(t, err)
+	})
+
+	t.Run("RetryExhausted", func(t *testing.T) {
+		// Test with invalid pod that will fail binding
+		invalidPod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "", // Invalid empty name
+				Namespace: "default",
+			},
+		}
+
+		err := bs.bindPodWithRetry(invalidPod, "test-node")
+		assert.Error(t, err, "Should fail after retries")
+	})
+
+	t.Run("ZeroRetries", func(t *testing.T) {
+		// Create a fresh scheduler with zero retries
+		bsZero := &BatchScheduler{
+			config: BatchSchedulerConfig{
+				BindRetryMax:       0,
+				BindTimeoutSeconds: 5,
+			},
+			clientset: clientset,
+			chronos:   chronos,
+			ctx:       context.Background(),
+		}
+
+		// Should still attempt once (attempts = BindRetryMax + 1)
+		err := bsZero.bindPodWithRetry(testPod, "test-node")
+		assert.NoError(t, err)
+	})
+}
+
+func TestPatchPodLabels(t *testing.T) {
+	// Create test pod
+	testPod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			Labels:    map[string]string{"existing": "label"},
+		},
+	}
+
+	clientset := fake.NewSimpleClientset(testPod)
+
+	bs := &BatchScheduler{
+		clientset: clientset,
+		ctx:       context.Background(),
+	}
+
+	t.Run("SuccessfulPatch", func(t *testing.T) {
+		labels := map[string]string{
+			"scheduled-by-batch": "true",
+			"new-label":          "value",
+		}
+
+		err := bs.patchPodLabels(context.Background(), "default", "test-pod", labels)
+		assert.NoError(t, err)
+	})
+
+	t.Run("InvalidPodName", func(t *testing.T) {
+		labels := map[string]string{"test": "value"}
+
+		err := bs.patchPodLabels(context.Background(), "default", "non-existent-pod", labels)
+		assert.Error(t, err, "Should fail for non-existent pod")
+	})
+
+	t.Run("EmptyLabels", func(t *testing.T) {
+		err := bs.patchPodLabels(context.Background(), "default", "test-pod", map[string]string{})
+		assert.NoError(t, err, "Should handle empty labels")
+	})
+}
+
+func TestEnhancedConfigLoading(t *testing.T) {
+	// Save original environment
+	originalEnvs := map[string]string{
+		"MAX_CONCURRENT_BINDS":    os.Getenv("MAX_CONCURRENT_BINDS"),
+		"BIND_RETRY_MAX":          os.Getenv("BIND_RETRY_MAX"),
+		"BIND_TIMEOUT_SECONDS":    os.Getenv("BIND_TIMEOUT_SECONDS"),
+		"BIND_QPS":                os.Getenv("BIND_QPS"),
+		"LABEL_PATCH_TIMEOUT_SEC": os.Getenv("LABEL_PATCH_TIMEOUT_SEC"),
+	}
+
+	// Clean up after test
+	defer func() {
+		for key, value := range originalEnvs {
+			if value == "" {
+				os.Unsetenv(key)
+			} else {
+				os.Setenv(key, value)
+			}
+		}
+	}()
+
+	t.Run("DefaultValues", func(t *testing.T) {
+		// Clear all environment variables
+		for key := range originalEnvs {
+			os.Unsetenv(key)
+		}
+
+		config := loadBatchSchedulerConfig()
+
+		assert.Equal(t, 30, config.MaxConcurrentBinds, "Default MaxConcurrentBinds should be 30")
+		assert.Equal(t, 3, config.BindRetryMax, "Default BindRetryMax should be 3")
+		assert.Equal(t, 30, config.BindTimeoutSeconds, "Default BindTimeoutSeconds should be 30")
+		assert.Equal(t, 50, config.BindQPS, "Default BindQPS should be 50")
+		assert.Equal(t, 5, config.LabelPatchTimeoutSec, "Default LabelPatchTimeoutSec should be 5")
+	})
+
+	t.Run("ValidEnvironmentVariables", func(t *testing.T) {
+		os.Setenv("MAX_CONCURRENT_BINDS", "50")
+		os.Setenv("BIND_RETRY_MAX", "5")
+		os.Setenv("BIND_TIMEOUT_SECONDS", "45")
+		os.Setenv("BIND_QPS", "100")
+		os.Setenv("LABEL_PATCH_TIMEOUT_SEC", "10")
+
+		config := loadBatchSchedulerConfig()
+
+		assert.Equal(t, 50, config.MaxConcurrentBinds)
+		assert.Equal(t, 5, config.BindRetryMax)
+		assert.Equal(t, 45, config.BindTimeoutSeconds)
+		assert.Equal(t, 100, config.BindQPS)
+		assert.Equal(t, 10, config.LabelPatchTimeoutSec)
+	})
+
+	t.Run("InvalidEnvironmentVariables", func(t *testing.T) {
+		os.Setenv("MAX_CONCURRENT_BINDS", "invalid")
+		os.Setenv("BIND_RETRY_MAX", "-1")         // Should be >= 0
+		os.Setenv("BIND_TIMEOUT_SECONDS", "0")    // Should be > 0
+		os.Setenv("BIND_QPS", "-10")              // Should be >= 0
+		os.Setenv("LABEL_PATCH_TIMEOUT_SEC", "0") // Should be > 0
+
+		config := loadBatchSchedulerConfig()
+
+		// Should fall back to defaults for invalid values
+		assert.Equal(t, 30, config.MaxConcurrentBinds, "Should use default for invalid MaxConcurrentBinds")
+		assert.Equal(t, 3, config.BindRetryMax, "Should use default for invalid BindRetryMax")
+		assert.Equal(t, 30, config.BindTimeoutSeconds, "Should use default for invalid BindTimeoutSeconds")
+		assert.Equal(t, 50, config.BindQPS, "Should use default for invalid BindQPS")
+		assert.Equal(t, 5, config.LabelPatchTimeoutSec, "Should use default for invalid LabelPatchTimeoutSec")
+	})
+}
+
+func TestResetFailedPodsWithPatch(t *testing.T) {
+	// Create test pod with failure markers
+	testPod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-failed-pod",
+			Namespace: "default",
+			Labels: map[string]string{
+				"chronos-batch-failed": "true",
+				"other-label":          "keep",
+			},
+			Annotations: map[string]string{
+				"chronos.scheduler/unscheduled-attempts": "5",
+				"chronos.scheduler/batch-failed-reason":  "Max attempts exceeded",
+				"chronos.scheduler/failed-at":            "2024-01-01T00:00:00Z",
+				"other-annotation":                       "keep",
+			},
+		},
+	}
+
+	clientset := fake.NewSimpleClientset(testPod)
+
+	bs := &BatchScheduler{
+		clientset: clientset,
+		ctx:       context.Background(),
+	}
+
+	t.Run("SuccessfulReset", func(t *testing.T) {
+		pods := []*v1.Pod{testPod}
+
+		// Should complete without error
+		bs.resetFailedPods(pods)
+
+		// Verify the patch was applied (in a real scenario, we'd check the pod state)
+		// For unit testing with fake client, we mainly verify no panics/errors
+	})
+
+	t.Run("NonExistentPod", func(t *testing.T) {
+		nonExistentPod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "non-existent",
+				Namespace: "default",
+			},
+		}
+
+		pods := []*v1.Pod{nonExistentPod}
+
+		// Should handle gracefully without panic
+		assert.NotPanics(t, func() {
+			bs.resetFailedPods(pods)
+		})
+	})
+
+	t.Run("EmptyPodsList", func(t *testing.T) {
+		// Should handle empty list gracefully
+		assert.NotPanics(t, func() {
+			bs.resetFailedPods([]*v1.Pod{})
+		})
 	})
 }
