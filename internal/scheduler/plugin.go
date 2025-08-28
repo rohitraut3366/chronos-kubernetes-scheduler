@@ -247,21 +247,11 @@ func (s *Chronos) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 	}
 
 	// Priority 1: Respect existing pod priorities (higher priority first)
-	if podInfo1.Pod.Spec.Priority != nil && podInfo2.Pod.Spec.Priority != nil {
-		if *podInfo1.Pod.Spec.Priority != *podInfo2.Pod.Spec.Priority {
-			result := *podInfo1.Pod.Spec.Priority > *podInfo2.Pod.Spec.Priority
-			klog.V(5).Infof("QueueSort: Less(%s, %s): priority_decision - p1_priority=%d, p2_priority=%d, result=%t",
-				podInfo1.Pod.Name, podInfo2.Pod.Name, priority1, priority2, result)
-			return result
-		}
-	} else if podInfo1.Pod.Spec.Priority != nil && podInfo2.Pod.Spec.Priority == nil {
-		klog.V(5).Infof("QueueSort: Less(%s, %s): priority_decision - p1_priority=%d, p2_priority=nil, result=true",
-			podInfo1.Pod.Name, podInfo2.Pod.Name, priority1)
-		return true // Pod with priority comes before pod without priority
-	} else if podInfo1.Pod.Spec.Priority == nil && podInfo2.Pod.Spec.Priority != nil {
-		klog.V(5).Infof("QueueSort: Less(%s, %s): priority_decision - p1_priority=nil, p2_priority=%d, result=false",
-			podInfo1.Pod.Name, podInfo2.Pod.Name, priority2)
-		return false // Pod without priority comes after pod with priority
+	if priority1 != priority2 {
+		result := priority1 > priority2
+		klog.V(5).Infof("QueueSort: Less(%s, %s): priority_decision - p1_priority=%d, p2_priority=%d, result=%t",
+			podInfo1.Pod.Name, podInfo2.Pod.Name, priority1, priority2, result)
+		return result
 	}
 
 	// Priority 2: Within same priority class, sort by duration (longest first)
