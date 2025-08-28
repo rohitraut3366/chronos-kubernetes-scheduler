@@ -326,14 +326,16 @@ spec:
         print("🔓 All nodes are now schedulable")
         return True
 
-    def _wait_for_all_pods_pending(self, pod_names: List[str], timeout: int = 60) -> bool:
+    def _wait_for_all_pods_pending(
+        self, pod_names: List[str], timeout: int = 60
+    ) -> bool:
         """Wait for all pods to be in Pending state with verification-based approach."""
         print(f"⏳ Waiting for all {len(pod_names)} pods to reach Pending state...")
-        
+
         start_time = time.time()
         while time.time() - start_time < timeout:
             pending_count = 0
-            
+
             for pod_name in pod_names:
                 output, code = self.kubectl(
                     [
@@ -348,16 +350,18 @@ spec:
                 )
                 if code == 0 and output == "Pending":
                     pending_count += 1
-            
+
             print(f"📊 Pods in Pending state: {pending_count}/{len(pod_names)}")
-            
+
             if pending_count == len(pod_names):
                 print("✅ All pods are now in Pending state (queued) - perfect!")
                 return True
-            
+
             time.sleep(2)  # Check every 2 seconds
-        
-        print(f"❌ Timeout: Only {pending_count}/{len(pod_names)} pods reached Pending state")
+
+        print(
+            f"❌ Timeout: Only {pending_count}/{len(pod_names)} pods reached Pending state"
+        )
         return False
 
     def run_queuesort_scenario(
