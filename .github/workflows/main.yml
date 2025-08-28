@@ -587,6 +587,18 @@ jobs:
         
         echo "🔍 Final batch scheduling activity summary:"
         kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler | grep -E "(Starting batch|Batch completed)" | tail -5 || echo "No batch activity logged"
+        
+        echo "=== SCHEDULER DECISION ANALYSIS ==="
+        echo "📖 Analyzing scheduler logs to understand placement decisions..."
+        SCHEDULER_POD=$(kubectl get pods -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler -o jsonpath='{.items[0].metadata.name}')
+        kubectl logs -n chronos-system $SCHEDULER_POD > /tmp/scheduler-full.log
+        
+        cd test-workloads
+        python3 parse-scheduler-logs.py /tmp/scheduler-full.log || {
+          echo "⚠️ Log analysis failed - continuing anyway"
+          echo "Recent scheduler logs for manual analysis:"
+          tail -50 /tmp/scheduler-full.log
+        }
 
     - name: Cleanup
       if: always()
