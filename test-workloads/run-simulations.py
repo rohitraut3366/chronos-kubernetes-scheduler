@@ -146,17 +146,19 @@ value: {priority_value}
 globalDefault: false
 description: "Priority class for QueueSort testing"
 """
-        
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(priority_class_yaml)
             yaml_file = f.name
 
         try:
-            output, code = self.kubectl([
-                "apply", "-f", yaml_file, "--kubeconfig", "/tmp/kubeconfig"
-            ])
+            output, code = self.kubectl(
+                ["apply", "-f", yaml_file, "--kubeconfig", "/tmp/kubeconfig"]
+            )
             if code == 0:
-                print(f"✅ Created PriorityClass: {priority_name} (value={priority_value})")
+                print(
+                    f"✅ Created PriorityClass: {priority_name} (value={priority_value})"
+                )
                 return True
             else:
                 print(f"❌ Failed to create PriorityClass {priority_name}: {output}")
@@ -166,18 +168,20 @@ description: "Priority class for QueueSort testing"
 
     def cleanup_priority_classes(self) -> bool:
         """Clean up all test priority classes"""
-        output, code = self.kubectl([
-            "get", "priorityclasses", "-o", "name", "--kubeconfig", "/tmp/kubeconfig"
-        ])
-        
+        output, code = self.kubectl(
+            ["get", "priorityclasses", "-o", "name", "--kubeconfig", "/tmp/kubeconfig"]
+        )
+
         if code == 0:
-            priority_classes = [pc.strip() for pc in output.split('\n') if pc.strip() and 'test-priority-' in pc]
+            priority_classes = [
+                pc.strip()
+                for pc in output.split("\n")
+                if pc.strip() and "test-priority-" in pc
+            ]
             for pc in priority_classes:
-                self.kubectl([
-                    "delete", pc, "--kubeconfig", "/tmp/kubeconfig"
-                ])
+                self.kubectl(["delete", pc, "--kubeconfig", "/tmp/kubeconfig"])
                 print(f"🧹 Deleted {pc}")
-        
+
         return True
 
     def create_queuesort_test_pod(
