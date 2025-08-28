@@ -44,6 +44,11 @@ scheduler:
     weight: 100
     # -- Job duration annotation key
     jobDurationAnnotation: "scheduling.workload.io/expected-duration-seconds"
+    
+    # -- Queue sort configuration
+    queueSort:
+      # -- Enable custom queue sorting (duration-based LPT heuristic)
+      enabled: false  # Default to false for backward compatibility
 
   # -- NodeResourcesFit plugin configuration for resource-aware tie-breaking
   nodeResourcesFit:

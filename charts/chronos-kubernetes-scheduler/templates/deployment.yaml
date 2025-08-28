@@ -131,6 +131,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: CHRONOS_QUEUE_SORT_ENABLED
+          value: "{{ .Values.scheduler.plugin.queueSort.enabled }}"
         {{- with .Values.extraEnv }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

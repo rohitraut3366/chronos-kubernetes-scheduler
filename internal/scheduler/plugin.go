@@ -23,11 +23,9 @@ const (
 
 // Chronos is a scheduler plugin that uses bin-packing logic with extension minimization
 // to optimize resource utilization and minimize cluster commitment extensions.
-// Supports both individual pod-by-pod scheduling and batch scheduling modes.
+// Implements both QueueSort (for duration-based ordering) and Score (for node selection).
 type Chronos struct {
-	handle           framework.Handle
-	batchScheduler   *BatchScheduler
-	batchModeEnabled bool
+	handle framework.Handle
 }
 
 // New initializes a new plugin and returns it.
@@ -36,24 +34,12 @@ func New(ctx context.Context, _ runtime.Object, h framework.Handle) (framework.P
 		handle: h,
 	}
 
-	// Check if batch mode is enabled via environment variable
-	batchModeEnabled := os.Getenv("CHRONOS_BATCH_MODE_ENABLED")
-	testModeEnabled := os.Getenv("CHRONOS_TEST_MODE")
-
-	if batchModeEnabled == "true" && testModeEnabled == "true" {
-		// Test mode: enable batch mode flag but don't create actual batch scheduler
-		chronos.batchModeEnabled = true
-		klog.Infof("🧪 Chronos BATCH MODE enabled - Test mode (no actual scheduler)")
-	} else if batchModeEnabled == "true" && h != nil {
-		// Production mode: create and start batch scheduler
-		chronos.batchModeEnabled = true
-		chronos.batchScheduler = NewBatchScheduler(h, chronos)
-		chronos.batchScheduler.Start()
-		klog.Infof("🚀 Chronos BATCH MODE enabled - Simple batch scheduling active")
+	// Check if queue sort mode is enabled
+	queueSortEnabled := os.Getenv("CHRONOS_QUEUE_SORT_ENABLED")
+	if queueSortEnabled == "true" {
+		klog.Infof("🚀 Chronos Scheduler initialized with QueueSort + Score plugins")
 	} else {
-		// Individual mode (default)
-		chronos.batchModeEnabled = false
-		klog.Infof("📝 Chronos INDIVIDUAL MODE enabled (default) - Pod-by-pod scheduling")
+		klog.Infof("📝 Chronos Scheduler initialized with Score plugin only (default FIFO queue)")
 	}
 
 	return chronos, nil
@@ -76,11 +62,7 @@ func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.
 		return 0, framework.NewStatus(framework.Success)
 	}
 
-	// Both individual and batch modes use the same scoring logic
-	// In batch mode: batch scheduler sets priorities, framework handles binding via our scoring
-	// In individual mode: framework processes pods individually via our scoring
-	klog.V(4).Infof("Pod %s/%s being scored (mode: %s)", p.Namespace, p.Name,
-		map[bool]string{true: "batch", false: "individual"}[s.batchModeEnabled])
+	// QueueSort orders pods by duration (longest first), Score selects best node
 
 	// Parse duration - support both integer and decimal values
 	newPodDurationFloat, err := strconv.ParseFloat(newPodDurationStr, 64)
@@ -240,6 +222,50 @@ func (s *Chronos) CalculateOptimizedScore(p *v1.Pod, nodeInfo *framework.NodeInf
 // ScoreExtensions of the Score plugin.
 func (s *Chronos) ScoreExtensions() framework.ScoreExtensions {
 	return s
+}
+
+// Less is a function used by the QueueSort extension point to sort pods in the scheduling queue.
+// It returns true if podInfo1 should be scheduled before podInfo2.
+// We sort by duration (longest first) to implement Longest Processing Time (LPT) heuristic.
+func (s *Chronos) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
+	// Priority 1: Respect existing pod priorities (higher priority first)
+	if podInfo1.Pod.Spec.Priority != nil && podInfo2.Pod.Spec.Priority != nil {
+		if *podInfo1.Pod.Spec.Priority != *podInfo2.Pod.Spec.Priority {
+			return *podInfo1.Pod.Spec.Priority > *podInfo2.Pod.Spec.Priority
+		}
+	} else if podInfo1.Pod.Spec.Priority != nil && podInfo2.Pod.Spec.Priority == nil {
+		return true // Pod with priority comes before pod without priority
+	} else if podInfo1.Pod.Spec.Priority == nil && podInfo2.Pod.Spec.Priority != nil {
+		return false // Pod without priority comes after pod with priority
+	}
+
+	// Priority 2: Within same priority class, sort by duration (longest first)
+	duration1 := s.getPodDuration(podInfo1.Pod)
+	duration2 := s.getPodDuration(podInfo2.Pod)
+
+	if duration1 != duration2 {
+		return duration1 > duration2 // Longest job first (LPT heuristic)
+	}
+
+	// Priority 3: If durations are equal, fall back to creation time (FIFO)
+	return podInfo1.Pod.CreationTimestamp.Before(&podInfo2.Pod.CreationTimestamp)
+}
+
+// getPodDuration extracts and parses the duration annotation from a pod.
+// Returns 0 if annotation is missing or invalid.
+func (s *Chronos) getPodDuration(pod *v1.Pod) int64 {
+	durationStr, exists := pod.Annotations[JobDurationAnnotation]
+	if !exists {
+		return 0 // Pods without duration annotation get lowest priority
+	}
+
+	durationFloat, err := strconv.ParseFloat(durationStr, 64)
+	if err != nil {
+		klog.V(4).Infof("Invalid duration annotation for pod %s/%s: %s", pod.Namespace, pod.Name, durationStr)
+		return 0
+	}
+
+	return int64(math.Round(durationFloat))
 }
 
 // NormalizeScore is the key to making this work for jobs of any duration.

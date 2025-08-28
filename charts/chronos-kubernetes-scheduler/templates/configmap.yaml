@@ -12,7 +12,15 @@ data:
     profiles:
     - schedulerName: {{ .Values.scheduler.name }}
       plugins:
-        # Scoring plugins - hierarchical priority
+        {{- if .Values.scheduler.plugin.queueSort.enabled }}
+        # Queue sorting - custom duration-based ordering
+        queueSort:
+          enabled:
+          - name: {{ .Values.scheduler.plugin.name }}
+          disabled:
+          - name: "*"  # Disable default priority+FIFO queue sorting
+        {{- end }}
+        # Scoring plugins - hierarchical priority  
         score:
           enabled:
           - name: {{ .Values.scheduler.plugin.name }}

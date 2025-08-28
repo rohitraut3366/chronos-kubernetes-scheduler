@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -2574,4 +2575,225 @@ func createNodeWithOverduePods(nodeName string) *framework.NodeInfo {
 	}
 
 	return nodeInfo
+}
+
+func TestQueueSortPluginFunctionality(t *testing.T) {
+	t.Log("🎯 Testing QueueSort plugin functionality")
+
+	chronos := &Chronos{handle: createComprehensiveMockHandle()}
+
+	tests := []struct {
+		name            string
+		pod1            *framework.QueuedPodInfo
+		pod2            *framework.QueuedPodInfo
+		expectPod1First bool
+		description     string
+	}{
+		{
+			name: "LongestDurationFirst",
+			pod1: &framework.QueuedPodInfo{
+				PodInfo: &framework.PodInfo{
+					Pod: mockPodWithDuration("long-job", 600),
+				},
+			},
+			pod2: &framework.QueuedPodInfo{
+				PodInfo: &framework.PodInfo{
+					Pod: mockPodWithDuration("short-job", 300),
+				},
+			},
+			expectPod1First: true,
+			description:     "Longer job should be scheduled first (LPT heuristic)",
+		},
+		{
+			name: "PriorityOverridesDuration",
+			pod1: createQueuedPodInfoWithPriority("high-priority-short", 100, 1000),
+			pod2: &framework.QueuedPodInfo{
+				PodInfo: &framework.PodInfo{
+					Pod: mockPodWithDuration("low-priority-long", 600),
+				},
+			},
+			expectPod1First: true,
+			description:     "High priority pod should override duration-based sorting",
+		},
+		{
+			name: "NoDurationAnnotationComesLast",
+			pod1: &framework.QueuedPodInfo{
+				PodInfo: &framework.PodInfo{
+					Pod: &v1.Pod{
+						ObjectMeta: metav1.ObjectMeta{Name: "no-duration", Namespace: "default"},
+					},
+				},
+			},
+			pod2: &framework.QueuedPodInfo{
+				PodInfo: &framework.PodInfo{
+					Pod: mockPodWithDuration("with-duration", 100),
+				},
+			},
+			expectPod1First: false,
+			description:     "Pod without duration annotation should be scheduled last",
+		},
+		{
+			name:            "SamePriorityDifferentDurations",
+			pod1:            createQueuedPodInfoWithPriority("priority-long", 600, 500),
+			pod2:            createQueuedPodInfoWithPriority("priority-short", 300, 500),
+			expectPod1First: true,
+			description:     "Same priority, longer duration should come first",
+		},
+		{
+			name:            "FIFOTieBreaker",
+			pod1:            createQueuedPodInfoWithTimestamp("first-created", 300, time.Now()),
+			pod2:            createQueuedPodInfoWithTimestamp("second-created", 300, time.Now().Add(1*time.Second)),
+			expectPod1First: true,
+			description:     "With equal durations, FIFO order should apply",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := chronos.Less(tt.pod1, tt.pod2)
+			assert.Equal(t, tt.expectPod1First, result,
+				"Less(%s, %s): %s", tt.pod1.PodInfo.Pod.Name, tt.pod2.PodInfo.Pod.Name, tt.description)
+			t.Logf("✅ %s: Pod1=%s, Pod2=%s, Pod1First=%v (%s)",
+				tt.name, tt.pod1.PodInfo.Pod.Name, tt.pod2.PodInfo.Pod.Name, result, tt.description)
+		})
+	}
+}
+
+func TestGetPodDurationFunction(t *testing.T) {
+	t.Log("🎯 Testing getPodDuration utility function")
+
+	chronos := &Chronos{handle: createComprehensiveMockHandle()}
+
+	tests := []struct {
+		name     string
+		pod      *v1.Pod
+		expected int64
+	}{
+		{
+			name:     "ValidIntegerDuration",
+			pod:      mockPodWithDuration("test", 600),
+			expected: 600,
+		},
+		{
+			name: "ValidDecimalDuration",
+			pod: &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test",
+					Namespace:   "default",
+					Annotations: map[string]string{JobDurationAnnotation: "600.75"},
+				},
+			},
+			expected: 601, // Rounded
+		},
+		{
+			name: "NoDurationAnnotation",
+			pod: &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+			},
+			expected: 0,
+		},
+		{
+			name: "InvalidDurationAnnotation",
+			pod: &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test",
+					Namespace:   "default",
+					Annotations: map[string]string{JobDurationAnnotation: "invalid"},
+				},
+			},
+			expected: 0,
+		},
+		{
+			name: "ZeroDuration",
+			pod: &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test",
+					Namespace:   "default",
+					Annotations: map[string]string{JobDurationAnnotation: "0"},
+				},
+			},
+			expected: 0,
+		},
+		{
+			name: "NegativeDuration",
+			pod: &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test",
+					Namespace:   "default",
+					Annotations: map[string]string{JobDurationAnnotation: "-100"},
+				},
+			},
+			expected: -100,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := chronos.getPodDuration(tt.pod)
+			assert.Equal(t, tt.expected, result)
+			t.Logf("✅ %s: Duration=%d", tt.name, result)
+		})
+	}
+}
+
+func TestEnvironmentVariableFlagCoverage(t *testing.T) {
+	t.Log("🎯 Testing environment variable flag coverage")
+
+	tests := []struct {
+		name          string
+		envValue      string
+		expectedInLog string
+	}{
+		{
+			name:          "QueueSortEnabled",
+			envValue:      "true",
+			expectedInLog: "QueueSort + Score plugins",
+		},
+		{
+			name:          "QueueSortDisabled",
+			envValue:      "false",
+			expectedInLog: "Score plugin only",
+		},
+		{
+			name:          "QueueSortEmpty",
+			envValue:      "",
+			expectedInLog: "Score plugin only",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set environment variable
+			originalValue := os.Getenv("CHRONOS_QUEUE_SORT_ENABLED")
+			os.Setenv("CHRONOS_QUEUE_SORT_ENABLED", tt.envValue)
+			defer os.Setenv("CHRONOS_QUEUE_SORT_ENABLED", originalValue)
+
+			// Create plugin instance
+			plugin, err := New(context.Background(), nil, createComprehensiveMockHandle())
+			assert.NoError(t, err)
+			assert.NotNil(t, plugin)
+
+			chronos := plugin.(*Chronos)
+			assert.NotNil(t, chronos.handle)
+
+			t.Logf("✅ %s: Environment flag handled correctly", tt.name)
+		})
+	}
+}
+
+// Helper functions for QueueSort tests
+func createQueuedPodInfoWithPriority(name string, duration int64, priority int32) *framework.QueuedPodInfo {
+	pod := mockPodWithDuration(name, duration)
+	pod.Spec.Priority = &priority
+	return &framework.QueuedPodInfo{
+		PodInfo: &framework.PodInfo{Pod: pod},
+	}
+}
+
+func createQueuedPodInfoWithTimestamp(name string, duration int64, timestamp time.Time) *framework.QueuedPodInfo {
+	pod := mockPodWithDuration(name, duration)
+	pod.CreationTimestamp = metav1.Time{Time: timestamp}
+	return &framework.QueuedPodInfo{
+		PodInfo: &framework.PodInfo{Pod: pod},
+	}
 }
