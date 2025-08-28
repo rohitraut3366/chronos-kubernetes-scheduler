@@ -65,17 +65,29 @@ var (
 		Name: "chronos_cache_reliability_total",
 		Help: "Cache reliability events (hits, misses, fallbacks).",
 	}, []string{"event_type"}) // "cache_hit", "cache_miss", "api_fallback_success", "api_fallback_failed"
+
+	// COOLDOWN: Metrics for failed pod cooldown system
+	cooldownResetCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "chronos_cooldown_resets_total",
+		Help: "Number of failed pods reset after cooldown period",
+	})
+	cooldownActiveGauge = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "chronos_pods_in_cooldown",
+		Help: "Number of pods currently in cooldown period",
+	})
 )
 
 const (
 	DefaultBatchIntervalSeconds   = 5
 	DefaultBatchSizeLimit         = 100
-	DefaultMaxUnscheduledAttempts = 12
+	DefaultMaxUnscheduledAttempts = 24  // 24 × 5s = 2 minutes before marking as failed
+	DefaultCooldownSeconds        = 120 // 2 minutes cooldown before reconsidering failed pods
 
-	ScheduledByBatchLabelKey         = "scheduled-by-batch"
-	ChronosBatchFailedLabelKey       = "chronos-batch-failed"
-	UnscheduledAttemptsAnnotationKey = "chronos.scheduler/unscheduled-attempts"
-	BatchFailedReasonAnnotationKey   = "chronos.scheduler/batch-failed-reason"
+	ScheduledByBatchLabelKey          = "scheduled-by-batch"
+	ChronosBatchFailedLabelKey        = "chronos-batch-failed"
+	UnscheduledAttemptsAnnotationKey  = "chronos.scheduler/unscheduled-attempts"
+	BatchFailedReasonAnnotationKey    = "chronos.scheduler/batch-failed-reason"
+	BatchFailedTimestampAnnotationKey = "chronos.scheduler/failed-at" // NEW: Cooldown timestamp
 )
 
 // OPTIMIZATION: Structs for the new resource request cache
@@ -116,6 +128,7 @@ type BatchSchedulerConfig struct {
 	BatchIntervalSeconds   int
 	BatchSizeLimit         int
 	MaxUnscheduledAttempts int
+	CooldownSeconds        int // NEW: Cooldown period for failed pods
 }
 
 type BatchScheduler struct {
@@ -273,6 +286,7 @@ func loadBatchSchedulerConfig() BatchSchedulerConfig {
 		BatchIntervalSeconds:   DefaultBatchIntervalSeconds,
 		BatchSizeLimit:         DefaultBatchSizeLimit,
 		MaxUnscheduledAttempts: DefaultMaxUnscheduledAttempts,
+		CooldownSeconds:        DefaultCooldownSeconds,
 	}
 	if envVal := os.Getenv("BATCH_INTERVAL_SECONDS"); envVal != "" {
 		if val, err := strconv.Atoi(envVal); err == nil && val > 0 {
@@ -293,6 +307,13 @@ func loadBatchSchedulerConfig() BatchSchedulerConfig {
 			config.MaxUnscheduledAttempts = val
 		} else {
 			klog.Warningf("Invalid value for MAX_UNSCHEDULED_ATTEMPTS: %q. Using default: %d. Error: %v", envVal, DefaultMaxUnscheduledAttempts, err)
+		}
+	}
+	if envVal := os.Getenv("COOLDOWN_SECONDS"); envVal != "" {
+		if val, err := strconv.Atoi(envVal); err == nil && val >= 30 && val <= 900 {
+			config.CooldownSeconds = val
+		} else {
+			klog.Warningf("Invalid value for COOLDOWN_SECONDS: %q (must be 30-900). Using default: %d. Error: %v", envVal, DefaultCooldownSeconds, err)
 		}
 	}
 	return config
@@ -394,33 +415,114 @@ func (bs *BatchScheduler) processBatch() {
 	klog.V(2).Infof("✅ Batch completed. Scheduled: %d, Bind-Failed: %d, Unassigned: %d.", scheduledCount, len(bindFailedPods), len(unassignedPods))
 }
 
+// COOLDOWN: Enhanced fetchPendingPods with cooldown support for failed pods
 func (bs *BatchScheduler) fetchPendingPods() ([]*v1.Pod, error) {
+	// Fetch all pending pods that haven't been successfully scheduled by us yet.
+	// NOTE: We no longer filter out failed pods here - we'll handle cooldown logic manually
 	listOptions := metav1.ListOptions{
 		FieldSelector: fields.OneTermEqualSelector("status.phase", string(v1.PodPending)).String(),
-		LabelSelector: "!" + ScheduledByBatchLabelKey + "," + ChronosBatchFailedLabelKey + "!=true",
+		LabelSelector: "!" + ScheduledByBatchLabelKey,
 	}
 	podList, err := bs.clientset.CoreV1().Pods("").List(bs.ctx, listOptions)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pending pods: %v", err)
 	}
 
-	var unscheduledPods []*v1.Pod
+	var eligiblePods []*v1.Pod
+	var podsToReset []*v1.Pod
+	cooldownCount := 0
+
 	for i := range podList.Items {
 		pod := &podList.Items[i]
-		if pod.Spec.NodeName == "" {
-			if _, ok := pod.Annotations[JobDurationAnnotation]; ok {
-				unscheduledPods = append(unscheduledPods, pod)
+		if pod.Spec.NodeName != "" {
+			continue // Already has a node, ignore.
+		}
+
+		// Only consider pods with duration annotation
+		if _, ok := pod.Annotations[JobDurationAnnotation]; !ok {
+			continue
+		}
+
+		// Check if this pod has previously failed
+		if _, isFailed := pod.Labels[ChronosBatchFailedLabelKey]; isFailed {
+			// This pod has previously failed. Check if its cooldown has expired.
+			failedAtStr, hasTimestamp := pod.Annotations[BatchFailedTimestampAnnotationKey]
+			if !hasTimestamp {
+				cooldownCount++
+				continue // Should not happen, but ignore if it does.
 			}
+			failedAt, err := time.Parse(time.RFC3339, failedAtStr)
+			if err != nil {
+				cooldownCount++
+				continue // Ignore pods with malformed timestamps.
+			}
+
+			if time.Since(failedAt) > time.Duration(bs.config.CooldownSeconds)*time.Second {
+				// Cooldown has expired! This pod is now eligible for reconsideration.
+				klog.V(3).Infof("🔄 Pod %s/%s cooldown expired (%.1fs). Reconsidering for scheduling.",
+					pod.Namespace, pod.Name, time.Since(failedAt).Seconds())
+				podsToReset = append(podsToReset, pod)
+				eligiblePods = append(eligiblePods, pod)
+				cooldownResetCounter.Inc()
+			} else {
+				cooldownCount++
+			}
+		} else {
+			// This is a standard pending pod that has not failed before.
+			eligiblePods = append(eligiblePods, pod)
 		}
 	}
 
-	if len(unscheduledPods) > bs.config.BatchSizeLimit {
-		sort.Slice(unscheduledPods, func(i, j int) bool {
-			return unscheduledPods[i].CreationTimestamp.Time.Before(unscheduledPods[j].CreationTimestamp.Time)
-		})
-		unscheduledPods = unscheduledPods[:bs.config.BatchSizeLimit]
+	// Update cooldown metrics
+	cooldownActiveGauge.Set(float64(cooldownCount))
+
+	// Asynchronously reset the state of pods whose cooldown has expired.
+	if len(podsToReset) > 0 {
+		go bs.resetFailedPods(podsToReset)
 	}
-	return unscheduledPods, nil
+
+	// Apply batch size limit to the final list of eligible pods.
+	if len(eligiblePods) > bs.config.BatchSizeLimit {
+		sort.Slice(eligiblePods, func(i, j int) bool {
+			return eligiblePods[i].CreationTimestamp.Time.Before(eligiblePods[j].CreationTimestamp.Time)
+		})
+		eligiblePods = eligiblePods[:bs.config.BatchSizeLimit]
+	}
+	return eligiblePods, nil
+}
+
+// COOLDOWN: Asynchronously resets the labels and annotations of pods whose cooldown has expired
+func (bs *BatchScheduler) resetFailedPods(pods []*v1.Pod) {
+	var wg sync.WaitGroup
+	for _, pod := range pods {
+		wg.Add(1)
+		go func(p *v1.Pod) {
+			defer wg.Done()
+			latestPod, err := bs.clientset.CoreV1().Pods(p.Namespace).Get(bs.ctx, p.Name, metav1.GetOptions{})
+			if err != nil {
+				klog.Errorf("⚠️ Failed to get pod %s/%s for cooldown reset: %v", p.Namespace, p.Name, err)
+				return
+			}
+
+			// Remove the failure markers so it can be retried.
+			if latestPod.Labels != nil {
+				delete(latestPod.Labels, ChronosBatchFailedLabelKey)
+			}
+			if latestPod.Annotations != nil {
+				delete(latestPod.Annotations, UnscheduledAttemptsAnnotationKey)
+				delete(latestPod.Annotations, BatchFailedReasonAnnotationKey)
+				delete(latestPod.Annotations, BatchFailedTimestampAnnotationKey)
+			}
+
+			_, updateErr := bs.clientset.CoreV1().Pods(latestPod.Namespace).Update(bs.ctx, latestPod, metav1.UpdateOptions{})
+			if updateErr != nil {
+				klog.Errorf("⚠️ Failed to reset pod %s/%s after cooldown: %v", latestPod.Namespace, latestPod.Name, updateErr)
+			} else {
+				klog.V(3).Infof("✅ Successfully reset failed pod %s/%s for retry", latestPod.Namespace, latestPod.Name)
+			}
+		}(pod)
+	}
+	wg.Wait()
 }
 
 func (bs *BatchScheduler) analyzePods(pods []*v1.Pod) []PodSchedulingRequest {
@@ -519,8 +621,14 @@ func (bs *BatchScheduler) getAvailableNodesWithBackoff() ([]*v1.Node, error) {
 	return nil, fmt.Errorf("failed to get nodes from API after %d retries: %w", maxRetries, lastErr)
 }
 
-func (bs *BatchScheduler) getNodeStates(nodes []*v1.Node) map[string]*NodeState {
-	nodeStates := make(map[string]*NodeState)
+// PERFORMANCE: Enhanced NodeState with cached NodeInfo to eliminate redundant API calls
+type EnhancedNodeState struct {
+	*NodeState
+	NodeInfo *framework.NodeInfo // Cache the NodeInfo to avoid repeated API calls
+}
+
+func (bs *BatchScheduler) getNodeStates(nodes []*v1.Node) map[string]*EnhancedNodeState {
+	nodeStates := make(map[string]*EnhancedNodeState)
 	for _, node := range nodes {
 		nodeInfo, err := bs.handle.SnapshotSharedLister().NodeInfos().Get(node.Name)
 		if err != nil {
@@ -555,19 +663,22 @@ func (bs *BatchScheduler) getNodeStates(nodes []*v1.Node) map[string]*NodeState 
 			availableMemory = 0
 		}
 
-		nodeStates[node.Name] = &NodeState{
-			NodeName:            node.Name,
-			Node:                node,
-			CurrentMaxRemaining: bs.chronos.calculateMaxRemainingTimeOptimized(nodeInfo.Pods),
-			AvailableSlots:      availableSlots,
-			AvailableCPU:        availableCPU,
-			AvailableMemory:     availableMemory,
+		nodeStates[node.Name] = &EnhancedNodeState{
+			NodeState: &NodeState{
+				NodeName:            node.Name,
+				Node:                node,
+				CurrentMaxRemaining: bs.chronos.calculateMaxRemainingTimeOptimized(nodeInfo.Pods),
+				AvailableSlots:      availableSlots,
+				AvailableCPU:        availableCPU,
+				AvailableMemory:     availableMemory,
+			},
+			NodeInfo: nodeInfo, // PERFORMANCE: Cache NodeInfo to eliminate redundant API calls
 		}
 	}
 	return nodeStates
 }
 
-func (bs *BatchScheduler) optimizeBatchAssignment(requests []PodSchedulingRequest, nodeStates map[string]*NodeState) (map[string]*NodeAssignment, []*v1.Pod) {
+func (bs *BatchScheduler) optimizeBatchAssignment(requests []PodSchedulingRequest, nodeStates map[string]*EnhancedNodeState) (map[string]*NodeAssignment, []*v1.Pod) {
 	sort.Slice(requests, func(i, j int) bool {
 		prioI := 0
 		if requests[i].Pod.Spec.Priority != nil {
@@ -594,7 +705,8 @@ func (bs *BatchScheduler) optimizeBatchAssignment(requests []PodSchedulingReques
 		bestNodeName := ""
 		bestScore := int64(math.MinInt64)
 
-		for name, state := range nodeStates {
+		for name, enhancedState := range nodeStates {
+			state := enhancedState.NodeState
 			if state.AvailableSlots <= 0 || state.AvailableCPU < podRequestCPU || state.AvailableMemory < podRequestMemory {
 				continue
 			}
@@ -605,8 +717,8 @@ func (bs *BatchScheduler) optimizeBatchAssignment(requests []PodSchedulingReques
 				continue
 			}
 
-			nodeInfo, _ := bs.handle.SnapshotSharedLister().NodeInfos().Get(name)
-			score := bs.chronos.CalculateOptimizedScore(req.Pod, nodeInfo, state.CurrentMaxRemaining, req.ExpectedDuration)
+			// PERFORMANCE: Use cached NodeInfo instead of redundant API call
+			score := bs.chronos.CalculateOptimizedScore(req.Pod, enhancedState.NodeInfo, state.CurrentMaxRemaining, req.ExpectedDuration)
 			if score > bestScore {
 				bestScore = score
 				bestNodeName = name
@@ -620,7 +732,8 @@ func (bs *BatchScheduler) optimizeBatchAssignment(requests []PodSchedulingReques
 			assignments[bestNodeName].Pods = append(assignments[bestNodeName].Pods, req.Pod)
 			assignedPods[req.Pod.Name] = true
 
-			state := nodeStates[bestNodeName]
+			enhancedState := nodeStates[bestNodeName]
+			state := enhancedState.NodeState
 			state.AvailableSlots--
 			state.AvailableCPU -= podRequestCPU
 			state.AvailableMemory -= podRequestMemory
@@ -684,17 +797,27 @@ func (bs *BatchScheduler) checkForUnsatisfiablePods(unassignedPods []*v1.Pod, no
 	}
 }
 
+// CONCURRENCY: Rate-limited pod binding to prevent API server overload
 func (bs *BatchScheduler) executeAssignments(assignments map[string]*NodeAssignment) (uint64, []*v1.Pod) {
 	var scheduledCount atomic.Uint64
 	var failedPods []*v1.Pod
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
+	// PERFORMANCE: Semaphore for bind concurrency control (max 30 concurrent bindings)
+	const maxConcurrentBinds = 30
+	bindSemaphore := make(chan struct{}, maxConcurrentBinds)
+
 	for _, assignment := range assignments {
 		for _, pod := range assignment.Pods {
 			wg.Add(1)
 			go func(p *v1.Pod, nodeName string) {
 				defer wg.Done()
+
+				// CONCURRENCY: Acquire semaphore slot before binding
+				bindSemaphore <- struct{}{}
+				defer func() { <-bindSemaphore }()
+
 				binding := &v1.Binding{
 					ObjectMeta: metav1.ObjectMeta{Name: p.Name, Namespace: p.Namespace},
 					Target:     v1.ObjectReference{Kind: "Node", Name: nodeName},
@@ -769,6 +892,8 @@ func (bs *BatchScheduler) handleUnscheduledPods(pods []*v1.Pod) {
 				}
 				latestPod.Labels[ChronosBatchFailedLabelKey] = "true"
 				latestPod.Annotations[BatchFailedReasonAnnotationKey] = fmt.Sprintf("Pod failed to schedule after %d attempts", attempts)
+				// COOLDOWN: Add the failure timestamp to start the cooldown period
+				latestPod.Annotations[BatchFailedTimestampAnnotationKey] = time.Now().Format(time.RFC3339)
 			} else {
 				latestPod.Annotations[UnscheduledAttemptsAnnotationKey] = strconv.Itoa(attempts)
 				klog.V(3).Infof("🔄 pod %s/%s unscheduled, attempt %d/%d.",

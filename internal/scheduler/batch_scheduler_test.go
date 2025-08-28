@@ -1331,14 +1331,17 @@ func TestOptimizeBatchAssignment_ResourceConstraints(t *testing.T) {
 		requests := []PodSchedulingRequest{{Pod: pod, ExpectedDuration: 300}}
 
 		// Create node state with zero available slots
-		nodeStates := map[string]*NodeState{
+		nodeStates := map[string]*EnhancedNodeState{
 			"full-node": {
-				NodeName:            "full-node",
-				Node:                mockNodeForBatch("full-node", "8", "16Gi", 10),
-				CurrentMaxRemaining: 0,
-				AvailableSlots:      0, // Zero slots available
-				AvailableCPU:        8000,
-				AvailableMemory:     16384,
+				NodeState: &NodeState{
+					NodeName:            "full-node",
+					Node:                mockNodeForBatch("full-node", "8", "16Gi", 10),
+					CurrentMaxRemaining: 0,
+					AvailableSlots:      0, // Zero slots available
+					AvailableCPU:        8000,
+					AvailableMemory:     16384,
+				},
+				NodeInfo: &framework.NodeInfo{}, // Mock NodeInfo for test
 			},
 		}
 
@@ -1354,14 +1357,17 @@ func TestOptimizeBatchAssignment_ResourceConstraints(t *testing.T) {
 		requests := []PodSchedulingRequest{{Pod: pod, ExpectedDuration: 300}}
 
 		// Create node state with insufficient CPU
-		nodeStates := map[string]*NodeState{
+		nodeStates := map[string]*EnhancedNodeState{
 			"cpu-limited": {
-				NodeName:            "cpu-limited",
-				Node:                mockNodeForBatch("cpu-limited", "8", "16Gi", 10),
-				CurrentMaxRemaining: 0,
-				AvailableSlots:      5,
-				AvailableCPU:        8000, // Only 8 CPU available
-				AvailableMemory:     16384,
+				NodeState: &NodeState{
+					NodeName:            "cpu-limited",
+					Node:                mockNodeForBatch("cpu-limited", "8", "16Gi", 10),
+					CurrentMaxRemaining: 0,
+					AvailableSlots:      5,
+					AvailableCPU:        8000, // Only 8 CPU available
+					AvailableMemory:     16384,
+				},
+				NodeInfo: &framework.NodeInfo{}, // Mock NodeInfo for test
 			},
 		}
 
@@ -1377,14 +1383,17 @@ func TestOptimizeBatchAssignment_ResourceConstraints(t *testing.T) {
 		requests := []PodSchedulingRequest{{Pod: pod, ExpectedDuration: 300}}
 
 		// Create node state with insufficient memory
-		nodeStates := map[string]*NodeState{
+		nodeStates := map[string]*EnhancedNodeState{
 			"mem-limited": {
-				NodeName:            "mem-limited",
-				Node:                mockNodeForBatch("mem-limited", "8", "16Gi", 10),
-				CurrentMaxRemaining: 0,
-				AvailableSlots:      5,
-				AvailableCPU:        8000,
-				AvailableMemory:     16384, // Only 16Gi available
+				NodeState: &NodeState{
+					NodeName:            "mem-limited",
+					Node:                mockNodeForBatch("mem-limited", "8", "16Gi", 10),
+					CurrentMaxRemaining: 0,
+					AvailableSlots:      5,
+					AvailableCPU:        8000,
+					AvailableMemory:     16384, // Only 16Gi available
+				},
+				NodeInfo: &framework.NodeInfo{}, // Mock NodeInfo for test
 			},
 		}
 
@@ -2457,5 +2466,229 @@ func TestGracefulShutdown(t *testing.T) {
 
 		// Final state should be consistent
 		assert.False(t, bs.running, "Final state should be stopped")
+	})
+}
+
+// TestCooldownSystem tests the complete failed pod cooldown and recovery system
+func TestCooldownSystem(t *testing.T) {
+	t.Run("FailedPod_TimestampAdded", func(t *testing.T) {
+		clientset := fake.NewSimpleClientset()
+		handle := &mockFrameworkHandle{clientset: clientset}
+		chronos := &Chronos{}
+
+		bs := NewBatchScheduler(handle, chronos)
+		bs.config.MaxUnscheduledAttempts = 2 // Make it fail quickly
+
+		// Create a pod that will fail
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod",
+				Namespace: "default",
+				Annotations: map[string]string{
+					JobDurationAnnotation:            "300",
+					UnscheduledAttemptsAnnotationKey: "1", // One attempt already
+				},
+			},
+			Spec: v1.PodSpec{},
+		}
+		_, err := clientset.CoreV1().Pods("default").Create(context.TODO(), pod, metav1.CreateOptions{})
+		require.NoError(t, err)
+
+		// Handle unscheduled pods (should mark as failed)
+		bs.handleUnscheduledPods([]*v1.Pod{pod})
+		time.Sleep(50 * time.Millisecond) // Wait for goroutine
+
+		// Verify pod is marked as failed with timestamp
+		updatedPod, err := clientset.CoreV1().Pods("default").Get(context.TODO(), "test-pod", metav1.GetOptions{})
+		require.NoError(t, err)
+
+		assert.Equal(t, "true", updatedPod.Labels[ChronosBatchFailedLabelKey])
+		assert.Contains(t, updatedPod.Annotations, BatchFailedTimestampAnnotationKey)
+
+		// Verify timestamp format
+		failedAtStr := updatedPod.Annotations[BatchFailedTimestampAnnotationKey]
+		failedAt, err := time.Parse(time.RFC3339, failedAtStr)
+		assert.NoError(t, err)
+		assert.WithinDuration(t, time.Now(), failedAt, time.Minute)
+	})
+
+	t.Run("CooldownPeriod_PodFiltered", func(t *testing.T) {
+		clientset := fake.NewSimpleClientset()
+		handle := &mockFrameworkHandle{clientset: clientset}
+		chronos := &Chronos{}
+
+		bs := NewBatchScheduler(handle, chronos)
+		bs.config.CooldownSeconds = 300 // 5 minutes
+
+		// Create a recently failed pod
+		recentFailTime := time.Now().Add(-1 * time.Minute).Format(time.RFC3339)
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "failed-pod",
+				Namespace: "default",
+				Labels: map[string]string{
+					ChronosBatchFailedLabelKey: "true",
+				},
+				Annotations: map[string]string{
+					JobDurationAnnotation:             "300",
+					BatchFailedTimestampAnnotationKey: recentFailTime,
+					UnscheduledAttemptsAnnotationKey:  "24",
+				},
+			},
+			Spec:   v1.PodSpec{},
+			Status: v1.PodStatus{Phase: v1.PodPending},
+		}
+		_, err := clientset.CoreV1().Pods("default").Create(context.TODO(), pod, metav1.CreateOptions{})
+		require.NoError(t, err)
+
+		// Fetch pending pods (should not include the recently failed pod)
+		pods, err := bs.fetchPendingPods()
+		assert.NoError(t, err)
+		assert.Empty(t, pods) // Pod should be filtered out due to cooldown
+	})
+
+	t.Run("CooldownExpired_PodEligible", func(t *testing.T) {
+		clientset := fake.NewSimpleClientset()
+		handle := &mockFrameworkHandle{clientset: clientset}
+		chronos := &Chronos{}
+
+		bs := NewBatchScheduler(handle, chronos)
+		bs.config.CooldownSeconds = 60 // 1 minute
+
+		// Create a pod that failed more than cooldown period ago
+		expiredFailTime := time.Now().Add(-2 * time.Minute).Format(time.RFC3339)
+		pod := &v1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "expired-pod",
+				Namespace: "default",
+				Labels: map[string]string{
+					ChronosBatchFailedLabelKey: "true",
+				},
+				Annotations: map[string]string{
+					JobDurationAnnotation:             "300",
+					BatchFailedTimestampAnnotationKey: expiredFailTime,
+					UnscheduledAttemptsAnnotationKey:  "24",
+					BatchFailedReasonAnnotationKey:    "Test failure",
+				},
+			},
+			Spec:   v1.PodSpec{},
+			Status: v1.PodStatus{Phase: v1.PodPending},
+		}
+		_, err := clientset.CoreV1().Pods("default").Create(context.TODO(), pod, metav1.CreateOptions{})
+		require.NoError(t, err)
+
+		// Fetch pending pods (should include the expired pod and trigger reset)
+		pods, err := bs.fetchPendingPods()
+		assert.NoError(t, err)
+		assert.Len(t, pods, 1)
+		assert.Equal(t, "expired-pod", pods[0].Name)
+
+		// Allow time for the async reset operation
+		time.Sleep(100 * time.Millisecond)
+
+		// Verify the pod's failure markers have been cleared
+		resetPod, err := clientset.CoreV1().Pods("default").Get(context.TODO(), "expired-pod", metav1.GetOptions{})
+		require.NoError(t, err)
+
+		_, hasFailedLabel := resetPod.Labels[ChronosBatchFailedLabelKey]
+		assert.False(t, hasFailedLabel, "Failed label should be removed")
+
+		_, hasAttemptsAnnotation := resetPod.Annotations[UnscheduledAttemptsAnnotationKey]
+		assert.False(t, hasAttemptsAnnotation, "Attempts annotation should be removed")
+
+		_, hasTimestampAnnotation := resetPod.Annotations[BatchFailedTimestampAnnotationKey]
+		assert.False(t, hasTimestampAnnotation, "Timestamp annotation should be removed")
+	})
+
+	t.Run("ResetFailedPods_ConcurrentSafety", func(t *testing.T) {
+		clientset := fake.NewSimpleClientset()
+		handle := &mockFrameworkHandle{clientset: clientset}
+		chronos := &Chronos{}
+
+		bs := NewBatchScheduler(handle, chronos)
+
+		// Create multiple failed pods
+		var pods []*v1.Pod
+		for i := 0; i < 10; i++ {
+			pod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("reset-pod-%d", i),
+					Namespace: "default",
+					Labels: map[string]string{
+						ChronosBatchFailedLabelKey: "true",
+					},
+					Annotations: map[string]string{
+						BatchFailedTimestampAnnotationKey: time.Now().Format(time.RFC3339),
+						UnscheduledAttemptsAnnotationKey:  "24",
+					},
+				},
+				Spec: v1.PodSpec{},
+			}
+			_, err := clientset.CoreV1().Pods("default").Create(context.TODO(), pod, metav1.CreateOptions{})
+			require.NoError(t, err)
+			pods = append(pods, pod)
+		}
+
+		// Reset all pods concurrently
+		bs.resetFailedPods(pods)
+
+		// Verify all pods have been reset
+		for i := 0; i < 10; i++ {
+			resetPod, err := clientset.CoreV1().Pods("default").Get(context.TODO(), fmt.Sprintf("reset-pod-%d", i), metav1.GetOptions{})
+			require.NoError(t, err)
+
+			_, hasFailedLabel := resetPod.Labels[ChronosBatchFailedLabelKey]
+			assert.False(t, hasFailedLabel, "Pod %d should not have failed label", i)
+		}
+	})
+
+	t.Run("Config_CooldownValidation", func(t *testing.T) {
+		// Test valid cooldown values
+		os.Setenv("COOLDOWN_SECONDS", "180")
+		defer os.Unsetenv("COOLDOWN_SECONDS")
+
+		config := loadBatchSchedulerConfig()
+		assert.Equal(t, 180, config.CooldownSeconds)
+
+		// Test invalid values (should use default)
+		os.Setenv("COOLDOWN_SECONDS", "10") // Too low
+		config = loadBatchSchedulerConfig()
+		assert.Equal(t, DefaultCooldownSeconds, config.CooldownSeconds)
+
+		os.Setenv("COOLDOWN_SECONDS", "1000") // Too high (>15min)
+		config = loadBatchSchedulerConfig()
+		assert.Equal(t, DefaultCooldownSeconds, config.CooldownSeconds)
+
+		os.Setenv("COOLDOWN_SECONDS", "invalid")
+		config = loadBatchSchedulerConfig()
+		assert.Equal(t, DefaultCooldownSeconds, config.CooldownSeconds)
+
+		// Test boundary values
+		os.Setenv("COOLDOWN_SECONDS", "30") // Minimum valid
+		config = loadBatchSchedulerConfig()
+		assert.Equal(t, 30, config.CooldownSeconds)
+
+		os.Setenv("COOLDOWN_SECONDS", "900") // Maximum valid (15 minutes)
+		config = loadBatchSchedulerConfig()
+		assert.Equal(t, 900, config.CooldownSeconds)
+
+		os.Unsetenv("COOLDOWN_SECONDS")
+	})
+
+	t.Run("ImprovedDefaults_Validation", func(t *testing.T) {
+		config := loadBatchSchedulerConfig()
+
+		// Verify improved defaults
+		assert.Equal(t, 24, config.MaxUnscheduledAttempts, "Should be 24 attempts (2 minutes at 5s intervals)")
+		assert.Equal(t, 120, config.CooldownSeconds, "Should be 120 seconds (2 minutes cooldown)")
+		assert.Equal(t, 5, config.BatchIntervalSeconds, "Should keep 5 seconds for responsiveness")
+
+		// Validate timing calculation
+		failureTime := config.MaxUnscheduledAttempts * config.BatchIntervalSeconds
+		assert.Equal(t, 120, failureTime, "Should take 2 minutes to mark as failed (24 * 5 = 120 seconds)")
+
+		// Validate cooldown range
+		assert.GreaterOrEqual(t, config.CooldownSeconds, 30, "Cooldown should be at least 30 seconds")
+		assert.LessOrEqual(t, config.CooldownSeconds, 900, "Cooldown should be at most 15 minutes (900s)")
 	})
 }
