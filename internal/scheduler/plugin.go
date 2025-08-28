@@ -234,6 +234,9 @@ func (s *Chronos) ScoreExtensions() framework.ScoreExtensions {
 // It returns true if podInfo1 should be scheduled before podInfo2.
 // We sort by duration (longest first) to implement Longest Processing Time (LPT) heuristic.
 func (s *Chronos) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
+	// Add visible logging to confirm this function is being called
+	klog.V(4).Infof("🎯 QueueSort: Comparing pods %s vs %s", podInfo1.Pod.Name, podInfo2.Pod.Name)
+
 	// Extract priority values for logging
 	var priority1, priority2 int32
 	if podInfo1.Pod.Spec.Priority != nil {
@@ -301,6 +304,7 @@ func (s *Chronos) getPodDuration(pod *v1.Pod) int64 {
 	durationStr, exists := pod.Annotations[JobDurationAnnotation]
 	if !exists {
 		// Pods without the annotation are given the lowest possible rank.
+		klog.V(4).Infof("🔍 getPodDuration: Pod %s has NO duration annotation, returning -1", pod.Name)
 		return -1
 	}
 
@@ -308,10 +312,13 @@ func (s *Chronos) getPodDuration(pod *v1.Pod) int64 {
 	if err != nil {
 		klog.V(4).Infof("Invalid duration annotation for pod %s/%s: %s", pod.Namespace, pod.Name, durationStr)
 		// Malformed annotations are also ranked last.
+		klog.V(4).Infof("🔍 getPodDuration: Pod %s has INVALID duration annotation '%s', returning -1", pod.Name, durationStr)
 		return -1
 	}
 
-	return int64(math.Round(durationFloat))
+	duration := int64(math.Round(durationFloat))
+	klog.V(4).Infof("🔍 getPodDuration: Pod %s has VALID duration annotation '%s' = %d seconds", pod.Name, durationStr, duration)
+	return duration
 }
 
 // NormalizeScore is the key to making this work for jobs of any duration.
