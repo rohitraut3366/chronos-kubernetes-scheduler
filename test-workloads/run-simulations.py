@@ -326,30 +326,52 @@ spec:
         print("🔓 All nodes are now schedulable")
         return True
 
+    def _wait_for_all_pods_pending(self, pod_names: List[str], timeout: int = 60) -> bool:
+        """Wait for all pods to be in Pending state with verification-based approach."""
+        print(f"⏳ Waiting for all {len(pod_names)} pods to reach Pending state...")
+        
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            pending_count = 0
+            
+            for pod_name in pod_names:
+                output, code = self.kubectl(
+                    [
+                        "get",
+                        "pod",
+                        pod_name,
+                        "-n",
+                        self.namespace,
+                        "-o",
+                        "jsonpath={.status.phase}",
+                    ]
+                )
+                if code == 0 and output == "Pending":
+                    pending_count += 1
+            
+            print(f"📊 Pods in Pending state: {pending_count}/{len(pod_names)}")
+            
+            if pending_count == len(pod_names):
+                print("✅ All pods are now in Pending state (queued) - perfect!")
+                return True
+            
+            time.sleep(2)  # Check every 2 seconds
+        
+        print(f"❌ Timeout: Only {pending_count}/{len(pod_names)} pods reached Pending state")
+        return False
+
     def run_queuesort_scenario(
         self, scenario_name: str, scenario: Dict[str, Any]
     ) -> bool:
         """Runs a QueueSort test scenario using the reliable Node Cordoning method."""
-        use_cordon = self.exec_config.get("use_cordon_method", True)
-
         print("\n" + "=" * 80)
         print(f"🎯 Running QueueSort scenario: {scenario_name}")
         print(f"📝 Description: {scenario['description']}")
-
-        if use_cordon:
-            print("🚧 Using Node Cordoning method (100% reliable)")
-        else:
-            print("⚡ Using original rapid creation method")
+        print("🚧 Using Node Cordoning method (100% reliable)")
         print("=" * 80)
 
         pod_names = [p["name"] for p in scenario["test_pods"]]
-
-        if use_cordon:
-            return self._run_queuesort_with_cordon(scenario_name, scenario, pod_names)
-        else:
-            return self._run_queuesort_original_method(
-                scenario_name, scenario, pod_names
-            )
+        return self._run_queuesort_with_cordon(scenario_name, scenario, pod_names)
 
     def _run_queuesort_with_cordon(
         self, scenario_name: str, scenario: Dict[str, Any], pod_names: List[str]
@@ -379,34 +401,9 @@ spec:
                 burst_interval = self.exec_config.get("burst_creation_interval", 0.5)
                 time.sleep(burst_interval)
 
-            # 3. Verify all test pods are in Pending state (should be 100% since nodes are cordoned)
-            print(f"⏳ Verifying all {len(pod_names)} pods are in Pending state...")
-            time.sleep(2)  # Brief wait for pod creation to complete
-
-            pending_count = 0
-            for pod_name in pod_names:
-                output, code = self.kubectl(
-                    [
-                        "get",
-                        "pod",
-                        pod_name,
-                        "-n",
-                        self.namespace,
-                        "-o",
-                        "jsonpath={.status.phase}",
-                    ]
-                )
-                if code == 0 and output == "Pending":
-                    pending_count += 1
-
-            print(
-                f"✅ {pending_count}/{len(pod_names)} pods are in Pending state (queued)"
-            )
-
-            if pending_count < len(pod_names):
-                print(
-                    "⚠️ Expected all pods to be Pending with cordoned nodes - this may indicate an issue"
-                )
+            # 3. Wait for all test pods to reach Pending state (verification-based)
+            if not self._wait_for_all_pods_pending(pod_names):
+                return False
 
             # 4. Wait for QueueSort plugin to sort the queue
             queue_sort_wait = self.exec_config.get("queue_sort_wait_time", 3)
@@ -414,13 +411,6 @@ spec:
                 f"⏳ Waiting {queue_sort_wait}s for QueueSort plugin to sort the queue..."
             )
             time.sleep(queue_sort_wait)
-
-            # 5. Add a small delay before uncordoning to ensure queue is fully processed
-            uncordon_delay = self.exec_config.get("uncordon_delay", 2)
-            print(
-                f"⏳ Waiting {uncordon_delay}s before uncordoning to ensure queue processing..."
-            )
-            time.sleep(uncordon_delay)
 
             # 6. Uncordon all nodes to trigger scheduling from the sorted queue
             if not self.uncordon_all_nodes():
@@ -439,40 +429,6 @@ spec:
             # Always try to uncordon nodes in case of any errors
             print("🔄 Ensuring all nodes are uncordoned...")
             self.uncordon_all_nodes()
-
-    def _run_queuesort_original_method(
-        self, scenario_name: str, scenario: Dict[str, Any], pod_names: List[str]
-    ) -> bool:
-        """Run QueueSort scenario using the original rapid creation method."""
-
-        print("\n📋 Creating test pods in rapid sequence...")
-
-        for pod_config in scenario["test_pods"]:
-            duration = pod_config.get("duration")
-            priority = pod_config.get("priority")
-
-            if not self.create_queuesort_test_pod(
-                pod_config["name"], duration, priority
-            ):
-                return False
-
-            # Add a small delay to ensure distinct creation timestamps for FIFO ordering
-            burst_interval = self.exec_config.get("burst_creation_interval", 0.5)
-            time.sleep(burst_interval)
-
-        # Wait for QueueSort processing and scheduling
-        queue_sort_wait = self.exec_config.get("queue_sort_wait_time", 3)
-        print(f"⏳ Waiting {queue_sort_wait}s for QueueSort plugin to process queue...")
-        time.sleep(queue_sort_wait)
-
-        # Observe the actual scheduling order using precise event monitoring
-        timeout = self.exec_config["timeout"]
-        print(f"👀 Monitoring scheduling order for {timeout}s...")
-        actual_order = self.wait_for_multiple_pods_scheduled(pod_names, timeout)
-
-        return self._analyze_queuesort_results(
-            scenario, pod_names, actual_order, "Original Method"
-        )
 
     def _analyze_queuesort_results(
         self,
@@ -538,20 +494,12 @@ spec:
             print("3. Pods without duration annotation should be scheduled last")
             print("4. FIFO ordering should break ties")
 
-            if "Cordoning" in method:
-                print("\n🚧 Node Cordoning method ensures:")
-                print("- Eliminates race conditions completely")
-                print("- All pods guaranteed to be Pending simultaneously")
-                print("- No resource calculations needed")
-                print("- Uses Kubernetes built-in scheduling control")
-                print("- Most reliable method for QueueSort testing")
-            else:
-                print("\n⚡ Original method limitations:")
-                print("- May have race conditions if pods are scheduled immediately")
-                print("- Less reliable in fast scheduling environments")
-                print(
-                    "- Consider enabling 'use_cordon_method: true' for most reliable testing"
-                )
+            print("\n🚧 Node Cordoning method ensures:")
+            print("- Eliminates race conditions completely")
+            print("- All pods guaranteed to be Pending simultaneously")
+            print("- No resource calculations needed")
+            print("- Uses Kubernetes built-in scheduling control")
+            print("- 100% reliable method for QueueSort testing")
 
         return success
 

@@ -248,10 +248,7 @@ execution:
   queue_sort_wait_time: 3       # Wait time for QueueSort plugin to sort the queue
   max_burst_pods: 15            # Maximum number of pods in burst tests
   
-  # Node cordoning method settings (100% reliable QueueSort testing)
-  use_cordon_method: true       # Enable node cordoning method (most reliable)
-  cordon_timeout: 30            # Timeout for cordoning operations (seconds)
-  uncordon_delay: 2             # Delay before uncordoning to ensure queue processing
+  # QueueSort testing uses node cordoning (100% reliable method)
   
   # Logging and validation settings  
   enable_verbose_logging: true  # Enable v4+ logging for queue sort validation
