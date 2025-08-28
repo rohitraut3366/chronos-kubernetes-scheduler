@@ -1,5 +1,6 @@
 # Chronos Scheduler Simulation Test Cases
 # Tests bin-packing, extension minimization, and consolidation logic
+# Now includes both individual and batch scheduling scenarios
 
 scenarios:
   
@@ -124,12 +125,326 @@ scenarios:
           duration: 70
         # Max remaining: 70s (equal)
 
-# Test execution configuration - optimized for speed and reliability
+  # NEW: BATCH SCHEDULING SPECIFIC TESTS
+
+  # Test 7: Batch processing - multiple pods scheduled together
+  batch_processing_basic:
+    description: "Batch scheduling: Process multiple pods in single batch cycle"
+    batch_pods:
+      - name: "batch-job-1"
+        duration: 45
+        expected_node: "chronos-test-worker2"  
+      - name: "batch-job-2" 
+        duration: 60
+        expected_node: "chronos-test-worker3"
+      - name: "batch-job-3"
+        duration: 30
+        expected_node: "chronos-test-worker2"  # Should consolidate
+    setup_pods:
+      chronos-test-worker:
+        - name: "existing-load-1"
+          duration: 90
+      chronos-test-worker2:
+        - name: "existing-load-2"
+          duration: 60
+
+  # Test 8: Batch equivalence classes - pods with similar constraints
+  batch_equivalence_classes:
+    description: "Batch scheduling: Test equivalence class pre-filtering optimization"
+    batch_pods:
+      - name: "compute-job-1"
+        duration: 40
+        nodeSelector:
+          workload-type: "compute"
+        expected_node: "chronos-test-worker"
+      - name: "compute-job-2"  # Same equivalence class
+        duration: 35
+        nodeSelector:
+          workload-type: "compute"
+        expected_node: "chronos-test-worker"  # Should be pre-filtered to same nodes
+      - name: "memory-job-1"
+        duration: 50
+        nodeSelector:
+          workload-type: "memory"
+        expected_node: "chronos-test-worker2"
+    setup_pods: {}
+    node_labels:
+      chronos-test-worker:
+        workload-type: "compute"
+      chronos-test-worker2:
+        workload-type: "memory"
+      chronos-test-worker3:
+        workload-type: "compute"
+      chronos-test-worker4:
+        workload-type: "memory"
+
+  # Test 9: Priority-based batch sorting
+  batch_priority_sorting:
+    description: "Batch scheduling: High priority pods should be scheduled first"
+    batch_pods:
+      - name: "low-priority-job"
+        duration: 60
+        priority: 100
+        expected_order: 3  # Should be scheduled last
+      - name: "high-priority-job"
+        duration: 40
+        priority: 1000
+        expected_order: 1  # Should be scheduled first
+      - name: "medium-priority-job"
+        duration: 50
+        priority: 500
+        expected_order: 2
+    setup_pods: {}
+
+  # Test 10: Large batch processing - stress test
+  batch_stress_test:
+    description: "Batch scheduling: Handle larger batches efficiently"
+    large_batch_pods: 12  # Create 12 pods to test batch processing
+    pod_template:
+      duration_range: [20, 80]
+      resources:
+        cpu: "50m"
+        memory: "64Mi"
+    setup_pods:
+      chronos-test-worker:
+        - name: "baseline-1"
+          duration: 60
+      chronos-test-worker2:
+        - name: "baseline-2"
+          duration: 90
+
+  # Test 11: Mixed workload consolidation
+  batch_mixed_workloads:
+    description: "Batch scheduling: Mix of short and long jobs with optimal consolidation"
+    batch_pods:
+      - name: "short-job-1"
+        duration: 15
+        expected_node: "chronos-test-worker2"  # Should consolidate with longer jobs
+      - name: "long-job-1"
+        duration: 120
+        expected_node: "chronos-test-worker3"  # Should go to empty node
+      - name: "short-job-2"
+        duration: 20
+        expected_node: "chronos-test-worker2"  # Should consolidate
+      - name: "medium-job-1"
+        duration: 60
+        expected_node: "chronos-test-worker"
+    setup_pods:
+      chronos-test-worker:
+        - name: "existing-medium"
+          duration: 70
+      chronos-test-worker2:
+        - name: "existing-long"
+          duration: 100
+
+  # Test 12: Resource-aware batch scheduling
+  batch_resource_constraints:
+    description: "Batch scheduling: Respect CPU and memory constraints"
+    batch_pods:
+      - name: "cpu-intensive"
+        duration: 45
+        resources:
+          cpu: "500m"
+          memory: "128Mi"
+        expected_node: "chronos-test-worker"
+      - name: "memory-intensive"
+        duration: 50
+        resources:
+          cpu: "100m"
+          memory: "512Mi"
+        expected_node: "chronos-test-worker2"
+      - name: "light-workload"
+        duration: 30
+        resources:
+          cpu: "50m"
+          memory: "64Mi"
+        expected_node: "chronos-test-worker3"
+    setup_pods: {}
+
+  # Test 13: Single pod batch (backwards compatibility)
+  batch_single_pod:
+    description: "Batch scheduling: Single pod should work exactly like individual scheduling"
+    batch_pods:
+      - name: "single-batch-job"
+        duration: 45
+        expected_node: "chronos-test-worker2"  # Should use same logic as individual
+        expected_strategy: "BIN-PACKING"
+    setup_pods:
+      chronos-test-worker:
+        - name: "existing-job"
+          duration: 60
+      chronos-test-worker2:
+        - name: "existing-longer-job"
+          duration: 90
+
+  # Test 14: Node affinity in batch
+  batch_node_affinity:
+    description: "Batch scheduling: Respect node affinity rules"
+    batch_pods:
+      - name: "affinity-job-1"
+        duration: 40
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: "zone"
+                operator: In
+                values: ["zone-a"]
+        expected_node: "chronos-test-worker"
+      - name: "affinity-job-2"
+        duration: 35
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: "zone"
+                operator: In
+                values: ["zone-b"]
+        expected_node: "chronos-test-worker2"
+    setup_pods: {}
+    node_labels:
+      chronos-test-worker:
+        zone: "zone-a"
+      chronos-test-worker2:
+        zone: "zone-b"
+      chronos-test-worker3:
+        zone: "zone-a"
+      chronos-test-worker4:
+        zone: "zone-b"
+
+  # Test 15: Anti-affinity in batch
+  batch_pod_anti_affinity:
+    description: "Batch scheduling: Respect pod anti-affinity rules"
+    batch_pods:
+      - name: "anti-affinity-job-1"
+        duration: 40
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: "conflicting-app"
+            topologyKey: "kubernetes.io/hostname"
+        expected_node: "chronos-test-worker2"  # Should avoid worker with conflicting app
+      - name: "anti-affinity-job-2"
+        duration: 35
+        expected_node: "chronos-test-worker3"
+    setup_pods:
+      chronos-test-worker:
+        - name: "conflicting-pod"
+          duration: 60
+          labels:
+            app: "conflicting-app"
+
+  # Test 16: Batch with tolerations
+  batch_tolerations:
+    description: "Batch scheduling: Handle node taints and pod tolerations"
+    batch_pods:
+      - name: "tolerant-job-1"
+        duration: 40
+        tolerations:
+        - key: "special-workload"
+          operator: "Equal"
+          value: "gpu"
+          effect: "NoSchedule"
+        expected_node: "chronos-test-worker"  # Should tolerate taint
+      - name: "normal-job-1"
+        duration: 35
+        expected_node: "chronos-test-worker2"  # Should avoid tainted node
+    setup_pods: {}
+    node_taints:
+      chronos-test-worker:
+        - key: "special-workload"
+          value: "gpu"
+          effect: "NoSchedule"
+
+  # Test 17: Extension vs bin-packing in batch
+  batch_extension_vs_binpacking:
+    description: "Batch scheduling: Mix of jobs that fit vs extend node completion times"
+    batch_pods:
+      - name: "fits-job-1"
+        duration: 30  # Should bin-pack into worker2 (fits in 80s)
+        expected_node: "chronos-test-worker2"
+        expected_strategy: "BIN-PACKING"
+      - name: "extends-job-1"
+        duration: 100  # Should extend worker (60s -> 100s = 40s extension)
+        expected_node: "chronos-test-worker"
+        expected_strategy: "EXTENSION"
+      - name: "fits-job-2"
+        duration: 25   # Should bin-pack with fits-job-1
+        expected_node: "chronos-test-worker2"
+        expected_strategy: "BIN-PACKING"
+    setup_pods:
+      chronos-test-worker:
+        - name: "short-existing"
+          duration: 60
+      chronos-test-worker2:
+        - name: "long-existing"
+          duration: 80
+
+  # Test 18: Empty node penalty in batch
+  batch_empty_node_penalty:
+    description: "Batch scheduling: Prefer nodes with existing work over empty nodes"
+    batch_pods:
+      - name: "consolidation-job-1"
+        duration: 40
+        expected_node: "chronos-test-worker"  # Should prefer node with work
+      - name: "consolidation-job-2"
+        duration: 35
+        expected_node: "chronos-test-worker"  # Should consolidate
+      - name: "overflow-job-1"
+        duration: 50
+        expected_node: "chronos-test-worker2"  # Eventually use empty node
+    setup_pods:
+      chronos-test-worker:
+        - name: "existing-work"
+          duration: 60
+      # worker2, worker3, worker4: empty - should be deprioritized
+
+  # Test 19: Longest Processing Time (LPT) heuristic
+  batch_lpt_heuristic:
+    description: "Batch scheduling: Longer jobs should be scheduled first within same priority"
+    batch_pods:
+      - name: "short-job"
+        duration: 20
+        expected_order: 3  # Should be scheduled last (LPT = longest first)
+      - name: "long-job"
+        duration: 80
+        expected_order: 1  # Should be scheduled first
+      - name: "medium-job"
+        duration: 50
+        expected_order: 2  # Should be scheduled second
+    setup_pods: {}
+
+  # Test 20: Batch performance vs individual
+  batch_vs_individual_performance:
+    description: "Batch scheduling: Same result as individual for identical scenarios"
+    batch_pods:
+      - name: "performance-test-job"
+        duration: 45
+        expected_node: "chronos-test-worker2"  # Should match individual scheduling result
+        expected_strategy: "BIN-PACKING"
+    setup_pods:
+      chronos-test-worker:
+        - name: "load-1"
+          duration: 60
+      chronos-test-worker2:
+        - name: "load-2"
+          duration: 80
+    # This should produce the same result as bin_packing_perfect_fit test
+
+# Test execution configuration - optimized for comprehensive testing
 execution:
-  # Optimized wait times for fast and reliable testing
+  # Timing settings optimized for CI reliability
   setup_wait_time: 1     # Fast pod creation timing
   test_wait_time: 1      # Quick test pod scheduling  
-  timeout: 45            # Increased timeout for reliability in CI environments
+  timeout: 60            # Timeout for individual tests
   polling_interval: 1    # Fast polling for scheduling status
   cleanup_wait: 2        # Quick cleanup between tests
+  
+  # Batch scheduling settings
+  batch_wait_time: 8     # Wait for batch processing cycle
+  batch_timeout: 90      # Extended timeout for batch tests
+  
+  # Test environment
   namespace: "simulation-test"
+  expected_worker_nodes: 4           # Need 4 workers for comprehensive testing

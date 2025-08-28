@@ -57,6 +57,8 @@ jobs:
         - role: control-plane
         - role: worker
         - role: worker
+        - role: worker
+        - role: worker
         EOF
 
     - name: Build Docker image with caching
@@ -132,7 +134,7 @@ jobs:
         # Create namespace
         kubectl create namespace chronos-system
         
-        # Create integration test values
+        # Create integration test values with batch scheduling enabled
         cat > values-ci.yaml << 'HELM_VALUES'
         replicaCount: 1
         
@@ -150,14 +152,30 @@ jobs:
             name: Chronos
             weight: 100
             jobDurationAnnotation: "scheduling.workload.io/expected-duration-seconds"
+          # NEW: Enable batch scheduling with optimized settings for CI
+          env:
+            - name: CHRONOS_BATCH_MODE_ENABLED
+              value: "true"
+            - name: BATCH_INTERVAL_SECONDS
+              value: "5"
+            - name: BATCH_SIZE_LIMIT
+              value: "25"
+            - name: MAX_CONCURRENT_BINDS
+              value: "10"
+            - name: COOLDOWN_SECONDS
+              value: "30"
+            - name: BIND_TIMEOUT_SECONDS
+              value: "15"
+            - name: MAX_UNSCHEDULED_ATTEMPTS
+              value: "5"
         
         resources:
           requests:
             cpu: 50m
-            memory: 64Mi
+            memory: 128Mi  # Increased for batch processing
           limits:
             cpu: 200m
-            memory: 256Mi
+            memory: 512Mi  # Increased for resource caching
         
         # Add tolerations for any taints
         tolerations:
@@ -389,6 +407,12 @@ jobs:
         echo "=== SUCCESSFULLY BOUND LOGS FROM LEADER ==="
         kubectl logs -n chronos-system $LEADER_POD | grep "Successfully bound" || echo "No successful binding logs found"
         
+        echo "=== BATCH SCHEDULING LOGS FROM LEADER ==="
+        kubectl logs -n chronos-system $LEADER_POD | grep -E "(Starting batch|Batch completed|BatchScheduler)" || echo "No batch scheduling logs found"
+        
+        echo "=== RESOURCE CACHING LOGS FROM LEADER ==="
+        kubectl logs -n chronos-system $LEADER_POD | grep -E "(Cache|cache)" || echo "No resource caching logs found"
+        
         echo "=== TEST POD SCHEDULER VERIFICATION ==="
         for pod in $(kubectl get pods -n integration-test -o name); do
           POD_NAME=$(echo $pod | cut -d'/' -f2)
@@ -467,6 +491,20 @@ jobs:
         
         echo "🎉 All critical infrastructure checks passed!"
         echo "📊 Log metrics above are informational only and don't affect build status"
+        
+        echo "=== BATCH METRICS VALIDATION ==="
+        # Check if batch metrics are being exposed (non-blocking validation)
+        echo "🔍 Checking if batch scheduling metrics are exposed..."
+        SCHEDULER_POD_IP=$(kubectl get pod -n chronos-system $LEADER_POD -o jsonpath='{.status.podIP}')
+        if [ -n "$SCHEDULER_POD_IP" ]; then
+          echo "Scheduler pod IP: $SCHEDULER_POD_IP"
+          # Use a test pod to check metrics endpoint
+          kubectl run metrics-test --rm -i --restart=Never --image=alpine/curl:latest -- \
+            curl -s "http://$SCHEDULER_POD_IP:8080/metrics" | grep -E "(chronos_batch|chronos_resource_cache|chronos_scheduler_bind)" | head -10 || \
+            echo "ℹ️  Batch metrics not found yet (normal if no batch operations have occurred)"
+        else
+          echo "ℹ️  Could not determine scheduler pod IP for metrics validation"
+        fi
 
     - name: Cache Python dependencies
       uses: actions/cache@v4
@@ -511,16 +549,40 @@ jobs:
           echo "🔍 Recent scheduler logs for debugging:"
           kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=50
           
+          echo "🔍 Batch scheduling activity:"
+          kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler | grep -E "(Starting batch|Batch completed)" | tail -10
+          
           echo "🔍 Simulation namespace pods status:"
           kubectl get pods -n simulation-test -o wide || echo "No simulation pods found"
           
           echo "🔍 Recent events in simulation namespace:"
           kubectl get events -n simulation-test --sort-by='.lastTimestamp' | tail -20 || echo "No simulation events found"
           
+          echo "🔍 Batch metrics (if available):"
+          SCHEDULER_POD=$(kubectl get pods -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler -o jsonpath='{.items[0].metadata.name}')
+          SCHEDULER_POD_IP=$(kubectl get pod -n chronos-system $SCHEDULER_POD -o jsonpath='{.status.podIP}' 2>/dev/null)
+          if [ -n "$SCHEDULER_POD_IP" ]; then
+            kubectl run debug-metrics --rm -i --restart=Never --image=alpine/curl:latest -- \
+              curl -s "http://$SCHEDULER_POD_IP:8080/metrics" | grep chronos_batch || echo "No batch metrics found"
+          fi
+          
           exit $EXIT_CODE
         }
         
         echo "✅ Scheduler logic simulations completed successfully!"
+        
+        echo "=== POST-SIMULATION BATCH METRICS ==="
+        SCHEDULER_POD=$(kubectl get pods -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler -o jsonpath='{.items[0].metadata.name}')
+        SCHEDULER_POD_IP=$(kubectl get pod -n chronos-system $SCHEDULER_POD -o jsonpath='{.status.podIP}' 2>/dev/null)
+        if [ -n "$SCHEDULER_POD_IP" ]; then
+          echo "📊 Final batch scheduling metrics:"
+          kubectl run final-metrics --rm -i --restart=Never --image=alpine/curl:latest -- \
+            curl -s "http://$SCHEDULER_POD_IP:8080/metrics" | grep -E "chronos_(batch|resource_cache|scheduler_bind)_.*_total" | head -15 || \
+            echo "ℹ️  Metrics not available"
+        fi
+        
+        echo "🔍 Final batch scheduling activity summary:"
+        kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler | grep -E "(Starting batch|Batch completed)" | tail -5 || echo "No batch activity logged"
 
     - name: Cleanup
       if: always()
