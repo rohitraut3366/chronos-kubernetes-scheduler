@@ -2646,6 +2646,29 @@ func TestQueueSortPluginFunctionality(t *testing.T) {
 			expectPod1First: true,
 			description:     "With equal durations, FIFO order should apply",
 		},
+		{
+			name: "ExplicitZeroDurationBeforeNoDuration",
+			pod1: &framework.QueuedPodInfo{
+				PodInfo: &framework.PodInfo{
+					Pod: &v1.Pod{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:        "explicit-zero",
+							Namespace:   "default",
+							Annotations: map[string]string{JobDurationAnnotation: "0"},
+						},
+					},
+				},
+			},
+			pod2: &framework.QueuedPodInfo{
+				PodInfo: &framework.PodInfo{
+					Pod: &v1.Pod{
+						ObjectMeta: metav1.ObjectMeta{Name: "no-duration", Namespace: "default"},
+					},
+				},
+			},
+			expectPod1First: true,
+			description:     "Pod with explicit 0 duration should come before pod with missing annotation",
+		},
 	}
 
 	for _, tt := range tests {
@@ -2690,7 +2713,7 @@ func TestGetPodDurationFunction(t *testing.T) {
 			pod: &v1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
 			},
-			expected: 0,
+			expected: -1,
 		},
 		{
 			name: "InvalidDurationAnnotation",
@@ -2701,7 +2724,7 @@ func TestGetPodDurationFunction(t *testing.T) {
 					Annotations: map[string]string{JobDurationAnnotation: "invalid"},
 				},
 			},
-			expected: 0,
+			expected: -1,
 		},
 		{
 			name: "ZeroDuration",

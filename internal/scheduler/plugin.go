@@ -28,6 +28,12 @@ type Chronos struct {
 	handle framework.Handle
 }
 
+// Compile-time interface conformance checks
+var _ framework.Plugin = &Chronos{}
+var _ framework.QueueSortPlugin = &Chronos{}
+var _ framework.ScorePlugin = &Chronos{}
+var _ framework.ScoreExtensions = &Chronos{}
+
 // New initializes a new plugin and returns it.
 func New(ctx context.Context, _ runtime.Object, h framework.Handle) (framework.Plugin, error) {
 	chronos := &Chronos{
@@ -252,17 +258,19 @@ func (s *Chronos) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
 }
 
 // getPodDuration extracts and parses the duration annotation from a pod.
-// Returns 0 if annotation is missing or invalid.
+// Returns -1 if annotation is missing or invalid, ensuring these pods are sorted last.
 func (s *Chronos) getPodDuration(pod *v1.Pod) int64 {
 	durationStr, exists := pod.Annotations[JobDurationAnnotation]
 	if !exists {
-		return 0 // Pods without duration annotation get lowest priority
+		// Pods without the annotation are given the lowest possible rank.
+		return -1
 	}
 
 	durationFloat, err := strconv.ParseFloat(durationStr, 64)
 	if err != nil {
 		klog.V(4).Infof("Invalid duration annotation for pod %s/%s: %s", pod.Namespace, pod.Name, durationStr)
-		return 0
+		// Malformed annotations are also ranked last.
+		return -1
 	}
 
 	return int64(math.Round(durationFloat))
