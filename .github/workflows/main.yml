@@ -153,6 +153,10 @@ jobs:
             weight: 100
             jobDurationAnnotation: "scheduling.workload.io/expected-duration-seconds"
           # NEW: Enable batch scheduling with optimized settings for CI
+          batchMode:
+            enabled: true
+            intervalSeconds: 5
+            sizeLimit: 25
           env:
             - name: CHRONOS_BATCH_MODE_ENABLED
               value: "true"
