@@ -610,7 +610,7 @@ func (bs *BatchScheduler) resetFailedPods(pods []*v1.Pod) {
 			}
 
 			_, patchErr := bs.clientset.CoreV1().Pods(p.Namespace).Patch(
-				bs.ctx, p.Name, types.StrategicMergePatchType, patchBytes, metav1.PatchOptions{})
+				bs.ctx, p.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{})
 			if patchErr != nil {
 				klog.Errorf("⚠️ Failed to reset pod %s/%s after cooldown: %v", p.Namespace, p.Name, patchErr)
 			} else {
