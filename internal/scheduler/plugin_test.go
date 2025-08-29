@@ -3077,7 +3077,7 @@ func TestReservePluginFunctionality(t *testing.T) {
 				os.Setenv("CHRONOS_RESERVE_DELAY", tt.envValue)
 			}
 			defer os.Unsetenv("CHRONOS_RESERVE_DELAY") // Cleanup
-			
+
 			if tt.customDelaySeconds != "" {
 				os.Setenv("CHRONOS_RESERVE_DELAY_SECONDS", tt.customDelaySeconds)
 			}
@@ -3120,7 +3120,7 @@ func TestReservePluginFunctionality(t *testing.T) {
 						expectedSeconds = parsed
 					}
 				}
-				
+
 				// Should take at least the expected duration (with some tolerance for execution overhead)
 				minExpected := time.Duration(expectedSeconds*900) * time.Millisecond // 90% tolerance
 				if executionTime < minExpected {
