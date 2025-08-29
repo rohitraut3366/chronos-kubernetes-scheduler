@@ -3139,7 +3139,7 @@ func TestReservePluginFunctionality(t *testing.T) {
 				t.Errorf("❌ %s: Expected status %v, got %v", tt.name, tt.expectedStatus, status)
 			}
 
-						// Verify delay behavior
+			// Verify delay behavior
 			if tt.expectedDelay {
 				// Determine expected delay duration with security bounds
 				expectedSeconds := 2 // default
@@ -3154,7 +3154,7 @@ func TestReservePluginFunctionality(t *testing.T) {
 					}
 					// For invalid values, expectedSeconds remains default (2)
 				}
-				
+
 				// Should take at least the expected duration (with some tolerance for execution overhead)
 				minExpected := time.Duration(expectedSeconds*900) * time.Millisecond // 90% tolerance
 				if executionTime < minExpected {
