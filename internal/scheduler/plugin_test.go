@@ -29,9 +29,9 @@ import (
 // Test constants matching the actual scoring algorithm values
 const (
 	// Core scoring constants from CalculateOptimizedScore function
-	binPackingPriority = 1000000 // Highest priority: jobs that fit within existing windows
-	extensionPriority  = 100000  // Medium priority: jobs that extend commitments
-	emptyNodePriority  = 1000    // Lowest priority: empty nodes
+	BinPackingPriority = 1000000 // Highest priority: jobs that fit within existing windows
+	ExtensionPriority  = 100000  // Medium priority: jobs that extend commitments
+	EmptyNodePriority  = 1000    // Lowest priority: empty nodes
 )
 
 // =================================================================
@@ -268,14 +268,15 @@ func TestScoringScenarios(t *testing.T) {
 		t.Run(scenario.name, func(t *testing.T) {
 			t.Logf("🎯 %s", scenario.description)
 
-			// Calculate scores using mock helper
-			score1 := calculateMockScore(
+			// Calculate scores using mock helper with explicit type declarations
+			var score1, score2 int64
+			score1 = calculateMockScore(
 				scenario.newPodDuration,
 				scenario.node1RemainingTime,
 				scenario.node1PodCount,
 				scenario.node1Capacity,
 			)
-			score2 := calculateMockScore(
+			score2 = calculateMockScore(
 				scenario.newPodDuration,
 				scenario.node2RemainingTime,
 				scenario.node2PodCount,
@@ -642,7 +643,7 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		scoreLarge := plugin.CalculateOptimizedScore(testPodLarge, nodeInfoLarge, 300, 100)
 		// This is bin-packing case (100 <= 300), so Priority 1
 		// Pure time-based scoring: baseScore + consolidationBonus (no resource bonus)
-		expectedLarge := int64(binPackingPriority) + 300*100 // Pure time-based score
+		expectedLarge := int64(BinPackingPriority) + 300*100 // Pure time-based score
 		assert.Equal(t, expectedLarge, scoreLarge, "Large capacity bin-packing score (pure time-based)")
 
 		t.Logf("✅ Optimized score edge cases covered")
@@ -934,9 +935,7 @@ func TestMainEntryPoints(t *testing.T) {
 	// Test plugin initialization
 	t.Run("PluginInitialization", func(t *testing.T) {
 		plugin, err := New(context.Background(), nil, nil)
-		assert.NoError(t, err, "Plugin initialization should succeed")
-		assert.NotNil(t, plugin, "Plugin should not be nil")
-		assert.Equal(t, PluginName, plugin.Name(), "Plugin name should be correct")
+		assert.True(t, err == nil && plugin != nil && plugin.Name() == PluginName, "Plugin should initialize successfully with correct name")
 	})
 
 	// Test main Score function - simplified test that checks the optimized methods are called
@@ -975,10 +974,8 @@ func TestMainEntryPoints(t *testing.T) {
 		}
 
 		durationStr, ok := pod1.Annotations[JobDurationAnnotation]
-		assert.True(t, ok, "Should find duration annotation")
 		duration, err := strconv.ParseInt(durationStr, 10, 64)
-		assert.NoError(t, err, "Should parse duration correctly")
-		assert.Equal(t, int64(300), duration, "Duration should be 300 seconds")
+		assert.True(t, ok && err == nil && duration == 300, "Should find and parse duration annotation to 300 seconds")
 
 		// Test missing annotation
 		pod2 := &v1.Pod{
@@ -1235,21 +1232,21 @@ func TestCalculateOptimizedScore(t *testing.T) {
 			case "extension-utilization":
 				// Updated for new extension minimization priority: strong penalty for extension
 				extensionPenalty := (tc.newPodDuration - tc.maxRemainingTime) * 100 // Extension minimization dominates
-				expectedScore := int64(extensionPriority) - extensionPenalty        // Pure time-based score
+				expectedScore := int64(ExtensionPriority) - extensionPenalty        // Pure time-based score
 				assert.Equal(t, expectedScore, score, "Extension case should prioritize extension minimization")
-				assert.Greater(t, score, int64(emptyNodePriority), "Extension case should score higher than empty nodes")
+				assert.Greater(t, score, int64(EmptyNodePriority), "Extension case should score higher than empty nodes")
 
 			case "consolidation":
 				// Updated for new hierarchical scoring: bin-packing case (renamed from consolidation)
-				baseScore := int64(binPackingPriority)
+				baseScore := int64(BinPackingPriority)
 				consolidationBonus := tc.maxRemainingTime * 100
 				expectedTotal := baseScore + consolidationBonus // Pure time-based score
 				assert.Equal(t, expectedTotal, score, "Bin-packing case should use hierarchical scoring")
-				assert.Greater(t, score, int64(extensionPriority), "Bin-packing case should score highest")
+				assert.Greater(t, score, int64(ExtensionPriority), "Bin-packing case should score highest")
 
 			case "empty-penalty":
 				// Updated for new hierarchical scoring: empty node case
-				expectedScore := int64(emptyNodePriority) // Pure time-based score
+				expectedScore := int64(EmptyNodePriority) // Pure time-based score
 				assert.Equal(t, expectedScore, score, "Empty node should have lowest priority score")
 				// Empty nodes should have much lower scores than active nodes
 				assert.Less(t, score, int64(10000), "Empty penalty should be significantly lower")
@@ -1595,7 +1592,7 @@ func TestMaximumCoveragePush(t *testing.T) {
 				// With hierarchical scoring, even zero-slot nodes get base priority score
 				// This is bin-packing case (300 <= 400), so gets Priority 1 base score
 				// Node is 100% utilized (15 pods * 100m = 1500m used / 1500m total), ResourceScore = 0
-				expectedZeroSlot := int64(binPackingPriority) + 400*100 + 0*10 // ResourceScore = 0, so bonus = 0
+				expectedZeroSlot := int64(BinPackingPriority) + 400*100 + 0*10 // ResourceScore = 0, so bonus = 0
 				assert.Equal(t, expectedZeroSlot, score, "%s should get base bin-packing score with no resource bonus", tc.name)
 			}
 
@@ -1654,11 +1651,10 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			assert.True(t, hasAnnotation1, "Should find annotation")
 			assert.False(t, hasAnnotation2, "Should not find annotation")
 
-			// Test duration parsing
-			durationStr := podWithAnnotation.Annotations[JobDurationAnnotation]
-			validDuration, validErr := strconv.ParseInt(durationStr, 10, 64)
-			assert.NoError(t, validErr, "Valid duration should parse")
-			assert.Equal(t, int64(300), validDuration, "Duration should be 300")
+					// Test duration parsing with simplified error handling
+		durationStr := podWithAnnotation.Annotations[JobDurationAnnotation]
+		validDuration, validErr := strconv.ParseInt(durationStr, 10, 64)
+		assert.True(t, validErr == nil && validDuration == 300, "Valid duration should parse to 300")
 
 			invalidDurationStr := podWithInvalidAnnotation.Annotations[JobDurationAnnotation]
 			_, invalidErr := strconv.ParseInt(invalidDurationStr, 10, 64)
@@ -1868,7 +1864,7 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 					// Verify score ranges based on priority
 					switch scenario.expectedPriority {
 					case "bin-packing-fit":
-						assert.GreaterOrEqual(t, score, int64(binPackingPriority), "Bin-packing should have highest priority")
+						assert.GreaterOrEqual(t, score, int64(BinPackingPriority), "Bin-packing should have highest priority")
 					case "extension-minimization":
 						// Large extension jobs can have negative scores due to heavy penalties - this is correct
 						if scenario.name == "ExtensionLarge" {
@@ -1878,7 +1874,7 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 							assert.Less(t, score, int64(200000), "Extension should be less than bin-packing")
 						}
 					case "empty-node-penalty":
-						assert.GreaterOrEqual(t, score, int64(emptyNodePriority), "Empty node should have lowest priority")
+						assert.GreaterOrEqual(t, score, int64(EmptyNodePriority), "Empty node should have lowest priority")
 						assert.Less(t, score, int64(10000), "Empty node should be significantly lower")
 					}
 
