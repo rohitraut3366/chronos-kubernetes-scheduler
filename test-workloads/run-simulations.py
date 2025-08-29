@@ -535,11 +535,11 @@ spec:
     kubernetes.io/hostname: chronos-test-worker"""
         # If node_selector is "null", don't add any nodeSelector (pod can go to any node)
 
-        pod_yaml += """
+        pod_yaml += f"""
   containers:
   - name: worker
     image: alpine:latest
-    command: ["sh", "-c", f"echo 'QueueSort test pod {pod_name}'; sleep 3600"]
+    command: ["sh", "-c", "echo 'QueueSort test pod {pod_name}'; sleep 3600"]
     resources:
       requests:
         cpu: "100m"
@@ -1982,8 +1982,8 @@ spec:
                         passed += 1
                 elif scenario_name.startswith("score_"):
                     print(f"\n🔍 Detected Score scenario: {scenario_name}")
-                if self.run_scenario(scenario_name, scenario):
-                    passed += 1
+                    if self.run_scenario(scenario_name, scenario):
+                        passed += 1
                 else:
                     print(
                         f"\n⚠️ Skipping scenario {scenario_name}: Unknown type (must start with 'queuesort_' or 'score_')"
