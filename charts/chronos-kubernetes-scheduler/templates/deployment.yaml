@@ -58,7 +58,7 @@ spec:
       {{- end }}
       containers:
       - name: scheduler
-        image: "{{ .Values.global.imageRegistry | default .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        image: "{{ if or .Values.global.imageRegistry .Values.image.registry }}{{ .Values.global.imageRegistry | default .Values.image.registry }}/{{ end }}{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         command:
         - /scheduler

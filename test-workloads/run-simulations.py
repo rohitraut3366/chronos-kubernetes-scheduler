@@ -477,13 +477,13 @@ description: "Priority class for QueueSort testing"
                 output, code = self.kubectl(["apply", "-f", pod_file])
 
                 if code == 0:
-                    print(f"✅ Created pod {i+1}/{len(test_pods)}: {pod_name}")
+                    print(f"✅ Created pod {i+1}/{len(pods_to_create)}: {pod_name}")
                 else:
                     print(f"❌ Failed to create pod {pod_name}: {output}")
                     return False
 
                 # Wait 1 second between pod creations to ensure distinct timestamps
-                if i < len(test_pods) - 1:  # Don't wait after the last pod
+                if i < len(pods_to_create) - 1:  # Don't wait after the last pod
                     time.sleep(1)
 
             finally:
