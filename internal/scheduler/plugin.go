@@ -42,11 +42,19 @@ func New(ctx context.Context, _ runtime.Object, h framework.Handle) (framework.P
 	// Cache environment variable configurations during initialization
 	reserveDelayEnabled := os.Getenv("CHRONOS_RESERVE_DELAY") == "true"
 
-	// Parse configurable delay duration (default 2 seconds)
+	// Parse configurable delay duration (default 2 seconds, max 30 seconds)
 	reserveDelaySeconds := 2
+	const maxReserveDelaySeconds = 30
 	if envDelay := os.Getenv("CHRONOS_RESERVE_DELAY_SECONDS"); envDelay != "" {
 		if parsed, err := strconv.Atoi(envDelay); err == nil && parsed > 0 {
-			reserveDelaySeconds = parsed
+			if parsed > maxReserveDelaySeconds {
+				klog.Warningf("CHRONOS_RESERVE_DELAY_SECONDS (%d) exceeds maximum (%d); using maximum.", parsed, maxReserveDelaySeconds)
+				reserveDelaySeconds = maxReserveDelaySeconds
+			} else {
+				reserveDelaySeconds = parsed
+			}
+		} else {
+			klog.Warningf("Invalid value for CHRONOS_RESERVE_DELAY_SECONDS: %q; using default (%d)", envDelay, reserveDelaySeconds)
 		}
 	}
 
@@ -359,7 +367,7 @@ func (s *Chronos) NormalizeScore(ctx context.Context, state *framework.CycleStat
 // Reserve implements the Reserve plugin interface to force add delay to scheduling.
 // This ensures that QueueSort order is noticeable in scheduling order.
 // Set CHRONOS_RESERVE_DELAY=true to enable artificial delays for testing.
-// Set CHRONOS_RESERVE_DELAY_SECONDS=N to configure delay duration (default: 2 seconds).
+// Set CHRONOS_RESERVE_DELAY_SECONDS=N to configure delay duration (default: 2 seconds, max: 30 seconds).
 func (s *Chronos) Reserve(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) *framework.Status {
 	// Use cached configuration instead of reading environment variable every time
 	if !s.reserveDelayEnabled {

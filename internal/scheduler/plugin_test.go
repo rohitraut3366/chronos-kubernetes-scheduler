@@ -3062,6 +3062,38 @@ func TestReservePluginFunctionality(t *testing.T) {
 			expectedStatus:     nil,
 			description:        "Reserve should use custom 1s delay when CHRONOS_RESERVE_DELAY_SECONDS=1",
 		},
+		{
+			name:               "ReserveDelayMaxBound",
+			envValue:           "true",
+			customDelaySeconds: "30",
+			expectedDelay:      true,
+			expectedStatus:     nil,
+			description:        "Reserve should accept maximum delay of 30 seconds",
+		},
+		{
+			name:               "ReserveDelayExceedsMax",
+			envValue:           "true",
+			customDelaySeconds: "60",
+			expectedDelay:      true,
+			expectedStatus:     nil,
+			description:        "Reserve should cap delay at 30 seconds when CHRONOS_RESERVE_DELAY_SECONDS exceeds maximum",
+		},
+		{
+			name:               "ReserveDelayInvalidValue",
+			envValue:           "true",
+			customDelaySeconds: "invalid",
+			expectedDelay:      true,
+			expectedStatus:     nil,
+			description:        "Reserve should use default 2s delay when CHRONOS_RESERVE_DELAY_SECONDS is invalid",
+		},
+		{
+			name:               "ReserveDelayNegativeValue",
+			envValue:           "true",
+			customDelaySeconds: "-5",
+			expectedDelay:      true,
+			expectedStatus:     nil,
+			description:        "Reserve should use default 2s delay when CHRONOS_RESERVE_DELAY_SECONDS is negative",
+		},
 	}
 
 	for _, tt := range tests {
@@ -3107,22 +3139,28 @@ func TestReservePluginFunctionality(t *testing.T) {
 				t.Errorf("❌ %s: Expected status %v, got %v", tt.name, tt.expectedStatus, status)
 			}
 
-			// Verify delay behavior
+						// Verify delay behavior
 			if tt.expectedDelay {
-				// Determine expected delay duration
+				// Determine expected delay duration with security bounds
 				expectedSeconds := 2 // default
+				const maxReserveDelaySeconds = 30
 				if tt.customDelaySeconds != "" {
 					if parsed, err := strconv.Atoi(tt.customDelaySeconds); err == nil && parsed > 0 {
-						expectedSeconds = parsed
+						if parsed > maxReserveDelaySeconds {
+							expectedSeconds = maxReserveDelaySeconds // should be capped
+						} else {
+							expectedSeconds = parsed
+						}
 					}
+					// For invalid values, expectedSeconds remains default (2)
 				}
-
+				
 				// Should take at least the expected duration (with some tolerance for execution overhead)
 				minExpected := time.Duration(expectedSeconds*900) * time.Millisecond // 90% tolerance
 				if executionTime < minExpected {
 					t.Errorf("❌ %s: Expected delay of ~%ds, but execution took only %v", tt.name, expectedSeconds, executionTime)
 				}
-				t.Logf("✅ %s: Delay verified - execution took %v", tt.name, executionTime)
+				t.Logf("✅ %s: Delay verified - execution took %v (expected ~%ds)", tt.name, executionTime, expectedSeconds)
 			} else {
 				// Should be very fast (less than 100ms)
 				if executionTime > 100*time.Millisecond {
