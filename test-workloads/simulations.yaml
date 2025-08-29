@@ -227,8 +227,8 @@ scenarios:
 
 # Test execution configuration
 execution:
-  setup_wait_time: 2           # Wait for setup pods to start
-  test_wait_time: 3            # Wait before creating test pods
+  setup_wait_time: 10          # Wait for setup pods to start (increased for CI)
+  test_wait_time: 5            # Wait before creating test pods (increased for CI)
   timeout: 180                 # Max wait for pod scheduling
   polling_interval: 1          # How often to check pod status
   cleanup_wait: 3              # Wait between test cleanup

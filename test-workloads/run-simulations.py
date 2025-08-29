@@ -113,7 +113,7 @@ spec:
   containers:
   - name: worker
     image: busybox:latest
-    command: ["sh", "-c", f"echo 'Setup pod {pod_name} running for {duration}s on {target_node}'; sleep {duration}"]
+    command: ["sh", "-c", "echo 'Setup pod {pod_name} running for {duration}s on {target_node}'; sleep {duration}"]
     resources:
       requests:
         cpu: "100m"
