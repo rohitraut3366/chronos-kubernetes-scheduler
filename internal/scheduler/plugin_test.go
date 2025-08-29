@@ -1651,10 +1651,10 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			assert.True(t, hasAnnotation1, "Should find annotation")
 			assert.False(t, hasAnnotation2, "Should not find annotation")
 
-					// Test duration parsing with simplified error handling
-		durationStr := podWithAnnotation.Annotations[JobDurationAnnotation]
-		validDuration, validErr := strconv.ParseInt(durationStr, 10, 64)
-		assert.True(t, validErr == nil && validDuration == 300, "Valid duration should parse to 300")
+			// Test duration parsing with simplified error handling
+			durationStr := podWithAnnotation.Annotations[JobDurationAnnotation]
+			validDuration, validErr := strconv.ParseInt(durationStr, 10, 64)
+			assert.True(t, validErr == nil && validDuration == 300, "Valid duration should parse to 300")
 
 			invalidDurationStr := podWithInvalidAnnotation.Annotations[JobDurationAnnotation]
 			_, invalidErr := strconv.ParseInt(invalidDurationStr, 10, 64)
