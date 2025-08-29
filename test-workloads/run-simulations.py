@@ -21,13 +21,13 @@ class ChronosSimulator:
         self.kubeconfig = kubeconfig
         self.exec_config = self.config["execution"]
         self.namespace = self.exec_config["namespace"]
-
+        
     def kubectl(self, args: List[str]) -> tuple[str, int]:
         """Execute kubectl command and return output, exit_code"""
         cmd = ["kubectl"] + args
         if self.kubeconfig:
             cmd.extend(["--kubeconfig", self.kubeconfig])
-
+        
         # Uncomment for debugging: print(f"🔧 Running: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True)
         # Return both stdout and stderr combined for better error handling
@@ -35,7 +35,7 @@ class ChronosSimulator:
         if result.returncode != 0 and result.stderr.strip():
             output = result.stderr.strip()
         return output, result.returncode
-
+    
     def create_namespace(self):
         """Create test namespace"""
         print(f"📁 Creating namespace: {self.namespace}")
@@ -44,7 +44,7 @@ class ChronosSimulator:
             print(f"❌ Failed to create namespace: {output}")
             return False
         return True
-
+    
     def cleanup_namespace(self):
         """Clean up test namespace"""
         print(f"🧹 Cleaning up namespace: {self.namespace}")
@@ -79,7 +79,7 @@ class ChronosSimulator:
 
         cleanup_wait = self.exec_config.get("cleanup_wait", 2)  # Reduced from 5 to 2
         time.sleep(cleanup_wait)  # Wait for cleanup
-
+    
     def get_nodes(self) -> List[str]:
         """Get available worker nodes"""
         output, code = self.kubectl(
@@ -88,13 +88,13 @@ class ChronosSimulator:
         if code != 0:
             print(f"❌ Failed to get nodes: {output}")
             return []
-
+        
         nodes = output.split()
         # Filter out control-plane nodes
         worker_nodes = [node for node in nodes if "control-plane" not in node]
         print(f"📊 Available worker nodes: {worker_nodes}")
         return worker_nodes
-
+    
     def create_setup_pod(self, pod_name: str, duration: int, target_node: str) -> bool:
         """Create a pod with specific duration on target node"""
         pod_yaml = f"""
@@ -113,26 +113,26 @@ spec:
   containers:
   - name: worker
     image: busybox:latest
-    command: ["sh", "-c", "echo 'Setup pod {pod_name} running for {duration}s on {target_node}'; sleep {duration}"]
+    command: ["sh", "-c", f"echo 'Setup pod {pod_name} running for {duration}s on {target_node}'; sleep {duration}"]
     resources:
       requests:
         cpu: "100m"
         memory: "64Mi"
 """
-
+        
         # Write pod YAML to temp file
         with open(f"/tmp/{pod_name}.yaml", "w") as f:
             f.write(pod_yaml)
-
+        
         # Apply pod
         output, code = self.kubectl(["apply", "-f", f"/tmp/{pod_name}.yaml"])
         if code != 0:
             print(f"❌ Failed to create setup pod {pod_name}: {output}")
             return False
-
+            
         print(f"✅ Created setup pod: {pod_name} -> {target_node} ({duration}s)")
         return True
-
+    
     def create_test_pod(self, pod_name: str, duration: int) -> bool:
         """Create the test pod that will be scheduled by Chronos"""
         pod_yaml = f"""
@@ -149,24 +149,24 @@ spec:
   containers:
   - name: worker
     image: alpine:latest
-    command: ["sh", "-c", "echo 'Test pod {pod_name} running for {duration}s'; sleep {duration}"]
+    command: ["sh", "-c", f"echo 'Test pod {pod_name} running for {duration}s'; sleep {duration}"]
     resources:
       requests:
         cpu: "100m"
         memory: "64Mi"
 """
-
+        
         with open(f"/tmp/{pod_name}.yaml", "w") as f:
             f.write(pod_yaml)
-
+        
         output, code = self.kubectl(["apply", "-f", f"/tmp/{pod_name}.yaml"])
         if code != 0:
             print(f"❌ Failed to create test pod {pod_name}: {output}")
             return False
-
+            
         print(f"🎯 Created test pod: {pod_name} ({duration}s)")
         return True
-
+    
     def create_priority_class(
         self, priority_name: str, priority_value: int, is_default: bool = False
     ) -> bool:
@@ -539,7 +539,7 @@ spec:
   containers:
   - name: worker
     image: alpine:latest
-    command: ["sh", "-c", "echo 'QueueSort test pod {pod_name}'; sleep 3600"]
+    command: ["sh", "-c", f"echo 'QueueSort test pod {pod_name}'; sleep 3600"]
     resources:
       requests:
         cpu: "100m"
@@ -580,7 +580,7 @@ spec:
   containers:
   - name: worker
     image: alpine:latest
-    command: ["sh", "-c", "echo 'QueueSort test pod {pod_name} running'; sleep {duration or 30}"]
+    command: ["sh", "-c", f"echo 'QueueSort test pod {pod_name} running'; sleep {duration or 30}"]
     resources:
       requests:
         cpu: "100m" 
@@ -607,7 +607,7 @@ spec:
     ) -> Optional[str]:
         """Wait for pod to be scheduled and return the node name"""
         print(f"⏳ Waiting for pod {pod_name} to be scheduled...")
-
+        
         start_time = time.time()
         while time.time() - start_time < timeout:
             output, code = self.kubectl(
@@ -621,17 +621,17 @@ spec:
                     "jsonpath={.spec.nodeName}",
                 ]
             )
-
+            
             if code == 0 and output:
                 print(f"✅ Pod {pod_name} scheduled on: {output}")
                 return output
-
+                
             polling_interval = self.exec_config.get("polling_interval", 2)
             time.sleep(polling_interval)
-
+        
         print(f"❌ Timeout waiting for pod {pod_name} to be scheduled")
         return None
-
+    
     def wait_for_multiple_pods_scheduled_via_events(
         self, pod_names: List[str], timeout: int = 120
     ) -> List[str]:
@@ -1091,7 +1091,7 @@ spec:
                                 print(
                                     f"🔍 Found binding: {pod_part} at {timestamp_part}"
                                 )
-                        except (IndexError, ValueError) as e:
+                        except (IndexError, ValueError):
                             continue
 
             if binding_events:
@@ -1787,7 +1787,7 @@ spec:
 
         # Be lenient - if either principle is followed, consider it reasonable
         return duration_first or longer_first
-
+    
     def get_scheduler_logs(self, pod_name: str) -> str:
         """Get scheduler logs for the test pod"""
         # Find scheduler pod
@@ -1803,21 +1803,21 @@ spec:
                 "jsonpath={.items[0].metadata.name}",
             ]
         )
-
+        
         if code != 0 or not output:
             print("❌ Could not find scheduler pod")
             return ""
-
+        
         scheduler_pod = output
         print(f"📋 Getting logs from scheduler pod: {scheduler_pod}")
-
+        
         # Get logs containing our test pod
         output, code = self.kubectl(["logs", "-n", "chronos-system", scheduler_pod])
-
+        
         if code != 0:
             print(f"❌ Failed to get scheduler logs: {output}")
             return ""
-
+        
         # Filter logs for our test pod
         relevant_logs = []
         for line in output.split("\n"):
@@ -1825,9 +1825,9 @@ spec:
                 "CHRONOS_SCORE" in line or "Successfully bound" in line
             ):
                 relevant_logs.append(line)
-
+        
         return "\n".join(relevant_logs)
-
+    
     def analyze_scheduling_decision(
         self, logs: str, expected_node: str, expected_strategy: str
     ) -> Dict[str, Any]:
@@ -1838,10 +1838,10 @@ spec:
             "strategy_used": None,
             "success": False,
         }
-
+        
         # Parse CHRONOS_SCORE lines
         chronos_pattern = r"CHRONOS_SCORE: Pod=([^,]+), Node=([^,]+), Strategy=([^,]+), NewPodDuration=(\d+)s, maxRemainingTime=(\d+)s, ExtensionDuration=(\d+)s, CompletionTime=([^,]+), FinalScore=(-?\d+)"
-
+        
         for line in logs.split("\n"):
             match = re.search(chronos_pattern, line)
             if match:
@@ -1857,7 +1857,7 @@ spec:
                         "final_score": int(match.group(8)),
                     }
                 )
-
+        
         # Parse successful binding
         binding_pattern = (
             r'Successfully bound pod to node.*pod="([^"]+)".*node="([^"]+)"'
@@ -1866,22 +1866,22 @@ spec:
             match = re.search(binding_pattern, line)
             if match:
                 result["chosen_node"] = match.group(2)
-
+        
         # Determine if expectations were met
         if expected_node == "any":
             result["success"] = result["chosen_node"] is not None
         else:
             result["success"] = result["chosen_node"] == expected_node
-
+            
         return result
-
+    
     def run_scenario(self, scenario_name: str, scenario: Dict[str, Any]) -> bool:
         """Run a single test scenario"""
         print("\n" + "=" * 80)
         print(f"🎯 Running scenario: {scenario_name}")
         print(f"📝 Description: {scenario['description']}")
         print("=" * 80)
-
+        
         # Setup initial conditions
         print("\n📋 Setting up initial conditions...")
         for node, pods in scenario["setup_pods"].items():
@@ -1890,39 +1890,39 @@ spec:
                     pod_config["name"], pod_config["duration"], node
                 ):
                     return False
-
+        
         # Wait for setup pods to be running
         setup_wait = self.exec_config["setup_wait_time"]
         print(f"⏳ Waiting {setup_wait}s for setup pods to be running...")
         time.sleep(setup_wait)
-
+        
         # Create test pod
         new_pod = scenario["new_pod"]
         test_wait = self.exec_config["test_wait_time"]
         print(f"⏳ Waiting {test_wait}s before scheduling test pod...")
         time.sleep(test_wait)
-
+        
         if not self.create_test_pod(new_pod["name"], new_pod["duration"]):
             return False
-
+        
         # Wait for scheduling
         timeout = self.exec_config["timeout"]
         actual_node = self.wait_for_pod_scheduled(new_pod["name"], timeout)
         if not actual_node:
             return False
-
+        
         # Analyze results
         logs = self.get_scheduler_logs(new_pod["name"])
         analysis = self.analyze_scheduling_decision(
             logs, new_pod["expected_node"], new_pod["expected_strategy"]
         )
-
+        
         # Print results
         print("\n📊 RESULTS:")
         print(f"Expected node: {new_pod['expected_node']}")
         print(f"Actual node: {actual_node}")
         print(f"Expected strategy: {new_pod['expected_strategy']}")
-
+        
         if analysis["chronos_scores"]:
             print("\n🔍 CHRONOS_SCORE details:")
             for score in analysis["chronos_scores"]:
@@ -1932,13 +1932,13 @@ spec:
                 print(f"  Max remaining: {score['max_remaining_time']}s")
                 print(f"  Extension needed: {score['extension_duration']}s")
                 print()
-
+        
         success = analysis["success"]
         status = "✅ PASSED" if success else "❌ FAILED"
         print(f"\n{status}")
-
+        
         return success
-
+    
     def run_all_scenarios(self) -> bool:
         """Run all configured scenarios"""
         start_time = time.time()
@@ -1947,10 +1947,10 @@ spec:
         # Get overall execution timeout from config (in minutes, convert to seconds)
         overall_timeout = self.exec_config.get("overall_timeout_minutes", 10) * 60
         print(f"⏱️  Overall execution timeout: {overall_timeout // 60} minutes")
-
+        
         if not self.create_namespace():
             return False
-
+        
         # Ensure all nodes are uncordoned before starting tests (cleanup from previous runs)
         self._ensure_all_nodes_uncordoned()
 
@@ -1963,7 +1963,7 @@ spec:
         scenarios = self.config["scenarios"]
         passed = 0
         total = len(scenarios)
-
+        
         try:
             for scenario_name, scenario in scenarios.items():
                 # Check overall timeout
@@ -1982,13 +1982,13 @@ spec:
                         passed += 1
                 elif scenario_name.startswith("score_"):
                     print(f"\n🔍 Detected Score scenario: {scenario_name}")
-                    if self.run_scenario(scenario_name, scenario):
-                        passed += 1
+                if self.run_scenario(scenario_name, scenario):
+                    passed += 1
                 else:
                     print(
                         f"\n⚠️ Skipping scenario {scenario_name}: Unknown type (must start with 'queuesort_' or 'score_')"
                     )
-
+                
                 # Cleanup between scenarios
                 print(f"🧹 Cleaning up pods from scenario: {scenario_name}")
                 self.kubectl(
@@ -2007,40 +2007,40 @@ spec:
                     "cleanup_wait", 2
                 )  # Reduced from 5 to 2
                 time.sleep(cleanup_wait)
-
+                
         finally:
             self.cleanup_namespace()
-
+        
         print("\n" + "=" * 80)
         elapsed_time = time.time() - start_time
         print(f"🏁 SIMULATION RESULTS: {passed}/{total} scenarios passed")
         print(f"⏱️  Total execution time: {elapsed_time:.1f}s")
         print("=" * 80)
-
+        
         return passed == total
 
 
 if __name__ == "__main__":
     import argparse
-
+    
     parser = argparse.ArgumentParser(description="Run Chronos scheduler simulations")
     parser.add_argument(
         "--config", default="simulations.yaml", help="Simulation config file"
     )
     parser.add_argument("--kubeconfig", help="Path to kubeconfig file")
     parser.add_argument("--scenario", help="Run specific scenario only")
-
+    
     args = parser.parse_args()
-
+    
     simulator = ChronosSimulator(args.config, args.kubeconfig)
-
+    
     if args.scenario:
         # Run single scenario
         scenario = simulator.config["scenarios"].get(args.scenario)
         if not scenario:
             print(f"❌ Scenario '{args.scenario}' not found")
             sys.exit(1)
-
+            
         simulator.create_namespace()
 
         # Check scenario type based on name prefix

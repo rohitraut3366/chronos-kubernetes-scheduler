@@ -58,7 +58,7 @@ spec:
       {{- end }}
       containers:
       - name: scheduler
-        image: "{{ if or .Values.global.imageRegistry .Values.image.registry }}{{ .Values.global.imageRegistry | default .Values.image.registry }}/{{ end }}{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        image: "{{ include "chronos-kubernetes-scheduler.image" . }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         command:
         - /scheduler
