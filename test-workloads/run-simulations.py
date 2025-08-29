@@ -1725,7 +1725,7 @@ spec:
             for line in queue_logs[-20:]:  # Show last 20 relevant lines
                 print(f"  {line}")
                 # Count actual comparisons (lines with "Comparing pods")
-                if "🎯 QueueSort: Comparing pods" in line:
+                if "QueueSort: Comparing pods" in line:
                     comparison_count += 1
         else:
             print(
