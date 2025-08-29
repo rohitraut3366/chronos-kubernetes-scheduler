@@ -791,7 +791,7 @@ spec:
                 # Small delay to ensure cordoning takes effect
                 time.sleep(2)
         
-        print(f"\n🎯 ONE-BY-ONE scheduling completed!")
+        print("\n🎯 ONE-BY-ONE scheduling completed!")
         print(f"📊 Final order: {scheduled_order}")
         return scheduled_order
 
@@ -929,7 +929,7 @@ spec:
             # Check if we have all pods
             latest_pods = [binding[1] for binding in latest_bindings]
             if set(latest_pods) == set(pod_names):
-                print(f"📋 Found complete binding set in logs")
+                print("📋 Found complete binding set in logs")
                 return latest_pods
         
         print("⚠️ Could not find complete binding set in logs")
@@ -1087,7 +1087,7 @@ spec:
                     ordered_pods.append(pod_name)
                     seen_pods.add(pod_name)
             
-            print(f"✅ COMPLETE SCHEDULING ORDER from events:")
+            print("✅ COMPLETE SCHEDULING ORDER from events:")
             for i, pod_name in enumerate(ordered_pods):
                 matching_event = next(e for e in scheduled_events if e[1] == pod_name)
                 print(f"   {i+1}. {pod_name} at {matching_event[0]}")
@@ -1365,20 +1365,20 @@ spec:
         print(f"Creation Order:              {creation_order}")
         print(f"Expected Scheduling Order:   {expected_order}")
         print(f"Actual Scheduling Order:     {actual_order}")
-        print(f"\n🔍 QUEUESORT VERIFICATION:")
+        print("\n🔍 QUEUESORT VERIFICATION:")
         print(f"   QueueSort Comparisons:    {queue_sort_comparisons} (shows QueueSort is active)")
         print(f"   All Pods Scheduled:       {all_pods_scheduled} ({len(actual_order)}/{len(pod_names)} pods)")
         
         if success:
-            print(f"   ✅ QueueSort plugin is working correctly!")
-            print(f"   📝 Note: Final scheduling order may differ due to Kubernetes parallel processing")
+            print("   ✅ QueueSort plugin is working correctly!")
+            print("   📝 Note: Final scheduling order may differ due to Kubernetes parallel processing")
         else:
             if not queuesort_working:
-                print(f"   ❌ No QueueSort comparisons detected - plugin may not be active")
+                print("   ❌ No QueueSort comparisons detected - plugin may not be active")
             if not all_pods_scheduled:
                 print(f"   ❌ Not all pods were scheduled successfully ({len(actual_order)}/{len(pod_names)} pods)")
             if not exact_match and not first_pod_correct:
-                print(f"   ❌ Scheduling order doesn't match expected order from simulations.yaml")
+                print("   ❌ Scheduling order doesn't match expected order from simulations.yaml")
 
         # Show pod details for debugging
         print("\n🔍 POD DETAILS:")
@@ -1556,7 +1556,7 @@ spec:
             positions = [pos for _, pos in duration_with_pos]
             longer_first = positions == sorted(positions)
         
-        print(f"🔍 QUEUESORT ORDER VALIDATION:")
+        print("🔍 QUEUESORT ORDER VALIDATION:")
         print(f"   Duration pods scheduled first: {duration_first}")
         print(f"   Longer jobs scheduled earlier: {longer_first}")
         
