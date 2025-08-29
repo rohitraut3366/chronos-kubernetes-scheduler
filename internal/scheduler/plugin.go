@@ -25,7 +25,8 @@ const (
 // to optimize resource utilization and minimize cluster commitment extensions.
 // Implements both QueueSort (for duration-based ordering) and Score (for node selection).
 type Chronos struct {
-	handle framework.Handle
+	handle              framework.Handle
+	reserveDelayEnabled bool
 }
 
 // Compile-time interface conformance checks
@@ -37,8 +38,12 @@ var _ framework.ReservePlugin = &Chronos{}
 
 // New initializes a new plugin and returns it.
 func New(ctx context.Context, _ runtime.Object, h framework.Handle) (framework.Plugin, error) {
+	// Cache environment variable configurations during initialization
+	reserveDelayEnabled := os.Getenv("CHRONOS_RESERVE_DELAY") == "true"
+
 	chronos := &Chronos{
-		handle: h,
+		handle:              h,
+		reserveDelayEnabled: reserveDelayEnabled,
 	}
 
 	// Check if queue sort mode is enabled
@@ -47,6 +52,11 @@ func New(ctx context.Context, _ runtime.Object, h framework.Handle) (framework.P
 		klog.Infof("🚀 Chronos Scheduler initialized with QueueSort + Score plugins")
 	} else {
 		klog.Infof("📝 Chronos Scheduler initialized with Score plugin only (default FIFO queue)")
+	}
+
+	// Log reserve delay configuration
+	if reserveDelayEnabled {
+		klog.Infof("⏳ Reserve delay enabled for sequential scheduling (testing mode)")
 	}
 
 	return chronos, nil
@@ -340,9 +350,8 @@ func (s *Chronos) NormalizeScore(ctx context.Context, state *framework.CycleStat
 // This ensures that QueueSort order is noticeable in scheduling order.
 // Set CHRONOS_RESERVE_DELAY=true to enable artificial delays for testing.
 func (s *Chronos) Reserve(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) *framework.Status {
-	// Check if reserve delay is enabled
-	reserveDelayEnabled := os.Getenv("CHRONOS_RESERVE_DELAY")
-	if reserveDelayEnabled != "true" {
+	// Use cached configuration instead of reading environment variable every time
+	if !s.reserveDelayEnabled {
 		return nil // Skip delay if not enabled
 	}
 

@@ -3065,8 +3065,10 @@ func TestReservePluginFunctionality(t *testing.T) {
 			}
 			defer os.Unsetenv("CHRONOS_RESERVE_DELAY") // Cleanup
 
-			// Create plugin instance
-			plugin := &Chronos{}
+			// Create plugin instance using New() to properly initialize cached config
+			pluginInterface, err := New(context.Background(), nil, nil)
+			require.NoError(t, err)
+			plugin := pluginInterface.(*Chronos)
 
 			// Create test pod
 			pod := &v1.Pod{
@@ -3207,7 +3209,10 @@ func TestReserveUnreserveIntegration(t *testing.T) {
 			os.Setenv("CHRONOS_RESERVE_DELAY", tt.envValue)
 			defer os.Unsetenv("CHRONOS_RESERVE_DELAY")
 
-			plugin := &Chronos{}
+			// Create plugin instance using New() to properly initialize cached config
+			pluginInterface, err := New(context.Background(), nil, nil)
+			require.NoError(t, err)
+			plugin := pluginInterface.(*Chronos)
 			ctx := context.Background()
 			state := framework.NewCycleState()
 
@@ -3270,7 +3275,10 @@ func TestReservePluginInterfaceConformance(t *testing.T) {
 	// Verify that Chronos implements ReservePlugin interface
 	var _ framework.ReservePlugin = &Chronos{}
 
-	plugin := &Chronos{}
+	// Create plugin instance using New() to properly initialize cached config
+	pluginInterface, err := New(context.Background(), nil, nil)
+	require.NoError(t, err)
+	plugin := pluginInterface.(*Chronos)
 
 	// Test with nil values to ensure no panics
 	t.Run("NilContextHandling", func(t *testing.T) {
