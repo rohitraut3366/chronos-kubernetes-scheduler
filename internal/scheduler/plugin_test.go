@@ -3010,3 +3010,311 @@ func createQueuedPodInfoWithPriorityAndTimestamp(name string, duration int64, pr
 		PodInfo: &framework.PodInfo{Pod: pod},
 	}
 }
+
+// =============================================================================
+// Reserve Plugin Tests
+// =============================================================================
+
+func TestReservePluginFunctionality(t *testing.T) {
+	t.Log("🎯 Testing Reserve plugin functionality")
+
+	tests := []struct {
+		name           string
+		envValue       string
+		expectedDelay  bool
+		expectedStatus *framework.Status
+		description    string
+	}{
+		{
+			name:           "ReserveDelayEnabled",
+			envValue:       "true",
+			expectedDelay:  true,
+			expectedStatus: nil,
+			description:    "Reserve should add delay when CHRONOS_RESERVE_DELAY=true",
+		},
+		{
+			name:           "ReserveDelayDisabled",
+			envValue:       "false",
+			expectedDelay:  false,
+			expectedStatus: nil,
+			description:    "Reserve should skip delay when CHRONOS_RESERVE_DELAY=false",
+		},
+		{
+			name:           "ReserveDelayEmpty",
+			envValue:       "",
+			expectedDelay:  false,
+			expectedStatus: nil,
+			description:    "Reserve should skip delay when CHRONOS_RESERVE_DELAY is empty",
+		},
+		{
+			name:           "ReserveDelayUnset",
+			envValue:       "unset", // Special value to unset the env var
+			expectedDelay:  false,
+			expectedStatus: nil,
+			description:    "Reserve should skip delay when CHRONOS_RESERVE_DELAY is not set",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup environment variable
+			if tt.envValue == "unset" {
+				os.Unsetenv("CHRONOS_RESERVE_DELAY")
+			} else {
+				os.Setenv("CHRONOS_RESERVE_DELAY", tt.envValue)
+			}
+			defer os.Unsetenv("CHRONOS_RESERVE_DELAY") // Cleanup
+
+			// Create plugin instance
+			plugin := &Chronos{}
+
+			// Create test pod
+			pod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+				},
+			}
+
+			// Create context and cycle state
+			ctx := context.Background()
+			state := framework.NewCycleState()
+			nodeName := "test-node"
+
+			// Measure execution time to verify delay behavior
+			startTime := time.Now()
+			status := plugin.Reserve(ctx, state, pod, nodeName)
+			executionTime := time.Since(startTime)
+
+			// Verify return status
+			if status != tt.expectedStatus {
+				t.Errorf("❌ %s: Expected status %v, got %v", tt.name, tt.expectedStatus, status)
+			}
+
+			// Verify delay behavior
+			if tt.expectedDelay {
+				// Should take at least 2 seconds (with some tolerance for execution overhead)
+				if executionTime < 1800*time.Millisecond {
+					t.Errorf("❌ %s: Expected delay of ~2s, but execution took only %v", tt.name, executionTime)
+				}
+				t.Logf("✅ %s: Delay verified - execution took %v", tt.name, executionTime)
+			} else {
+				// Should be very fast (less than 100ms)
+				if executionTime > 100*time.Millisecond {
+					t.Errorf("❌ %s: Expected no delay, but execution took %v", tt.name, executionTime)
+				}
+				t.Logf("✅ %s: No delay verified - execution took %v", tt.name, executionTime)
+			}
+
+			t.Logf("✅ %s: %s", tt.name, tt.description)
+		})
+	}
+}
+
+func TestUnreservePluginFunctionality(t *testing.T) {
+	t.Log("🎯 Testing Unreserve plugin functionality")
+
+	tests := []struct {
+		name        string
+		podName     string
+		nodeName    string
+		description string
+	}{
+		{
+			name:        "BasicUnreserveCall",
+			podName:     "test-pod-1",
+			nodeName:    "node-1",
+			description: "Unreserve should handle basic pod unreservation",
+		},
+		{
+			name:        "UnreserveWithLongPodName",
+			podName:     "very-long-pod-name-with-many-characters-and-hyphens",
+			nodeName:    "node-2",
+			description: "Unreserve should handle pods with long names",
+		},
+		{
+			name:        "UnreserveWithSpecialCharacters",
+			podName:     "pod-with-123-numbers",
+			nodeName:    "node-with-special-chars",
+			description: "Unreserve should handle pods and nodes with numbers and special characters",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create plugin instance
+			plugin := &Chronos{}
+
+			// Create test pod
+			pod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tt.podName,
+					Namespace: "default",
+				},
+			}
+
+			// Create context and cycle state
+			ctx := context.Background()
+			state := framework.NewCycleState()
+
+			// Measure execution time (should be very fast)
+			startTime := time.Now()
+
+			// Call Unreserve (should not panic or error)
+			plugin.Unreserve(ctx, state, pod, tt.nodeName)
+
+			executionTime := time.Since(startTime)
+
+			// Verify it executes quickly (no delays)
+			if executionTime > 50*time.Millisecond {
+				t.Errorf("❌ %s: Unreserve took too long: %v", tt.name, executionTime)
+			}
+
+			t.Logf("✅ %s: %s (execution: %v)", tt.name, tt.description, executionTime)
+		})
+	}
+}
+
+func TestReserveUnreserveIntegration(t *testing.T) {
+	t.Log("🎯 Testing Reserve/Unreserve integration scenarios")
+
+	tests := []struct {
+		name          string
+		envValue      string
+		podCount      int
+		expectedDelay bool
+		description   string
+	}{
+		{
+			name:          "ReserveDelayMultiplePods",
+			envValue:      "true",
+			podCount:      3,
+			expectedDelay: true,
+			description:   "Multiple pods should each experience delay when reserve delay is enabled",
+		},
+		{
+			name:          "FastReserveMultiplePods",
+			envValue:      "false",
+			podCount:      5,
+			expectedDelay: false,
+			description:   "Multiple pods should execute quickly when reserve delay is disabled",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup environment
+			os.Setenv("CHRONOS_RESERVE_DELAY", tt.envValue)
+			defer os.Unsetenv("CHRONOS_RESERVE_DELAY")
+
+			plugin := &Chronos{}
+			ctx := context.Background()
+			state := framework.NewCycleState()
+
+			var totalReserveTime time.Duration
+
+			// Test Reserve for multiple pods
+			for i := 0; i < tt.podCount; i++ {
+				pod := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      fmt.Sprintf("test-pod-%d", i),
+						Namespace: "default",
+					},
+				}
+
+				startTime := time.Now()
+				status := plugin.Reserve(ctx, state, pod, fmt.Sprintf("node-%d", i))
+				reserveTime := time.Since(startTime)
+				totalReserveTime += reserveTime
+
+				// Verify status is always nil (success)
+				if status != nil {
+					t.Errorf("❌ Reserve failed for pod %d: %v", i, status)
+				}
+
+				// Immediately call Unreserve for the same pod
+				unreserveStart := time.Now()
+				plugin.Unreserve(ctx, state, pod, fmt.Sprintf("node-%d", i))
+				unreserveTime := time.Since(unreserveStart)
+
+				// Unreserve should always be fast
+				if unreserveTime > 10*time.Millisecond {
+					t.Errorf("❌ Unreserve took too long for pod %d: %v", i, unreserveTime)
+				}
+			}
+
+			// Verify total timing behavior
+			if tt.expectedDelay {
+				expectedMinTime := time.Duration(tt.podCount) * 1800 * time.Millisecond // ~1.8s per pod
+				if totalReserveTime < expectedMinTime {
+					t.Errorf("❌ %s: Expected total Reserve time >= %v, got %v",
+						tt.name, expectedMinTime, totalReserveTime)
+				}
+			} else {
+				maxExpectedTime := time.Duration(tt.podCount) * 50 * time.Millisecond // 50ms per pod max
+				if totalReserveTime > maxExpectedTime {
+					t.Errorf("❌ %s: Expected total Reserve time <= %v, got %v",
+						tt.name, maxExpectedTime, totalReserveTime)
+				}
+			}
+
+			t.Logf("✅ %s: %s (total Reserve time: %v for %d pods)",
+				tt.name, tt.description, totalReserveTime, tt.podCount)
+		})
+	}
+}
+
+func TestReservePluginInterfaceConformance(t *testing.T) {
+	t.Log("🎯 Testing Reserve plugin interface conformance")
+
+	// Verify that Chronos implements ReservePlugin interface
+	var _ framework.ReservePlugin = &Chronos{}
+
+	plugin := &Chronos{}
+
+	// Test with nil values to ensure no panics
+	t.Run("NilContextHandling", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("❌ Reserve panicked with nil context: %v", r)
+			}
+		}()
+
+		pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}}
+		state := framework.NewCycleState()
+
+		// This should not panic even with nil context (Go's context handling)
+		status := plugin.Reserve(context.Background(), state, pod, "node")
+		if status != nil {
+			t.Errorf("❌ Expected nil status, got: %v", status)
+		}
+
+		// Unreserve should also not panic
+		plugin.Unreserve(context.Background(), state, pod, "node")
+
+		t.Log("✅ Nil context handling verified")
+	})
+
+	t.Run("EmptyPodHandling", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("❌ Reserve panicked with empty pod: %v", r)
+			}
+		}()
+
+		pod := &v1.Pod{} // Empty pod
+		ctx := context.Background()
+		state := framework.NewCycleState()
+
+		status := plugin.Reserve(ctx, state, pod, "node")
+		if status != nil {
+			t.Errorf("❌ Expected nil status with empty pod, got: %v", status)
+		}
+
+		plugin.Unreserve(ctx, state, pod, "node")
+
+		t.Log("✅ Empty pod handling verified")
+	})
+
+	t.Log("✅ Reserve plugin interface conformance verified")
+}

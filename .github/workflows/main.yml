@@ -149,6 +149,7 @@ jobs:
           name: chronos-kubernetes-scheduler
           leaderElection:
             enabled: false  # Single replica in CI
+          parallelism: 1  # Sequential scheduling for reliable QueueSort testing
           plugin:
             name: Chronos
             weight: 100
@@ -156,14 +157,20 @@ jobs:
             # Enable QueueSort plugin for testing
             queueSort:
               enabled: true  # Enable custom queue sorting (LPT heuristic)
-          # Enable verbose logging for queue sort validation
-          verbosity: 5  # Set klog verbosity to level 5 for Less() function debugging
+        
+        # Override logging level for queue heap operations debugging
+        logging:
+          level: 6  # Enable v6 logging for queue heap operations (ActiveQ, MoveAllToActiveQ)
           
         # Additional container args for enhanced logging
         extraArgs:
-          - "--v=5"  # Enable v5 logging
           - "--logtostderr=true"  # Log to stderr for easier capture
           - "--stderrthreshold=INFO"  # Lower threshold for comprehensive logging
+        
+        # Environment variables for scheduling control
+        extraEnv:
+          - name: CHRONOS_RESERVE_DELAY
+            value: "true"  # Enable Reserve plugin delays for sequential scheduling (testing only)
         
         resources:
           requests:

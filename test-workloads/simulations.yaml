@@ -4,7 +4,7 @@
 scenarios:
   
   # Test 1: Bin-packing - new job fits in existing completion time
-  bin_packing_perfect_fit:
+  score_bin_packing_perfect_fit:
     description: "New job should fit perfectly in node with longest remaining time"
     new_pod:
       name: "test-bin-packing"
@@ -24,7 +24,7 @@ scenarios:
           duration: 90
 
   # Test 2: Extension minimization - new job extends completion time
-  extension_minimal:
+  score_extension_minimal:
     description: "New job requires extension, choose node with minimal extension needed"
     new_pod:
       name: "test-extension"
@@ -44,7 +44,7 @@ scenarios:
           duration: 70
 
   # Test 3: Consolidation preference - choose longer remaining work
-  consolidation_preference:
+  score_consolidation_preference:
     description: "Between two nodes that can fit, choose one with longer remaining work"
     new_pod:
       name: "test-consolidation" 
@@ -61,7 +61,7 @@ scenarios:
 
 
   # Test 4: Empty node avoidance - heavily penalized
-  empty_node_avoidance:
+  score_empty_node_avoidance:
     description: "Avoid empty nodes when other options exist"
     new_pod:
       name: "test-empty-avoidance"
@@ -75,7 +75,7 @@ scenarios:
 
 
   # Test 5: Extension job - choose minimal extension
-  extension_job:
+  score_extension_job:
     description: "Job that extends all nodes, choose minimal extension"
     new_pod:
       name: "test-extension-job"
@@ -99,7 +99,7 @@ scenarios:
         # Max remaining: 100s, extension needed: 120-100=20s (better)
 
   # Test 6: Equal remaining times - tie-breaking
-  tie_breaking:
+  score_tie_breaking:
     description: "Equal remaining times should use resource-based tie-breaking"  
     new_pod:
       name: "test-tie-breaking"
@@ -119,13 +119,14 @@ scenarios:
   # Test 7: Queue Sort LPT - Longest Processing Time First
   queuesort_longest_first:
     description: "Submit pods short->long->medium; expect them to be scheduled long->medium->short"
-    test_pods:
-      - name: "test-pod-short"
-        duration: 60
-      - name: "test-pod-long"
-        duration: 300
-      - name: "test-pod-medium"
-        duration: 120
+    setup_pods:
+      chronos-test-worker:
+        - name: "test-pod-short"
+          duration: 60
+        - name: "test-pod-long"
+          duration: 300
+        - name: "test-pod-medium"
+          duration: 120
     expected_scheduling_order:
       - "test-pod-long"
       - "test-pod-medium"
@@ -134,16 +135,17 @@ scenarios:
   # Test 8: Queue Sort with Priority Override
   queuesort_priority_override:
     description: "Priority should override duration-based sorting in queue"
-    test_pods:
-      - name: "low-priority-long"
-        duration: 600
-        priority: 100
-      - name: "high-priority-short"
-        duration: 60
-        priority: 1000
-      - name: "no-priority-medium"
-        duration: 300
-        priority: null
+    setup_pods:
+      chronos-test-worker:
+        - name: "low-priority-long"
+          duration: 600
+          priority: 100
+        - name: "high-priority-short"
+          duration: 60
+          priority: 1000
+        - name: "no-priority-medium"
+          duration: 300
+          priority: null
     expected_scheduling_order:
       - "high-priority-short" 
       - "low-priority-long"  
@@ -152,15 +154,16 @@ scenarios:
   # Test 9: Queue Sort with Missing Duration Annotations  
   queuesort_missing_duration:
     description: "Pods without duration annotation should be scheduled last"
-    test_pods:
-      - name: "with-duration-long"
-        duration: 300
-      - name: "with-duration-short" 
-        duration: 120 
-      - name: "no-duration-1"
-        duration: null  
-      - name: "no-duration-2"
-        duration: null  
+    setup_pods:
+      chronos-test-worker:
+        - name: "no-duration-1"
+          duration: null  
+        - name: "no-duration-2"
+          duration: null  
+        - name: "with-duration-short" 
+          duration: 120 
+        - name: "with-duration-long"
+          duration: 300
     expected_scheduling_order:
       - "with-duration-long"  
       - "with-duration-short" 
@@ -170,13 +173,14 @@ scenarios:
   # Test 10: Queue Sort FIFO Tie-breaking
   queuesort_fifo_tiebreaker:
     description: "Equal durations should use FIFO (creation time) ordering"
-    test_pods:
-      - name: "equal-duration-first"
-        duration: 300
-      - name: "equal-duration-second"
-        duration: 300
-      - name: "equal-duration-third"
-        duration: 300
+    setup_pods:
+      chronos-test-worker:
+        - name: "equal-duration-first"
+          duration: 300
+        - name: "equal-duration-second"
+          duration: 300
+        - name: "equal-duration-third"
+          duration: 300
     expected_scheduling_order:
       - "equal-duration-first"
       - "equal-duration-second"
@@ -185,31 +189,32 @@ scenarios:
   # Test 11: Queue Sort Comprehensive Test
   queuesort_comprehensive:
     description: "Complex scenario with mixed priorities, durations, and missing annotations"
-    test_pods:
-      - name: "critical-short"
-        duration: 30
-        priority: 2000
-      - name: "high-long"
-        duration: 3600
-        priority: 1000
-      - name: "high-medium"
-        duration: 1800
-        priority: 1000
-      - name: "normal-very-long"
-        duration: 7200
-        priority: 500
-      - name: "normal-medium"
-        duration: 900
-        priority: 500
-      - name: "no-priority-long"
-        duration: 2400
-        priority: null
-      - name: "no-priority-short"
-        duration: 300
-        priority: null
-      - name: "no-annotation"
-        duration: null
-        priority: null
+    setup_pods:
+      chronos-test-worker:
+        - name: "critical-short"
+          duration: 30
+          priority: 2000
+        - name: "high-long"
+          duration: 3600
+          priority: 1000
+        - name: "no-annotation"
+          duration: null
+          priority: null
+        - name: "high-medium"
+          duration: 1800
+          priority: 1000
+        - name: "normal-very-long"
+          duration: 7200
+          priority: 500
+        - name: "no-priority-short"
+          duration: 300
+          priority: null
+        - name: "normal-medium"
+          duration: 900
+          priority: 500
+        - name: "no-priority-long"
+          duration: 2400
+          priority: null
     expected_scheduling_order:
       - "critical-short"     
       - "high-long"
@@ -229,11 +234,6 @@ execution:
   cleanup_wait: 3              # Wait between test cleanup
   namespace: "simulation-test"
   
-  burst_creation_interval: 0.5  # Delay between burst pods
-  queue_sort_wait_time: 3       # Wait for queue sorting
-  max_burst_pods: 15            # Max pods in burst tests
-  
-  log_level: 5                  # Scheduler log verbosity
-  validate_queue_order: true    # Check scheduling order
+  queue_sort_wait_time: 8       # Wait for queue sorting to complete
   
   overall_timeout_minutes: 10   # Total test time limit
