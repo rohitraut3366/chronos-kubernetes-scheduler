@@ -160,9 +160,10 @@ func (s *Chronos) CalculateOptimizedScore(p *v1.Pod, nodeInfo *framework.NodeInf
 
 	// Hierarchical scoring with clear priority levels
 	const (
-		binPackingPriority = 1000000 // Highest priority: jobs that fit within existing windows
-		extensionPriority  = 100000  // Medium priority: jobs that extend commitments
-		emptyNodePriority  = 1000    // Lowest priority: empty nodes
+		binPackingPriority   = 1000000 // Highest priority: jobs that fit within existing windows
+		extensionPriority    = 100000  // Medium priority: jobs that extend commitments
+		maxPossibleExtension = 10000   // Arbitrary large number to ensure extension score remains positive
+		emptyNodePriority    = 1000    // Lowest priority: empty nodes
 	)
 
 	var finalScore int64
@@ -181,10 +182,18 @@ func (s *Chronos) CalculateOptimizedScore(p *v1.Pod, nodeInfo *framework.NodeInf
 
 	} else if maxRemainingTime > 0 {
 		// PRIORITY 2: Job extends beyond existing work - MINIMIZE EXTENSION
-		// Choose node that minimizes the extension of cluster resource commitments
 		extensionDuration = newPodDuration - maxRemainingTime
-		extensionPenalty := -(extensionDuration * 100) // Extension penalty - heavy penalty for extending commitments
-		finalScore = int64(extensionPriority) + extensionPenalty
+
+		// Invert the score: smaller extension = higher score.
+		// The base score is always extensionPriority, ensuring it's higher than emptyNodePriority.
+		// We subtract extensionDuration to rank nodes within this tier.
+		// maxPossibleExtension is an arbitrary large number to ensure the score remains positive.
+		scoreWithinTier := maxPossibleExtension - extensionDuration
+		if scoreWithinTier < 0 {
+			scoreWithinTier = 0 // Prevent negative scores from exceptionally long jobs
+		}
+
+		finalScore = int64(extensionPriority) + scoreWithinTier
 		nodeStrategy = "EXTENSION"
 		completionTime = fmt.Sprintf("%ds", newPodDuration)
 

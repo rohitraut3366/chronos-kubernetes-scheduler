@@ -154,7 +154,7 @@ func TestInvalidInputs(t *testing.T) {
 		assert.Empty(t, durationStr, "Duration string should be empty")
 
 		// In real scheduler, this would result in score 0
-		t.Log("✅ Pod without annotation handled gracefully")
+		t.Log("Pod without annotation handled gracefully")
 	})
 
 	t.Run("MalformedDurationAnnotation", func(t *testing.T) {
@@ -171,7 +171,7 @@ func TestInvalidInputs(t *testing.T) {
 		_, err := strconv.ParseInt(durationStr, 10, 64)
 		assert.Error(t, err, "Should fail to parse malformed duration")
 
-		t.Log("✅ Malformed annotation handled gracefully")
+		t.Log("Malformed annotation handled gracefully")
 	})
 
 	t.Run("NegativeDuration", func(t *testing.T) {
@@ -183,7 +183,7 @@ func TestInvalidInputs(t *testing.T) {
 		assert.Negative(t, duration, "Duration should be negative")
 
 		// In real scheduler, negative duration would be handled appropriately
-		t.Log("✅ Negative duration parsed correctly")
+		t.Log("Negative duration parsed correctly")
 	})
 }
 
@@ -288,7 +288,7 @@ func TestScoringScenarios(t *testing.T) {
 					"Expected node2 to win. Node1: %d, Node2: %d", score1, score2)
 			}
 
-			t.Logf("✅ %s wins correctly!", scenario.expectedWinner)
+			t.Logf("%s wins correctly!", scenario.expectedWinner)
 		})
 	}
 }
@@ -359,7 +359,7 @@ func TestRandomizedPropertyValidation(t *testing.T) {
 			})
 		}
 
-		t.Logf("✅ Property-based testing completed: %d strict dominance cases validated", successfulTests)
+		t.Logf("Property-based testing completed: %d strict dominance cases validated", successfulTests)
 	})
 }
 
@@ -450,7 +450,7 @@ func TestRealisticClusterScenarios(t *testing.T) {
 			assert.NotEmpty(t, bestNode, "Should select a winning node")
 			assert.Greater(t, bestScore, int64(0), "Winning score should be positive")
 
-			t.Logf("✅ Realistic cluster scheduling completed")
+			t.Logf("Realistic cluster scheduling completed")
 		})
 	}
 }
@@ -490,7 +490,7 @@ func TestPerformanceScaling(t *testing.T) {
 			duration := time.Since(start)
 			avgPerNode := duration / time.Duration(load.nodeCount)
 
-			t.Logf("✅ %s: %d nodes scored in %v (avg: %v per node)",
+			t.Logf("%s: %d nodes scored in %v (avg: %v per node)",
 				load.name, load.nodeCount, duration, avgPerNode)
 
 			// Performance assertion: should scale linearly
@@ -520,7 +520,7 @@ func TestCorrectnessInvariants(t *testing.T) {
 			"Active nodes should beat empty nodes for cost optimization (active=%d, empty=%d)",
 			activeNode, emptyNode)
 
-		t.Log("✅ Empty node penalty correctly ensures active node preference")
+		t.Log("Empty node penalty correctly ensures active node preference")
 	})
 
 	t.Run("UtilizationTieBreakerWorks", func(t *testing.T) {
@@ -532,7 +532,7 @@ func TestCorrectnessInvariants(t *testing.T) {
 		assert.Equal(t, emptyNode1, emptyNode2,
 			"Empty nodes have identical time-based scores (node1=%d, node2=%d). NodeResourcesFit handles resource tie-breaking.", emptyNode1, emptyNode2)
 
-		t.Log("✅ Pure time-based scoring: identical time characteristics = identical scores")
+		t.Log("Pure time-based scoring: identical time characteristics = identical scores")
 	})
 
 	t.Run("ScoreMonotonicity", func(t *testing.T) {
@@ -549,7 +549,7 @@ func TestCorrectnessInvariants(t *testing.T) {
 		sameTimeNode2 := calculateMockScore(30, 40, 15, 100) // Same bin-packing, different utilization
 		assert.Equal(t, sameTimeNode1, sameTimeNode2, "Pure time-based scoring: same time characteristics = same score")
 
-		t.Log("✅ Hierarchical score monotonicity verified (time-based scoring)")
+		t.Log("Hierarchical score monotonicity verified (time-based scoring)")
 	})
 }
 
@@ -591,7 +591,7 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		// Resource scoring now handled by NodeResourcesFit plugin - just verify node is set correctly
 		assert.Equal(t, "huge-capacity", nodeInfoHuge.Node().Name, "Node should be set correctly")
 
-		t.Logf("✅ Resource utilization edge cases: NodeResourcesFit plugin now handles resource scoring")
+		t.Logf("Resource utilization edge cases: NodeResourcesFit plugin now handles resource scoring")
 	})
 
 	t.Run("BinPackingEdgeCases", func(t *testing.T) {
@@ -607,7 +607,7 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		completionTimeZeroJob := plugin.CalculateBinPackingCompletionTime(400, 0)
 		assert.Equal(t, int64(400), completionTimeZeroJob, "Zero job should return existing work")
 
-		t.Logf("✅ Bin-packing edge cases covered")
+		t.Logf("Bin-packing edge cases covered")
 	})
 
 	t.Run("OptimizedScoreEdgeCases", func(t *testing.T) {
@@ -615,10 +615,10 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		nodeInfo := mockNodeInfo("full-node", 20, 20) // 20 pods, each using 100m CPU = 2000m total
 		testPod := mockPodWithDuration("test-pod", 600)
 		score := plugin.CalculateOptimizedScore(testPod, nodeInfo, 300, 600)
-		// Node has 2000m CPU allocated, 20 pods * 100m = 2000m used = 100% utilized, ResourceScore = 0
-		// Extension: 100000 - (600-300)*100 + 0*5 = 100000 - 30000 + 0 = 70000
-		expectedScore := int64(70000)
-		assert.Equal(t, expectedScore, score, "Full resource utilization gets base extension score with no resource bonus")
+		// Extension duration: 600-300 = 300s, scoreWithinTier = 10000-300 = 9700
+		// New scoring: 100000 + 9700 = 109700
+		expectedScore := int64(109700)
+		assert.Equal(t, expectedScore, score, "Extension case uses new hierarchy-preserving scoring")
 
 		// Test edge case: node over capacity (shouldn't happen but test robustness)
 		nodeInfoOver := mockNodeInfo("over-node", 25, 20) // Over capacity: 25 pods * 100m = 2500m used on 2000m node
@@ -637,7 +637,7 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		expectedLarge := int64(binPackingPriority) + 300*100 // Pure time-based score
 		assert.Equal(t, expectedLarge, scoreLarge, "Large capacity bin-packing score (pure time-based)")
 
-		t.Logf("✅ Optimized score edge cases covered")
+		t.Logf("Optimized score edge cases covered")
 	})
 }
 
@@ -657,7 +657,7 @@ func TestBoundaryConditions(t *testing.T) {
 		score1 := plugin.CalculateOptimizedScore(testPodEmpty, nodeInfo, 0, 0)
 		assert.Greater(t, score1, int64(0), "Zero duration should still have positive score from utilization")
 
-		t.Logf("✅ Zero duration boundaries covered")
+		t.Logf("Zero duration boundaries covered")
 	})
 
 	t.Run("MaxValueBoundaries", func(t *testing.T) {
@@ -672,7 +672,7 @@ func TestBoundaryConditions(t *testing.T) {
 		score := plugin.CalculateOptimizedScore(testPodExtreme, nodeInfo, largeTime, 1000)
 		assert.Greater(t, score, int64(0), "Large times should still produce valid scores")
 
-		t.Logf("✅ Maximum value boundaries covered")
+		t.Logf("Maximum value boundaries covered")
 	})
 }
 
@@ -739,7 +739,7 @@ func TestScoreFunctionLogicCoverage(t *testing.T) {
 				assert.InDelta(t, tc.expectedRemaining, remainingSeconds, float64(tolerance),
 					"%s: Expected ~%ds remaining, got %ds", tc.description, tc.expectedRemaining, remainingSeconds)
 
-				t.Logf("✅ %s: Duration=%ds, Elapsed=%.1fs, Remaining=%ds",
+				t.Logf("%s: Duration=%ds, Elapsed=%.1fs, Remaining=%ds",
 					tc.name, tc.podDuration, elapsedSeconds, remainingSeconds)
 			})
 		}
@@ -773,7 +773,7 @@ func TestScoreFunctionLogicCoverage(t *testing.T) {
 		assert.Equal(t, int64(500), maxRemainingTime, "Should find maximum remaining time")
 		assert.Contains(t, winningDescription, "should win", "Should identify the longest time")
 
-		t.Logf("✅ Max remaining time logic: %ds (%s)", maxRemainingTime, winningDescription)
+		t.Logf("Max remaining time logic: %ds (%s)", maxRemainingTime, winningDescription)
 	})
 
 	t.Run("PodPhaseFilteringLogic", func(t *testing.T) {
@@ -797,7 +797,7 @@ func TestScoreFunctionLogicCoverage(t *testing.T) {
 
 				assert.Equal(t, testPod.shouldSkip, skip, testPod.description)
 
-				t.Logf("✅ Phase %s: Skip=%t (%s)", testPod.phase, skip, testPod.description)
+				t.Logf("Phase %s: Skip=%t (%s)", testPod.phase, skip, testPod.description)
 			})
 		}
 	})
@@ -878,7 +878,7 @@ func TestScoreFunctionLogicCoverage(t *testing.T) {
 					}
 				}
 
-				t.Logf("✅ %s: Found=%t, Valid=%t, Value=%d",
+				t.Logf("%s: Found=%t, Valid=%t, Value=%d",
 					testAnno.name, found, testAnno.expectValid, testAnno.expectedVal)
 			})
 		}
@@ -909,7 +909,7 @@ func TestScoreFunctionLogicCoverage(t *testing.T) {
 
 				assert.Equal(t, scenario.expected, remainingSeconds, scenario.description)
 
-				t.Logf("✅ Duration=%ds, Elapsed=%ds, Remaining=%ds",
+				t.Logf("Duration=%ds, Elapsed=%ds, Remaining=%ds",
 					scenario.duration, scenario.elapsed, remainingSeconds)
 			})
 		}
@@ -951,7 +951,7 @@ func TestMainEntryPoints(t *testing.T) {
 		score := plugin.CalculateOptimizedScore(testPodScore, nodeInfo, maxRemainingTime, newJobDuration)
 		assert.Greater(t, score, int64(0), "Score should be positive")
 
-		t.Logf("✅ Score calculation methods: completion=%ds, score=%d", completionTime, score)
+		t.Logf("Score calculation methods: completion=%ds, score=%d", completionTime, score)
 	})
 
 	// Test annotation parsing logic (what Score function does first)
@@ -982,7 +982,7 @@ func TestMainEntryPoints(t *testing.T) {
 		_, ok = pod2.Annotations[JobDurationAnnotation]
 		assert.False(t, ok, "Should not find duration annotation")
 
-		t.Logf("✅ Annotation parsing works correctly")
+		t.Logf("Annotation parsing works correctly")
 	})
 
 	// Test ScoreExtensions function
@@ -994,7 +994,7 @@ func TestMainEntryPoints(t *testing.T) {
 		assert.NotNil(t, extensions, "ScoreExtensions should not be nil")
 		assert.Equal(t, plugin, extensions, "ScoreExtensions should return the plugin itself")
 
-		t.Logf("✅ ScoreExtensions function works correctly")
+		t.Logf("ScoreExtensions function works correctly")
 	})
 
 	// Test parts of Score function we CAN test without complex mocking
@@ -1024,7 +1024,7 @@ func TestMainEntryPoints(t *testing.T) {
 		assert.True(t, status2.IsSuccess(), "Invalid annotation should be handled gracefully")
 		assert.Equal(t, int64(0), score2, "Invalid annotation should return score 0")
 
-		t.Logf("✅ Score function annotation parsing covered (early return paths)")
+		t.Logf("Score function annotation parsing covered (early return paths)")
 	})
 
 	// Test Score function error handling paths
@@ -1045,7 +1045,7 @@ func TestMainEntryPoints(t *testing.T) {
 		// We'll catch this with a deferred recover to test the error path
 		defer func() {
 			if r := recover(); r != nil {
-				t.Logf("✅ Nil handle error path covered (expected panic caught: %v)", r)
+				t.Logf("Nil handle error path covered (expected panic caught: %v)", r)
 			}
 		}()
 
@@ -1055,7 +1055,7 @@ func TestMainEntryPoints(t *testing.T) {
 		if !status.IsSuccess() {
 			assert.Equal(t, framework.Error, status.Code(), "Should return error status for node info failure")
 			assert.Equal(t, int64(0), score, "Should return 0 score on error")
-			t.Logf("✅ Node info error path covered gracefully")
+			t.Logf("Node info error path covered gracefully")
 		}
 	})
 
@@ -1085,7 +1085,7 @@ func TestMainEntryPoints(t *testing.T) {
 			assert.LessOrEqual(t, nodeScore.Score, int64(100), "Normalized score should be <= 100")
 		}
 
-		t.Logf("✅ NormalizeScore function: %v", scores)
+		t.Logf("NormalizeScore function: %v", scores)
 	})
 
 	// Test NormalizeScore with equal scores
@@ -1113,7 +1113,7 @@ func TestMainEntryPoints(t *testing.T) {
 			assert.Equal(t, int64(100), nodeScore.Score, "Equal scores should normalize to 100")
 		}
 
-		t.Logf("✅ NormalizeScore handles equal scores: %v", scores)
+		t.Logf("NormalizeScore handles equal scores: %v", scores)
 	})
 }
 
@@ -1225,11 +1225,16 @@ func TestCalculateOptimizedScore(t *testing.T) {
 
 			switch tc.expectedStrategy {
 			case "extension-utilization":
-				// Updated for new extension minimization priority: strong penalty for extension
+				// Updated for new extension scoring: ensures extension always beats empty nodes
 				const extensionPriority = 100000
-				extensionPenalty := (tc.newPodDuration - tc.maxRemainingTime) * 100 // Extension minimization dominates
-				expectedScore := int64(extensionPriority) - extensionPenalty        // Pure time-based score
-				assert.Equal(t, expectedScore, score, "Extension case should prioritize extension minimization")
+				const maxPossibleExtension = 10000
+				extensionDuration := tc.newPodDuration - tc.maxRemainingTime
+				scoreWithinTier := maxPossibleExtension - extensionDuration
+				if scoreWithinTier < 0 {
+					scoreWithinTier = 0
+				}
+				expectedScore := int64(extensionPriority) + scoreWithinTier
+				assert.Equal(t, expectedScore, score, "Extension case uses new hierarchy-preserving scoring")
 				assert.Greater(t, score, int64(1000), "Extension case should score higher than empty nodes")
 
 			case "consolidation":
@@ -1250,7 +1255,7 @@ func TestCalculateOptimizedScore(t *testing.T) {
 				assert.Less(t, score, int64(10000), "Empty penalty should be significantly lower")
 			}
 
-			t.Logf("✅ %s: Strategy=%s, Score=%d (pure time-based)",
+			t.Logf("%s: Strategy=%s, Score=%d (pure time-based)",
 				tc.name, tc.expectedStrategy, score)
 		})
 	}
@@ -1320,7 +1325,7 @@ func TestEstimateNodeCapacity(t *testing.T) {
 			// Just verify node is properly set
 			assert.Equal(t, tc.name, nodeInfo.Node().Name, "Node should be set correctly")
 
-			t.Logf("✅ %s: CPU=%dm (resource scoring now handled by NodeResourcesFit)", tc.name, tc.cpuMillis)
+			t.Logf("%s: CPU=%dm (resource scoring now handled by NodeResourcesFit)", tc.name, tc.cpuMillis)
 		})
 	}
 }
@@ -1425,7 +1430,7 @@ func TestTwoPhaseDecisionLogic(t *testing.T) {
 				"Test %s: %s. Expected %s to win, but %s won",
 				tc.name, tc.description, tc.expectedWinner, actualWinner)
 
-			t.Logf("✅ %s: Winner=%s (Score=%d), Strategy=%s",
+			t.Logf("%s: Winner=%s (Score=%d), Strategy=%s",
 				tc.name, actualWinner, scores[winnerIndex], tc.expectedStrategy)
 		})
 	}
@@ -1478,7 +1483,7 @@ func TestMaximumCoveragePush(t *testing.T) {
 		assert.Equal(t, int64(0), largeScores[0].Score, "Smallest should be 0")
 		assert.Equal(t, int64(100), largeScores[1].Score, "Largest should be 100")
 
-		t.Logf("✅ All NormalizeScore edge cases covered")
+		t.Logf("All NormalizeScore edge cases covered")
 	})
 
 	t.Run("EstimateCapacityAllBoundaries", func(t *testing.T) {
@@ -1526,7 +1531,7 @@ func TestMaximumCoveragePush(t *testing.T) {
 		// Resource scoring now handled by NodeResourcesFit plugin
 		assert.Equal(t, "fractional", nodeInfoFrac.Node().Name, "Node should be set correctly")
 
-		t.Logf("✅ All resource utilization boundaries covered")
+		t.Logf("All resource utilization boundaries covered")
 	})
 
 	t.Run("OptimizedScoreCompleteMatrix", func(t *testing.T) {
@@ -1595,7 +1600,7 @@ func TestMaximumCoveragePush(t *testing.T) {
 				assert.Equal(t, expectedZeroSlot, score, "%s should get base bin-packing score with no resource bonus", tc.name)
 			}
 
-			t.Logf("✅ %s: Score=%d, Pattern=%s", tc.name, score, tc.expectedPattern)
+			t.Logf("%s: Score=%d, Pattern=%s", tc.name, score, tc.expectedPattern)
 		}
 	})
 }
@@ -1626,7 +1631,7 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			assert.True(t, skip2, "Failed pod should be skipped")
 			assert.False(t, skip3, "Running pod should not be skipped")
 
-			t.Logf("✅ Pod phase filtering logic covered")
+			t.Logf("Pod phase filtering logic covered")
 		})
 
 		// Test 2: Annotation processing (lines that parse annotations)
@@ -1660,7 +1665,7 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			_, invalidErr := strconv.ParseInt(invalidDurationStr, 10, 64)
 			assert.Error(t, invalidErr, "Invalid duration should error")
 
-			t.Logf("✅ Annotation processing logic covered")
+			t.Logf("Annotation processing logic covered")
 		})
 
 		// Test 3: Time calculations (lines that calculate remaining time)
@@ -1701,7 +1706,7 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 				assert.Equal(t, int64(0), negativeRemaining, "Negative should be clamped to 0")
 			}
 
-			t.Logf("✅ Time calculation logic covered")
+			t.Logf("Time calculation logic covered")
 		})
 
 		// Test 4: Max remaining time logic (lines that find maximum)
@@ -1728,10 +1733,10 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			}
 			assert.Equal(t, int64(0), maxRemainingTime, "Max should remain 0")
 
-			t.Logf("✅ Maximum remaining time logic covered")
+			t.Logf("Maximum remaining time logic covered")
 		})
 
-		t.Logf("✅ Score function internal logic comprehensively covered via unit tests")
+		t.Logf("Score function internal logic comprehensively covered via unit tests")
 	})
 
 	t.Run("PluginMainEntryPointCoverage", func(t *testing.T) {
@@ -1746,7 +1751,7 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			name := plugin.Name()
 			assert.Equal(t, PluginName, name, "Name should match constant")
 
-			t.Logf("✅ New() function and Name() function covered")
+			t.Logf("New() function and Name() function covered")
 		})
 
 		// Test constants and package-level variables
@@ -1756,10 +1761,10 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			// maxPossibleScore constant removed - no longer used in scoring logic
 			// Removed utilizationBonus constant - now using hierarchical scoring with priority levels
 
-			t.Logf("✅ All package constants covered")
+			t.Logf("All package constants covered")
 		})
 
-		t.Logf("✅ Main plugin entry points comprehensively covered")
+		t.Logf("Main plugin entry points comprehensively covered")
 	})
 }
 
@@ -1784,7 +1789,7 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 		expectedAnnotationLength := len(JobDurationAnnotation)
 		assert.Equal(t, 48, expectedAnnotationLength, "Annotation constant should have expected length")
 
-		t.Logf("✅ All package-level constants accessible and correctly valued")
+		t.Logf("All package-level constants accessible and correctly valued")
 	})
 
 	t.Run("HierarchicalScoringMethodsComprehensive", func(t *testing.T) {
@@ -1814,7 +1819,7 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 			})
 		}
 
-		t.Logf("✅ CalculateBinPackingCompletionTime method integration verified")
+		t.Logf("CalculateBinPackingCompletionTime method integration verified")
 	})
 
 	t.Run("CalculateOptimizedScoreExtensive", func(t *testing.T) {
@@ -1866,19 +1871,21 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 					case "bin-packing-fit":
 						assert.GreaterOrEqual(t, score, int64(1000000), "Bin-packing should have highest priority")
 					case "extension-minimization":
-						// Large extension jobs can have negative scores due to heavy penalties - this is correct
+						// Large extension jobs are still in the extension tier but with lower scores within that tier
 						if scenario.name == "ExtensionLarge" {
-							assert.Less(t, score, int64(0), "Large extension jobs should be heavily penalized")
+							// Extension jobs are now always >= 100000 due to hierarchy fix, but still penalized within tier
+							assert.GreaterOrEqual(t, score, int64(100000), "Large extension jobs still in extension tier")
 						} else {
-							assert.GreaterOrEqual(t, score, int64(50000), "Small extension should have medium priority")
-							assert.Less(t, score, int64(200000), "Extension should be less than bin-packing")
+							// Extension jobs should be in the 100,000-110,000 range
+							assert.GreaterOrEqual(t, score, int64(100000), "Extension should be in extension tier")
+							assert.LessOrEqual(t, score, int64(110000), "Extension should be within tier range")
 						}
 					case "empty-node-penalty":
 						assert.GreaterOrEqual(t, score, int64(1000), "Empty node should have lowest priority")
 						assert.Less(t, score, int64(10000), "Empty node should be significantly lower")
 					}
 
-					t.Logf("✅ %s on %s: Score=%d (%s strategy)",
+					t.Logf("%s on %s: Score=%d (%s strategy)",
 						scenario.name, node.description, score, scenario.expectedPriority)
 				})
 			}
@@ -1921,7 +1928,7 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 				// Resource scoring now handled by NodeResourcesFit plugin
 				assert.Equal(t, tc.name, nodeInfo.Node().Name, "Node should be set correctly: %s", tc.description)
 
-				t.Logf("✅ %s (%dm CPU): Resource scoring handled by NodeResourcesFit", tc.description, tc.cpuMillis)
+				t.Logf("%s (%dm CPU): Resource scoring handled by NodeResourcesFit", tc.description, tc.cpuMillis)
 			})
 		}
 	})
@@ -1938,7 +1945,7 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 		extensions := plugin.ScoreExtensions()
 		assert.Equal(t, plugin, extensions, "ScoreExtensions should return self")
 
-		t.Logf("✅ Plugin interface methods covered")
+		t.Logf("Plugin interface methods covered")
 	})
 
 	t.Run("NewPluginConstructorVariations", func(t *testing.T) {
@@ -1960,7 +1967,7 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 				assert.True(t, ok, "Should return Chronos plugin type")
 				assert.Equal(t, PluginName, chronosPlugin.Name(), "Name should match constant")
 
-				t.Logf("✅ Plugin created with context %d", i)
+				t.Logf("Plugin created with context %d", i)
 			})
 		}
 	})
@@ -2007,7 +2014,7 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 					},
 				},
 				nodeName:      "node-with-work",
-				expectedRange: [2]int64{-100000, 0}, // Large extension gets penalized
+				expectedRange: [2]int64{100000, 110000}, // Extension tier range
 				description:   "Job extends beyond existing work (extension)",
 			},
 			{
@@ -2043,7 +2050,7 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 					},
 				},
 				nodeName:      "node-with-work",
-				expectedRange: [2]int64{70000, 80000}, // Actual observed range for this scenario
+				expectedRange: [2]int64{100000, 110000}, // Extension tier range (601s > 360s remaining)
 				description:   "Pod with decimal duration gets converted to integer (600.75 -> 601)",
 			},
 		}
@@ -2058,7 +2065,7 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 				assert.LessOrEqual(t, score, scenario.expectedRange[1],
 					"Score should be at most %d: %s", scenario.expectedRange[1], scenario.description)
 
-				t.Logf("✅ %s: Score=%d (expected %d-%d) - %s",
+				t.Logf("%s: Score=%d (expected %d-%d) - %s",
 					scenario.name, score, scenario.expectedRange[0], scenario.expectedRange[1], scenario.description)
 			})
 		}
@@ -2083,7 +2090,7 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 		assert.Equal(t, int64(0), score, "Should return 0 score on error")
 		assert.Contains(t, status.Message(), "getting node", "Error message should mention node retrieval")
 
-		t.Logf("✅ Error handling verified: %s", status.Message())
+		t.Logf("Error handling verified: %s", status.Message())
 	})
 
 	t.Run("ScoreWithComplexNodeStates", func(t *testing.T) {
@@ -2100,7 +2107,7 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 		}{
 			{"ValidAnnotation", "600", "positive", "Standard job with valid annotation"},
 			{"ZeroDuration", "0", "positive", "Zero duration job (edge case)"},
-			{"LargeDuration", "36000", "negative", "Very large duration job (10 hours) - gets heavily penalized"},
+			{"LargeDuration", "36000", "positive", "Very large duration job (10 hours) - still in extension tier with low score"},
 			{"NoAnnotation", "", "zero", "Job without duration annotation"},
 		}
 
@@ -2127,7 +2134,7 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 					assert.Less(t, score, int64(0), "Should have negative score: %s", tc.description)
 				}
 
-				t.Logf("✅ %s: Score=%d - %s", tc.name, score, tc.description)
+				t.Logf("%s: Score=%d - %s", tc.name, score, tc.description)
 			})
 		}
 	})
@@ -2149,7 +2156,7 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 		assert.True(t, status.IsSuccess(), "Score should succeed with overdue pods")
 		assert.Greater(t, score, int64(0), "Should still calculate positive score")
 
-		t.Logf("✅ Overdue pod clamping test: Score=%d (overdue pods handled correctly)", score)
+		t.Logf("Overdue pod clamping test: Score=%d (overdue pods handled correctly)", score)
 	})
 }
 
@@ -2574,4 +2581,198 @@ func createNodeWithOverduePods(nodeName string) *framework.NodeInfo {
 	}
 
 	return nodeInfo
+}
+
+// =================================================================
+// Hierarchy Fix Validation Tests
+// =================================================================
+
+func TestExtensionHierarchyFix(t *testing.T) {
+	t.Log("Testing extension vs empty node hierarchy fix")
+
+	t.Run("ExtensionAlwaysBeatsEmpty", func(t *testing.T) {
+		// Test the specific scenario from the bug report where empty node was chosen
+		// Pod duration: 1997s, various extension durations
+
+		testCases := []struct {
+			name              string
+			podDuration       int64
+			extensionDuration int64
+			remainingTime     int64
+		}{
+			{
+				name:              "Small Extension",
+				podDuration:       1997,
+				remainingTime:     1500,
+				extensionDuration: 497, // 1997 - 1500
+			},
+			{
+				name:              "Medium Extension (Original Bug)",
+				podDuration:       1997,
+				remainingTime:     730,
+				extensionDuration: 1267, // 1997 - 730
+			},
+			{
+				name:              "Large Extension",
+				podDuration:       1997,
+				remainingTime:     200,
+				extensionDuration: 1797, // 1997 - 200
+			},
+			{
+				name:              "Very Large Extension",
+				podDuration:       5000,
+				remainingTime:     100,
+				extensionDuration: 4900, // 5000 - 100
+			},
+			{
+				name:              "Extreme Extension",
+				podDuration:       10000,
+				remainingTime:     50,
+				extensionDuration: 9950, // 10000 - 50
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				// Extension node (has existing work but needs extension)
+				extensionScore := calculateMockScore(tc.podDuration, tc.remainingTime, 5, 100)
+
+				// Empty node (no existing work)
+				emptyScore := calculateMockScore(tc.podDuration, 0, 0, 100)
+
+				assert.Greater(t, extensionScore, emptyScore,
+					"Extension node (score=%d) should ALWAYS beat empty node (score=%d) even with %ds extension",
+					extensionScore, emptyScore, tc.extensionDuration)
+
+				t.Logf("Extension=%d > Empty=%d (extension duration: %ds)",
+					extensionScore, emptyScore, tc.extensionDuration)
+			})
+		}
+	})
+
+	t.Run("CompleteHierarchyValidation", func(t *testing.T) {
+		// Validate the complete hierarchy: BIN-PACKING > EXTENSION > EMPTY
+
+		// Test various scenarios to ensure hierarchy is maintained
+		testScenarios := []struct {
+			name        string
+			podDuration int64
+		}{
+			{"Short Job", 300},
+			{"Medium Job", 1000},
+			{"Long Job (Bug Scenario)", 1997},
+			{"Very Long Job", 5000},
+		}
+
+		for _, scenario := range testScenarios {
+			t.Run(scenario.name, func(t *testing.T) {
+				podDuration := scenario.podDuration
+
+				// BIN-PACKING: Job fits within existing work
+				binPackingScore := calculateMockScore(podDuration, podDuration+500, 3, 100)
+
+				// EXTENSION: Job extends beyond existing work (ensure remaining time is positive)
+				remainingTime := podDuration / 2 // Use half the duration as remaining time
+				extensionScore := calculateMockScore(podDuration, remainingTime, 3, 100)
+
+				// EMPTY: No existing work
+				emptyScore := calculateMockScore(podDuration, 0, 0, 100)
+
+				// Validate complete hierarchy
+				assert.Greater(t, binPackingScore, extensionScore,
+					"BIN-PACKING (score=%d) should beat EXTENSION (score=%d)",
+					binPackingScore, extensionScore)
+
+				assert.Greater(t, extensionScore, emptyScore,
+					"EXTENSION (score=%d) should beat EMPTY (score=%d)",
+					extensionScore, emptyScore)
+
+				t.Logf("Hierarchy: BIN-PACKING=%d > EXTENSION=%d > EMPTY=%d",
+					binPackingScore, extensionScore, emptyScore)
+			})
+		}
+	})
+
+	t.Run("ExtensionRankingWithinTier", func(t *testing.T) {
+		// Test that within the extension tier, smaller extensions score higher
+
+		podDuration := int64(2000)
+
+		// Different extension durations (smaller = better)
+		smallExtension := calculateMockScore(podDuration, 1800, 3, 100)    // 200s extension
+		mediumExtension := calculateMockScore(podDuration, 1500, 3, 100)   // 500s extension
+		largeExtension := calculateMockScore(podDuration, 1000, 3, 100)    // 1000s extension
+		veryLargeExtension := calculateMockScore(podDuration, 500, 3, 100) // 1500s extension
+
+		// Validate ranking within extension tier
+		assert.Greater(t, smallExtension, mediumExtension,
+			"Smaller extension should score higher")
+		assert.Greater(t, mediumExtension, largeExtension,
+			"Medium extension should score higher than large")
+		assert.Greater(t, largeExtension, veryLargeExtension,
+			"Large extension should score higher than very large")
+
+		t.Logf("Extension tier ranking: %d > %d > %d > %d",
+			smallExtension, mediumExtension, largeExtension, veryLargeExtension)
+	})
+
+	t.Run("ScoreBoundaryValidation", func(t *testing.T) {
+		// Validate that scores stay within expected ranges
+
+		// BIN-PACKING should be 1,000,000+
+		binPackingScore := calculateMockScore(1000, 2000, 3, 100)
+		assert.GreaterOrEqual(t, binPackingScore, int64(1000000),
+			"BIN-PACKING scores should be >= 1,000,000")
+
+		// EXTENSION should be 100,000 to 110,000
+		extensionScore := calculateMockScore(2000, 1000, 3, 100)
+		assert.GreaterOrEqual(t, extensionScore, int64(100000),
+			"EXTENSION scores should be >= 100,000")
+		assert.LessOrEqual(t, extensionScore, int64(110000),
+			"EXTENSION scores should be <= 110,000")
+
+		// EMPTY should be exactly 1,000
+		emptyScore := calculateMockScore(1000, 0, 0, 100)
+		assert.Equal(t, emptyScore, int64(1000),
+			"EMPTY node scores should be exactly 1,000")
+
+		t.Logf("Score boundaries: BIN-PACKING=%d, EXTENSION=%d, EMPTY=%d",
+			binPackingScore, extensionScore, emptyScore)
+	})
+
+	t.Run("OriginalBugScenarioValidation", func(t *testing.T) {
+		// Test the exact scenario from the original bug report
+		// Pod: buildkite-...-t59h2, NewPodDuration=1997s
+
+		podDuration := int64(1997)
+
+		// Test some of the actual nodes from the logs
+		testNodes := []struct {
+			name          string
+			remainingTime int64
+			expectedScore string
+		}{
+			{"Node with 730s remaining", 730, "EXTENSION"},
+			{"Node with 979s remaining", 979, "EXTENSION"},
+			{"Node with 348s remaining", 348, "EXTENSION"},
+			{"Empty node", 0, "EMPTY-NODE"},
+		}
+
+		emptyNodeScore := calculateMockScore(podDuration, 0, 0, 100)
+
+		for _, node := range testNodes {
+			if node.remainingTime > 0 {
+				extensionScore := calculateMockScore(podDuration, node.remainingTime, 3, 100)
+
+				assert.Greater(t, extensionScore, emptyNodeScore,
+					"Extension node '%s' (score=%d) should beat empty node (score=%d)",
+					node.name, extensionScore, emptyNodeScore)
+
+				t.Logf("%s: Extension=%d > Empty=%d",
+					node.name, extensionScore, emptyNodeScore)
+			}
+		}
+
+		t.Log("Original bug scenario: All extension nodes now beat empty node")
+	})
 }
