@@ -27,6 +27,7 @@ const (
 type Chronos struct {
 	handle              framework.Handle
 	reserveDelayEnabled bool
+	reserveDelaySeconds int
 }
 
 // Compile-time interface conformance checks
@@ -41,9 +42,18 @@ func New(ctx context.Context, _ runtime.Object, h framework.Handle) (framework.P
 	// Cache environment variable configurations during initialization
 	reserveDelayEnabled := os.Getenv("CHRONOS_RESERVE_DELAY") == "true"
 
+	// Parse configurable delay duration (default 2 seconds)
+	reserveDelaySeconds := 2
+	if envDelay := os.Getenv("CHRONOS_RESERVE_DELAY_SECONDS"); envDelay != "" {
+		if parsed, err := strconv.Atoi(envDelay); err == nil && parsed > 0 {
+			reserveDelaySeconds = parsed
+		}
+	}
+
 	chronos := &Chronos{
 		handle:              h,
 		reserveDelayEnabled: reserveDelayEnabled,
+		reserveDelaySeconds: reserveDelaySeconds,
 	}
 
 	// Check if queue sort mode is enabled
@@ -56,7 +66,7 @@ func New(ctx context.Context, _ runtime.Object, h framework.Handle) (framework.P
 
 	// Log reserve delay configuration
 	if reserveDelayEnabled {
-		klog.Infof("⏳ Reserve delay enabled for sequential scheduling (testing mode)")
+		klog.Infof("⏳ Reserve delay enabled: %ds for sequential scheduling (testing mode)", reserveDelaySeconds)
 	}
 
 	return chronos, nil
@@ -349,6 +359,7 @@ func (s *Chronos) NormalizeScore(ctx context.Context, state *framework.CycleStat
 // Reserve implements the Reserve plugin interface to force add delay to scheduling.
 // This ensures that QueueSort order is noticeable in scheduling order.
 // Set CHRONOS_RESERVE_DELAY=true to enable artificial delays for testing.
+// Set CHRONOS_RESERVE_DELAY_SECONDS=N to configure delay duration (default: 2 seconds).
 func (s *Chronos) Reserve(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) *framework.Status {
 	// Use cached configuration instead of reading environment variable every time
 	if !s.reserveDelayEnabled {
@@ -357,7 +368,7 @@ func (s *Chronos) Reserve(ctx context.Context, state *framework.CycleState, pod 
 
 	// Add artificial delay to force sequential scheduling
 	// This ensures pods are scheduled in exact queue order
-	delay := 2 * time.Second
+	delay := time.Duration(s.reserveDelaySeconds) * time.Second
 	klog.V(4).Infof("Chronos Reserve: Adding %v delay for pod %s", delay, pod.Name)
 	time.Sleep(delay)
 	klog.V(4).Infof("Chronos Reserve: Delay completed for pod %s", pod.Name)

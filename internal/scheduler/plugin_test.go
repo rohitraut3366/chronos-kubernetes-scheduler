@@ -3019,51 +3019,69 @@ func TestReservePluginFunctionality(t *testing.T) {
 	t.Log("🎯 Testing Reserve plugin functionality")
 
 	tests := []struct {
-		name           string
-		envValue       string
-		expectedDelay  bool
-		expectedStatus *framework.Status
-		description    string
+		name               string
+		envValue           string
+		customDelaySeconds string
+		expectedDelay      bool
+		expectedStatus     *framework.Status
+		description        string
 	}{
 		{
-			name:           "ReserveDelayEnabled",
-			envValue:       "true",
-			expectedDelay:  true,
-			expectedStatus: nil,
-			description:    "Reserve should add delay when CHRONOS_RESERVE_DELAY=true",
+			name:               "ReserveDelayEnabled",
+			envValue:           "true",
+			customDelaySeconds: "",
+			expectedDelay:      true,
+			expectedStatus:     nil,
+			description:        "Reserve should add delay when CHRONOS_RESERVE_DELAY=true",
 		},
 		{
-			name:           "ReserveDelayDisabled",
-			envValue:       "false",
-			expectedDelay:  false,
-			expectedStatus: nil,
-			description:    "Reserve should skip delay when CHRONOS_RESERVE_DELAY=false",
+			name:               "ReserveDelayDisabled",
+			envValue:           "false",
+			customDelaySeconds: "",
+			expectedDelay:      false,
+			expectedStatus:     nil,
+			description:        "Reserve should skip delay when CHRONOS_RESERVE_DELAY=false",
 		},
 		{
-			name:           "ReserveDelayEmpty",
-			envValue:       "",
-			expectedDelay:  false,
-			expectedStatus: nil,
-			description:    "Reserve should skip delay when CHRONOS_RESERVE_DELAY is empty",
+			name:               "ReserveDelayEmpty",
+			envValue:           "",
+			customDelaySeconds: "",
+			expectedDelay:      false,
+			expectedStatus:     nil,
+			description:        "Reserve should skip delay when CHRONOS_RESERVE_DELAY is empty",
 		},
 		{
-			name:           "ReserveDelayUnset",
-			envValue:       "unset", // Special value to unset the env var
-			expectedDelay:  false,
-			expectedStatus: nil,
-			description:    "Reserve should skip delay when CHRONOS_RESERVE_DELAY is not set",
+			name:               "ReserveDelayUnset",
+			envValue:           "unset", // Special value to unset the env var
+			customDelaySeconds: "",
+			expectedDelay:      false,
+			expectedStatus:     nil,
+			description:        "Reserve should skip delay when CHRONOS_RESERVE_DELAY is not set",
+		},
+		{
+			name:               "ReserveDelayCustomDuration",
+			envValue:           "true",
+			customDelaySeconds: "1",
+			expectedDelay:      true,
+			expectedStatus:     nil,
+			description:        "Reserve should use custom 1s delay when CHRONOS_RESERVE_DELAY_SECONDS=1",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup environment variable
+			// Setup environment variables
 			if tt.envValue == "unset" {
 				os.Unsetenv("CHRONOS_RESERVE_DELAY")
 			} else {
 				os.Setenv("CHRONOS_RESERVE_DELAY", tt.envValue)
 			}
 			defer os.Unsetenv("CHRONOS_RESERVE_DELAY") // Cleanup
+			
+			if tt.customDelaySeconds != "" {
+				os.Setenv("CHRONOS_RESERVE_DELAY_SECONDS", tt.customDelaySeconds)
+			}
+			defer os.Unsetenv("CHRONOS_RESERVE_DELAY_SECONDS") // Cleanup
 
 			// Create plugin instance using New() to properly initialize cached config
 			pluginInterface, err := New(context.Background(), nil, nil)
@@ -3095,9 +3113,18 @@ func TestReservePluginFunctionality(t *testing.T) {
 
 			// Verify delay behavior
 			if tt.expectedDelay {
-				// Should take at least 2 seconds (with some tolerance for execution overhead)
-				if executionTime < 1800*time.Millisecond {
-					t.Errorf("❌ %s: Expected delay of ~2s, but execution took only %v", tt.name, executionTime)
+				// Determine expected delay duration
+				expectedSeconds := 2 // default
+				if tt.customDelaySeconds != "" {
+					if parsed, err := strconv.Atoi(tt.customDelaySeconds); err == nil && parsed > 0 {
+						expectedSeconds = parsed
+					}
+				}
+				
+				// Should take at least the expected duration (with some tolerance for execution overhead)
+				minExpected := time.Duration(expectedSeconds*900) * time.Millisecond // 90% tolerance
+				if executionTime < minExpected {
+					t.Errorf("❌ %s: Expected delay of ~%ds, but execution took only %v", tt.name, expectedSeconds, executionTime)
 				}
 				t.Logf("✅ %s: Delay verified - execution took %v", tt.name, executionTime)
 			} else {

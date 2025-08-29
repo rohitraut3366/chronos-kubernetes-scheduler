@@ -571,7 +571,7 @@ jobs:
         kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=10 || echo "No scheduler logs yet"
         echo "=== STARTING SIMULATIONS ==="
         
-        python3 run-simulations.py --config simulations.yaml --kubeconfig /tmp/kubeconfig || {
+        timeout 30m python3 run-simulations.py --config simulations.yaml --kubeconfig /tmp/kubeconfig || {
           EXIT_CODE=$?
           
           if [ $EXIT_CODE -eq 124 ]; then
