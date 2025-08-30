@@ -145,7 +145,7 @@ func TestPluginBasics(t *testing.T) {
 		assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation)
 		// maxPossibleScore constant removed as it's no longer used in scoring logic
 
-		t.Logf("✅ Constants validated - framework.MaxNodeScore = %d", framework.MaxNodeScore)
+		t.Logf("Constants validated - framework.MaxNodeScore = %d", framework.MaxNodeScore)
 	})
 }
 
@@ -266,7 +266,7 @@ func TestScoringScenarios(t *testing.T) {
 
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
-			t.Logf("🎯 %s", scenario.description)
+			t.Logf("%s", scenario.description)
 
 			// Calculate scores using mock helper with explicit type declarations
 			var score1, score2 int64
@@ -369,7 +369,6 @@ func TestRandomizedPropertyValidation(t *testing.T) {
 			})
 		}
 
-		t.Logf("Property-based testing completed: %d strict dominance cases validated", successfulTests)
 	})
 }
 
@@ -378,7 +377,6 @@ func TestRandomizedPropertyValidation(t *testing.T) {
 // =================================================================
 
 func TestRealisticClusterScenarios(t *testing.T) {
-	t.Log("🚀 Testing realistic production cluster scenarios")
 
 	clusterTests := []struct {
 		name        string
@@ -430,7 +428,7 @@ func TestRealisticClusterScenarios(t *testing.T) {
 
 	for _, cluster := range clusterTests {
 		t.Run(cluster.name, func(t *testing.T) {
-			t.Logf("🎯 %s", cluster.description)
+			t.Logf("%s", cluster.description)
 
 			var bestScore int64
 			var bestNode string
@@ -453,14 +451,13 @@ func TestRealisticClusterScenarios(t *testing.T) {
 				}
 			}
 
-			t.Logf("🏆 Winner: %s with score %d", bestNode, bestScore)
-			t.Logf("📝 Pattern: %s", cluster.expectedPattern)
+			t.Logf("Winner: %s with score %d", bestNode, bestScore)
+			t.Logf("Pattern: %s", cluster.expectedPattern)
 
 			// Validate that we selected a node (basic sanity check)
 			assert.NotEmpty(t, bestNode, "Should select a winning node")
 			assert.Greater(t, bestScore, int64(0), "Winning score should be positive")
 
-			t.Logf("Realistic cluster scheduling completed")
 		})
 	}
 }
@@ -470,7 +467,6 @@ func TestRealisticClusterScenarios(t *testing.T) {
 // =================================================================
 
 func TestPerformanceScaling(t *testing.T) {
-	t.Log("📈 Testing scheduler performance with various loads")
 
 	loadTests := []struct {
 		name        string
@@ -519,7 +515,6 @@ func TestPerformanceScaling(t *testing.T) {
 // =================================================================
 
 func TestCorrectnessInvariants(t *testing.T) {
-	t.Log("🔍 Validating core algorithm correctness invariants")
 
 	t.Run("EmptyNodePenaltyDominance", func(t *testing.T) {
 		// Test that active nodes beat empty nodes for cost optimization
@@ -542,7 +537,6 @@ func TestCorrectnessInvariants(t *testing.T) {
 		assert.Equal(t, emptyNode1, emptyNode2,
 			"Empty nodes have identical time-based scores (node1=%d, node2=%d). NodeResourcesFit handles resource tie-breaking.", emptyNode1, emptyNode2)
 
-		t.Log("Pure time-based scoring: identical time characteristics = identical scores")
 	})
 
 	t.Run("ScoreMonotonicity", func(t *testing.T) {
@@ -559,7 +553,6 @@ func TestCorrectnessInvariants(t *testing.T) {
 		sameTimeNode2 := calculateMockScore(30, 40, 15, 100) // Same bin-packing, different utilization
 		assert.Equal(t, sameTimeNode1, sameTimeNode2, "Pure time-based scoring: same time characteristics = same score")
 
-		t.Log("Hierarchical score monotonicity verified (time-based scoring)")
 	})
 }
 
@@ -568,7 +561,6 @@ func TestCorrectnessInvariants(t *testing.T) {
 // =================================================================
 
 func TestEdgeCaseCoverage(t *testing.T) {
-	t.Log("🔍 Testing edge cases for maximum coverage")
 
 	plugin := &Chronos{}
 
@@ -617,7 +609,6 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		completionTimeZeroJob := plugin.CalculateBinPackingCompletionTime(400, 0)
 		assert.Equal(t, int64(400), completionTimeZeroJob, "Zero job should return existing work")
 
-		t.Logf("Bin-packing edge cases covered")
 	})
 
 	t.Run("OptimizedScoreEdgeCases", func(t *testing.T) {
@@ -646,12 +637,10 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		expectedLarge := int64(BinPackingPriority) + 300*100 // Pure time-based score
 		assert.Equal(t, expectedLarge, scoreLarge, "Large capacity bin-packing score (pure time-based)")
 
-		t.Logf("Optimized score edge cases covered")
 	})
 }
 
 func TestBoundaryConditions(t *testing.T) {
-	t.Log("📐 Testing boundary conditions for complete coverage")
 
 	plugin := &Chronos{}
 
@@ -666,7 +655,6 @@ func TestBoundaryConditions(t *testing.T) {
 		score1 := plugin.CalculateOptimizedScore(testPodEmpty, nodeInfo, 0, 0)
 		assert.Greater(t, score1, int64(0), "Zero duration should still have positive score from utilization")
 
-		t.Logf("Zero duration boundaries covered")
 	})
 
 	t.Run("MaxValueBoundaries", func(t *testing.T) {
@@ -681,7 +669,6 @@ func TestBoundaryConditions(t *testing.T) {
 		score := plugin.CalculateOptimizedScore(testPodExtreme, nodeInfo, largeTime, 1000)
 		assert.Greater(t, score, int64(0), "Large times should still produce valid scores")
 
-		t.Logf("Maximum value boundaries covered")
 	})
 }
 
@@ -690,7 +677,6 @@ func TestBoundaryConditions(t *testing.T) {
 // =================================================================
 
 func TestScoreFunctionLogicCoverage(t *testing.T) {
-	t.Log("🎯 Additional tests to improve Score function coverage")
 
 	t.Run("TimeCalculationEdgeCases", func(t *testing.T) {
 		// Test the time calculation logic that happens in the Score function
@@ -930,7 +916,6 @@ func TestScoreFunctionLogicCoverage(t *testing.T) {
 // =================================================================
 
 func TestMainEntryPoints(t *testing.T) {
-	t.Log("🔗 Testing main plugin entry points that Kubernetes calls")
 
 	// Test plugin initialization
 	t.Run("PluginInitialization", func(t *testing.T) {
@@ -1029,7 +1014,6 @@ func TestMainEntryPoints(t *testing.T) {
 		assert.True(t, status2.IsSuccess(), "Invalid annotation should be handled gracefully")
 		assert.Equal(t, int64(0), score2, "Invalid annotation should return score 0")
 
-		t.Logf("Score function annotation parsing covered (early return paths)")
 	})
 
 	// Test Score function error handling paths
@@ -1050,7 +1034,7 @@ func TestMainEntryPoints(t *testing.T) {
 		// We'll catch this with a deferred recover to test the error path
 		defer func() {
 			if r := recover(); r != nil {
-				t.Logf("Nil handle error path covered (expected panic caught: %v)", r)
+
 			}
 		}()
 
@@ -1060,7 +1044,7 @@ func TestMainEntryPoints(t *testing.T) {
 		if !status.IsSuccess() {
 			assert.Equal(t, framework.Error, status.Code(), "Should return error status for node info failure")
 			assert.Equal(t, int64(0), score, "Should return 0 score on error")
-			t.Logf("Node info error path covered gracefully")
+
 		}
 	})
 
@@ -1338,7 +1322,6 @@ func TestEstimateNodeCapacity(t *testing.T) {
 // =================================================================
 
 func TestTwoPhaseDecisionLogic(t *testing.T) {
-	t.Log("🎯 Testing complete two-phase decision logic")
 
 	// Scenario: Choose between extension vs consolidation
 	testCases := []struct {
@@ -1444,7 +1427,6 @@ func TestTwoPhaseDecisionLogic(t *testing.T) {
 // =================================================================
 
 func TestMaximumCoveragePush(t *testing.T) {
-	t.Log("🚀 Strategic tests to push coverage to 80%+")
 
 	plugin := &Chronos{}
 
@@ -1486,7 +1468,6 @@ func TestMaximumCoveragePush(t *testing.T) {
 		assert.Equal(t, int64(0), largeScores[0].Score, "Smallest should be 0")
 		assert.Equal(t, int64(100), largeScores[1].Score, "Largest should be 100")
 
-		t.Logf("All NormalizeScore edge cases covered")
 	})
 
 	t.Run("EstimateCapacityAllBoundaries", func(t *testing.T) {
@@ -1534,7 +1515,6 @@ func TestMaximumCoveragePush(t *testing.T) {
 		// Resource scoring now handled by NodeResourcesFit plugin
 		assert.Equal(t, "fractional", nodeInfoFrac.Node().Name, "Node should be set correctly")
 
-		t.Logf("All resource utilization boundaries covered")
 	})
 
 	t.Run("OptimizedScoreCompleteMatrix", func(t *testing.T) {
@@ -1612,7 +1592,6 @@ func TestMaximumCoveragePush(t *testing.T) {
 // =================================================================
 
 func TestAdvancedScoreFunctionCoverage(t *testing.T) {
-	t.Log("🎯 Advanced tests to push Score() function coverage to 80%+")
 
 	t.Run("PodLogicCoverage_SimpleUnitTests", func(t *testing.T) {
 		// Simple unit tests that cover the Score function logic without complex mocking
@@ -1633,7 +1612,6 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			assert.True(t, skip2, "Failed pod should be skipped")
 			assert.False(t, skip3, "Running pod should not be skipped")
 
-			t.Logf("Pod phase filtering logic covered")
 		})
 
 		// Test 2: Annotation processing (lines that parse annotations)
@@ -1666,7 +1644,6 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			_, invalidErr := strconv.ParseInt(invalidDurationStr, 10, 64)
 			assert.Error(t, invalidErr, "Invalid duration should error")
 
-			t.Logf("Annotation processing logic covered")
 		})
 
 		// Test 3: Time calculations (lines that calculate remaining time)
@@ -1707,7 +1684,6 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 				assert.Equal(t, int64(0), negativeRemaining, "Negative should be clamped to 0")
 			}
 
-			t.Logf("Time calculation logic covered")
 		})
 
 		// Test 4: Max remaining time logic (lines that find maximum)
@@ -1734,10 +1710,8 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			}
 			assert.Equal(t, int64(0), maxRemainingTime, "Max should remain 0")
 
-			t.Logf("Maximum remaining time logic covered")
 		})
 
-		t.Logf("Score function internal logic comprehensively covered via unit tests")
 	})
 
 	t.Run("PluginMainEntryPointCoverage", func(t *testing.T) {
@@ -1752,7 +1726,6 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			name := plugin.Name()
 			assert.Equal(t, PluginName, name, "Name should match constant")
 
-			t.Logf("New() function and Name() function covered")
 		})
 
 		// Test constants and package-level variables
@@ -1762,10 +1735,8 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			// maxPossibleScore constant removed - no longer used in scoring logic
 			// Removed utilizationBonus constant - now using hierarchical scoring with priority levels
 
-			t.Logf("All package constants covered")
 		})
 
-		t.Logf("Main plugin entry points comprehensively covered")
 	})
 }
 
@@ -1774,7 +1745,6 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 // =================================================================
 
 func TestScoreFunctionStrategicCoverage(t *testing.T) {
-	t.Log("🎯 Strategic tests to push Score function coverage toward 80%")
 
 	t.Run("ConstantsAndPackageLevelAccess", func(t *testing.T) {
 		// Test direct access to package-level constants (ensures they're covered)
@@ -1820,7 +1790,6 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 			})
 		}
 
-		t.Logf("CalculateBinPackingCompletionTime method integration verified")
 	})
 
 	t.Run("CalculateOptimizedScoreExtensive", func(t *testing.T) {
@@ -1946,7 +1915,6 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 		extensions := plugin.ScoreExtensions()
 		assert.Equal(t, plugin, extensions, "ScoreExtensions should return self")
 
-		t.Logf("Plugin interface methods covered")
 	})
 
 	t.Run("NewPluginConstructorVariations", func(t *testing.T) {
@@ -1979,7 +1947,6 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 // =================================================================
 
 func TestScoreFunctionFrameworkIntegration(t *testing.T) {
-	t.Log("🎯 Framework integration tests to push Score() function coverage toward 80%")
 
 	t.Run("ScoreWithRealFrameworkHandle", func(t *testing.T) {
 		// Create comprehensive mock handle that supports real Score() calls
@@ -2585,7 +2552,6 @@ func createNodeWithOverduePods(nodeName string) *framework.NodeInfo {
 }
 
 func TestQueueSortPluginFunctionality(t *testing.T) {
-	t.Log("🎯 Testing QueueSort plugin functionality")
 
 	chronos := &Chronos{handle: createComprehensiveMockHandle()}
 
@@ -2683,14 +2649,13 @@ func TestQueueSortPluginFunctionality(t *testing.T) {
 			result := chronos.Less(tt.pod1, tt.pod2)
 			assert.Equal(t, tt.expectPod1First, result,
 				"Less(%s, %s): %s", tt.pod1.PodInfo.Pod.Name, tt.pod2.PodInfo.Pod.Name, tt.description)
-			t.Logf("✅ %s: Pod1=%s, Pod2=%s, Pod1First=%v (%s)",
+			t.Logf(" %s: Pod1=%s, Pod2=%s, Pod1First=%v (%s)",
 				tt.name, tt.pod1.PodInfo.Pod.Name, tt.pod2.PodInfo.Pod.Name, result, tt.description)
 		})
 	}
 }
 
 func TestGetPodDurationFunction(t *testing.T) {
-	t.Log("🎯 Testing getPodDuration utility function")
 
 	chronos := &Chronos{}
 
@@ -2711,13 +2676,12 @@ func TestGetPodDurationFunction(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := chronos.getPodDuration(tc.pod)
 			assert.Equal(t, tc.expected, result)
-			t.Logf("✅ %s: Duration=%d", tc.name, result)
+			t.Logf(" %s: Duration=%d", tc.name, result)
 		})
 	}
 }
 
 func TestEnvironmentVariableFlagCoverage(t *testing.T) {
-	t.Log("🎯 Testing environment variable flag coverage")
 
 	tests := []struct {
 		name          string
@@ -2756,7 +2720,7 @@ func TestEnvironmentVariableFlagCoverage(t *testing.T) {
 			chronos := plugin.(*Chronos)
 			assert.NotNil(t, chronos.handle)
 
-			t.Logf("✅ %s: Environment flag handled correctly", tt.name)
+			t.Logf(" %s: Environment flag handled correctly", tt.name)
 		})
 	}
 }
@@ -2779,7 +2743,6 @@ func createQueuedPodInfoWithTimestamp(name string, duration int64, timestamp tim
 }
 
 func TestLessFunctionComprehensive(t *testing.T) {
-	t.Log("🧪 Comprehensive unit tests for Less() function decision paths")
 
 	chronos := &Chronos{handle: createComprehensiveMockHandle()}
 
@@ -2967,7 +2930,7 @@ func TestLessFunctionComprehensive(t *testing.T) {
 					result := chronos.Less(tt.pod1, tt.pod2)
 					assert.Equal(t, tt.expectPod1First, result,
 						"Less(%s, %s): %s", tt.pod1.PodInfo.Pod.Name, tt.pod2.PodInfo.Pod.Name, tt.description)
-					t.Logf("✅ %s: Pod1=%s, Pod2=%s, Pod1First=%v (%s)",
+					t.Logf(" %s: Pod1=%s, Pod2=%s, Pod1First=%v (%s)",
 						tt.name, tt.pod1.PodInfo.Pod.Name, tt.pod2.PodInfo.Pod.Name, result, tt.description)
 				})
 			}
@@ -3020,7 +2983,6 @@ func createQueuedPodInfoWithPriorityAndTimestamp(name string, duration int64, pr
 // =============================================================================
 
 func TestReservePluginFunctionality(t *testing.T) {
-	t.Log("🎯 Testing Reserve plugin functionality")
 
 	tests := []struct {
 		name               string
@@ -3144,7 +3106,7 @@ func TestReservePluginFunctionality(t *testing.T) {
 
 			// Verify return status
 			if status != tt.expectedStatus {
-				t.Errorf("❌ %s: Expected status %v, got %v", tt.name, tt.expectedStatus, status)
+				t.Errorf(" %s: Expected status %v, got %v", tt.name, tt.expectedStatus, status)
 			}
 
 			// Verify delay behavior
@@ -3166,24 +3128,23 @@ func TestReservePluginFunctionality(t *testing.T) {
 				// Should take at least the expected duration (with some tolerance for execution overhead)
 				minExpected := time.Duration(expectedSeconds*900) * time.Millisecond // 90% tolerance
 				if executionTime < minExpected {
-					t.Errorf("❌ %s: Expected delay of ~%ds, but execution took only %v", tt.name, expectedSeconds, executionTime)
+					t.Errorf(" %s: Expected delay of ~%ds, but execution took only %v", tt.name, expectedSeconds, executionTime)
 				}
-				t.Logf("✅ %s: Delay verified - execution took %v (expected ~%ds)", tt.name, executionTime, expectedSeconds)
+				t.Logf(" %s: Delay verified - execution took %v (expected ~%ds)", tt.name, executionTime, expectedSeconds)
 			} else {
 				// Should be very fast (less than 100ms)
 				if executionTime > 100*time.Millisecond {
-					t.Errorf("❌ %s: Expected no delay, but execution took %v", tt.name, executionTime)
+					t.Errorf(" %s: Expected no delay, but execution took %v", tt.name, executionTime)
 				}
-				t.Logf("✅ %s: No delay verified - execution took %v", tt.name, executionTime)
+				t.Logf(" %s: No delay verified - execution took %v", tt.name, executionTime)
 			}
 
-			t.Logf("✅ %s: %s", tt.name, tt.description)
+			t.Logf(" %s: %s", tt.name, tt.description)
 		})
 	}
 }
 
 func TestUnreservePluginFunctionality(t *testing.T) {
-	t.Log("🎯 Testing Unreserve plugin functionality")
 
 	tests := []struct {
 		name        string
@@ -3238,16 +3199,15 @@ func TestUnreservePluginFunctionality(t *testing.T) {
 
 			// Verify it executes quickly (no delays)
 			if executionTime > 50*time.Millisecond {
-				t.Errorf("❌ %s: Unreserve took too long: %v", tt.name, executionTime)
+				t.Errorf(" %s: Unreserve took too long: %v", tt.name, executionTime)
 			}
 
-			t.Logf("✅ %s: %s (execution: %v)", tt.name, tt.description, executionTime)
+			t.Logf(" %s: %s (execution: %v)", tt.name, tt.description, executionTime)
 		})
 	}
 }
 
 func TestReserveUnreserveIntegration(t *testing.T) {
-	t.Log("🎯 Testing Reserve/Unreserve integration scenarios")
 
 	tests := []struct {
 		name          string
@@ -3303,7 +3263,7 @@ func TestReserveUnreserveIntegration(t *testing.T) {
 
 				// Verify status is always nil (success)
 				if status != nil {
-					t.Errorf("❌ Reserve failed for pod %d: %v", i, status)
+					t.Errorf(" Reserve failed for pod %d: %v", i, status)
 				}
 
 				// Immediately call Unreserve for the same pod
@@ -3313,7 +3273,7 @@ func TestReserveUnreserveIntegration(t *testing.T) {
 
 				// Unreserve should always be fast
 				if unreserveTime > 10*time.Millisecond {
-					t.Errorf("❌ Unreserve took too long for pod %d: %v", i, unreserveTime)
+					t.Errorf(" Unreserve took too long for pod %d: %v", i, unreserveTime)
 				}
 			}
 
@@ -3321,25 +3281,24 @@ func TestReserveUnreserveIntegration(t *testing.T) {
 			if tt.expectedDelay {
 				expectedMinTime := time.Duration(tt.podCount) * 1800 * time.Millisecond // ~1.8s per pod
 				if totalReserveTime < expectedMinTime {
-					t.Errorf("❌ %s: Expected total Reserve time >= %v, got %v",
+					t.Errorf(" %s: Expected total Reserve time >= %v, got %v",
 						tt.name, expectedMinTime, totalReserveTime)
 				}
 			} else {
 				maxExpectedTime := time.Duration(tt.podCount) * 50 * time.Millisecond // 50ms per pod max
 				if totalReserveTime > maxExpectedTime {
-					t.Errorf("❌ %s: Expected total Reserve time <= %v, got %v",
+					t.Errorf(" %s: Expected total Reserve time <= %v, got %v",
 						tt.name, maxExpectedTime, totalReserveTime)
 				}
 			}
 
-			t.Logf("✅ %s: %s (total Reserve time: %v for %d pods)",
+			t.Logf(" %s: %s (total Reserve time: %v for %d pods)",
 				tt.name, tt.description, totalReserveTime, tt.podCount)
 		})
 	}
 }
 
 func TestReservePluginInterfaceConformance(t *testing.T) {
-	t.Log("🎯 Testing Reserve plugin interface conformance")
 
 	// Verify that Chronos implements ReservePlugin interface
 	var _ framework.ReservePlugin = &Chronos{}
@@ -3353,7 +3312,7 @@ func TestReservePluginInterfaceConformance(t *testing.T) {
 	t.Run("NilContextHandling", func(t *testing.T) {
 		defer func() {
 			if r := recover(); r != nil {
-				t.Errorf("❌ Reserve panicked with nil context: %v", r)
+				t.Errorf(" Reserve panicked with nil context: %v", r)
 			}
 		}()
 
@@ -3363,19 +3322,18 @@ func TestReservePluginInterfaceConformance(t *testing.T) {
 		// This should not panic even with nil context (Go's context handling)
 		status := plugin.Reserve(context.Background(), state, pod, "node")
 		if status != nil {
-			t.Errorf("❌ Expected nil status, got: %v", status)
+			t.Errorf(" Expected nil status, got: %v", status)
 		}
 
 		// Unreserve should also not panic
 		plugin.Unreserve(context.Background(), state, pod, "node")
 
-		t.Log("✅ Nil context handling verified")
 	})
 
 	t.Run("EmptyPodHandling", func(t *testing.T) {
 		defer func() {
 			if r := recover(); r != nil {
-				t.Errorf("❌ Reserve panicked with empty pod: %v", r)
+				t.Errorf(" Reserve panicked with empty pod: %v", r)
 			}
 		}()
 
@@ -3385,15 +3343,13 @@ func TestReservePluginInterfaceConformance(t *testing.T) {
 
 		status := plugin.Reserve(ctx, state, pod, "node")
 		if status != nil {
-			t.Errorf("❌ Expected nil status with empty pod, got: %v", status)
+			t.Errorf(" Expected nil status with empty pod, got: %v", status)
 		}
 
 		plugin.Unreserve(ctx, state, pod, "node")
 
-		t.Log("✅ Empty pod handling verified")
 	})
 
-	t.Log("✅ Reserve plugin interface conformance verified")
 }
 
 // =================================================================
@@ -3401,7 +3357,6 @@ func TestReservePluginInterfaceConformance(t *testing.T) {
 // =================================================================
 
 func TestExtensionHierarchyFix(t *testing.T) {
-	t.Log("Testing extension vs empty node hierarchy fix")
 
 	t.Run("ExtensionAlwaysBeatsEmpty", func(t *testing.T) {
 		// Test the specific scenario from the bug report where empty node was chosen
