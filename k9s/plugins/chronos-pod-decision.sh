@@ -119,7 +119,6 @@ analyze_pod_decision() {
     
     # Pre-extract commonly used log patterns for performance
     local chronos_score_logs=$(echo "$logs" | grep "CHRONOS_SCORE:" || true)
-    local normalize_score_logs=$(echo "$logs" | grep "RawScore.*NormalizedScore" || true)
     local bound_logs=$(echo "$logs" | grep "Successfully bound pod" || true)
     
     if [[ -z "$logs" ]]; then
@@ -195,7 +194,6 @@ analyze_pod_decision() {
     local max_strategy_width=8  # minimum for "Strategy" 
     local max_completion_width=15  # minimum for "Completion Time"
     local max_raw_width=9  # minimum for "Raw Score"
-    local max_norm_width=10  # minimum for "Norm Score"
     local max_calc_width=19  # minimum for "Calculation Details"
     
     # Parse node evaluations from detailed CHRONOS_SCORE format - optimized for performance
@@ -216,10 +214,6 @@ analyze_pod_decision() {
         local completion_time=$(echo "$line" | sed -n 's/.*CompletionTime=\([^,]*\),.*/\1/p')
         local raw_score=$(echo "$line" | sed -n 's/.*FinalScore=\([0-9-]*\).*/\1/p')
         
-        # Pre-extract normalized score for this specific node (much faster than nested grep)
-        local norm_score=$(echo "$normalize_score_logs" | grep "Node: $node_name," | sed -n 's/.*NormalizedScore: \([0-9]*\).*/\1/p' | head -1)
-        norm_score=${norm_score:-"N/A"}
-        
         # Create detailed calculation info for display
         if [[ "$strategy" == "BIN-PACKING" ]]; then
             calc_info="Fits in ${existing_work}"
@@ -233,56 +227,54 @@ analyze_pod_decision() {
         display_strategy="$strategy"
         [[ "$strategy" == "EMPTY-NODE" ]] && display_strategy="EMPTY NODE"
         
-        node_data+=("$node_name|$display_strategy|$completion_time|$raw_score|$norm_score|$calc_info|$strategy")
+        node_data+=("$node_name|$display_strategy|$completion_time|$raw_score|$calc_info|$strategy")
         
         # Update maximum widths
         [[ ${#node_name} -gt $max_node_width ]] && max_node_width=${#node_name}
         [[ ${#display_strategy} -gt $max_strategy_width ]] && max_strategy_width=${#display_strategy}
         [[ ${#completion_time} -gt $max_completion_width ]] && max_completion_width=${#completion_time}
         [[ ${#raw_score} -gt $max_raw_width ]] && max_raw_width=${#raw_score}
-        [[ ${#norm_score} -gt $max_norm_width ]] && max_norm_width=${#norm_score}
         [[ ${#calc_info} -gt $max_calc_width ]] && max_calc_width=${#calc_info}
     done <<< "$chronos_score_logs"
     
     # Generate dynamic table borders and headers
-    local border_line="┌$(printf "%*s" $((max_node_width + 2)) "" | tr ' ' '─')┬$(printf "%*s" $((max_strategy_width + 2)) "" | tr ' ' '─')┬$(printf "%*s" $((max_completion_width + 2)) "" | tr ' ' '─')┬$(printf "%*s" $((max_raw_width + 2)) "" | tr ' ' '─')┬$(printf "%*s" $((max_norm_width + 2)) "" | tr ' ' '─')┬$(printf "%*s" $((max_calc_width + 2)) "" | tr ' ' '─')┐"
-    local separator_line="├$(printf "%*s" $((max_node_width + 2)) "" | tr ' ' '─')┼$(printf "%*s" $((max_strategy_width + 2)) "" | tr ' ' '─')┼$(printf "%*s" $((max_completion_width + 2)) "" | tr ' ' '─')┼$(printf "%*s" $((max_raw_width + 2)) "" | tr ' ' '─')┼$(printf "%*s" $((max_norm_width + 2)) "" | tr ' ' '─')┼$(printf "%*s" $((max_calc_width + 2)) "" | tr ' ' '─')┤"
-    local bottom_line="└$(printf "%*s" $((max_node_width + 2)) "" | tr ' ' '─')┴$(printf "%*s" $((max_strategy_width + 2)) "" | tr ' ' '─')┴$(printf "%*s" $((max_completion_width + 2)) "" | tr ' ' '─')┴$(printf "%*s" $((max_raw_width + 2)) "" | tr ' ' '─')┴$(printf "%*s" $((max_norm_width + 2)) "" | tr ' ' '─')┴$(printf "%*s" $((max_calc_width + 2)) "" | tr ' ' '─')┘"
+    local border_line="┌$(printf "%*s" $((max_node_width + 2)) "" | tr ' ' '─')┬$(printf "%*s" $((max_strategy_width + 2)) "" | tr ' ' '─')┬$(printf "%*s" $((max_completion_width + 2)) "" | tr ' ' '─')┬$(printf "%*s" $((max_raw_width + 2)) "" | tr ' ' '─')┬$(printf "%*s" $((max_calc_width + 2)) "" | tr ' ' '─')┐"
+    local separator_line="├$(printf "%*s" $((max_node_width + 2)) "" | tr ' ' '─')┼$(printf "%*s" $((max_strategy_width + 2)) "" | tr ' ' '─')┼$(printf "%*s" $((max_completion_width + 2)) "" | tr ' ' '─')┼$(printf "%*s" $((max_raw_width + 2)) "" | tr ' ' '─')┼$(printf "%*s" $((max_calc_width + 2)) "" | tr ' ' '─')┤"
+    local bottom_line="└$(printf "%*s" $((max_node_width + 2)) "" | tr ' ' '─')┴$(printf "%*s" $((max_strategy_width + 2)) "" | tr ' ' '─')┴$(printf "%*s" $((max_completion_width + 2)) "" | tr ' ' '─')┴$(printf "%*s" $((max_raw_width + 2)) "" | tr ' ' '─')┴$(printf "%*s" $((max_calc_width + 2)) "" | tr ' ' '─')┘"
     
     # Print table header
     echo "$border_line"
-    printf "│ %-*s │ %-*s │ %-*s │ %-*s │ %-*s │ %-*s │\n" \
+    printf "│ %-*s │ %-*s │ %-*s │ %-*s │ %-*s │\n" \
         $max_node_width "Node Name" \
         $max_strategy_width "Strategy" \
         $max_completion_width "Completion Time" \
-        $max_raw_width "Raw Score" \
-        $max_norm_width "Norm Score" \
+        $max_raw_width "Score" \
         $max_calc_width "Calculation Details"
     echo "$separator_line"
     
     # Second pass: format and display data
     for data in "${node_data[@]}"; do
-        IFS='|' read -r node_name display_strategy completion_time raw_score norm_score calc_info strategy <<< "$data"
+        IFS='|' read -r node_name display_strategy completion_time raw_score calc_info strategy <<< "$data"
         
         # Highlight chosen node and color-code strategies
         if [[ "$node_name" == "$chosen_node" ]]; then
             case "$strategy" in
                 "BIN-PACKING")
-                    echo -e "$(printf "│ ${GREEN}%-*s${NC} │ ${CYAN}%-*s${NC} │ ${YELLOW}%-*s${NC} │ ${MAGENTA}%-*s${NC} │ ${BOLD}%-*s${NC} │ ${CYAN}%-*s${NC} │" $max_node_width "$node_name" $max_strategy_width "$display_strategy" $max_completion_width "$completion_time" $max_raw_width "$raw_score" $max_norm_width "$norm_score" $max_calc_width "$calc_info")"
+                    echo -e "$(printf "│ ${GREEN}%-*s${NC} │ ${CYAN}%-*s${NC} │ ${YELLOW}%-*s${NC} │ ${MAGENTA}%-*s${NC} │ ${CYAN}%-*s${NC} │" $max_node_width "$node_name" $max_strategy_width "$display_strategy" $max_completion_width "$completion_time" $max_raw_width "$raw_score" $max_calc_width "$calc_info")"
                     ;;
                 "EXTENSION")
-                    echo -e "$(printf "│ ${GREEN}%-*s${NC} │ ${YELLOW}%-*s${NC} │ ${YELLOW}%-*s${NC} │ ${MAGENTA}%-*s${NC} │ ${BOLD}%-*s${NC} │ ${YELLOW}%-*s${NC} │" $max_node_width "$node_name" $max_strategy_width "$display_strategy" $max_completion_width "$completion_time" $max_raw_width "$raw_score" $max_norm_width "$norm_score" $max_calc_width "$calc_info")"
+                    echo -e "$(printf "│ ${GREEN}%-*s${NC} │ ${YELLOW}%-*s${NC} │ ${YELLOW}%-*s${NC} │ ${MAGENTA}%-*s${NC} │ ${YELLOW}%-*s${NC} │" $max_node_width "$node_name" $max_strategy_width "$display_strategy" $max_completion_width "$completion_time" $max_raw_width "$raw_score" $max_calc_width "$calc_info")"
                     ;;
                 "EMPTY-NODE")
-                    echo -e "$(printf "│ ${GREEN}%-*s${NC} │ ${MAGENTA}%-*s${NC} │ ${YELLOW}%-*s${NC} │ ${MAGENTA}%-*s${NC} │ ${BOLD}%-*s${NC} │ ${MAGENTA}%-*s${NC} │" $max_node_width "$node_name" $max_strategy_width "$display_strategy" $max_completion_width "$completion_time" $max_raw_width "$raw_score" $max_norm_width "$norm_score" $max_calc_width "$calc_info")"
+                    echo -e "$(printf "│ ${GREEN}%-*s${NC} │ ${MAGENTA}%-*s${NC} │ ${YELLOW}%-*s${NC} │ ${MAGENTA}%-*s${NC} │ ${MAGENTA}%-*s${NC} │" $max_node_width "$node_name" $max_strategy_width "$display_strategy" $max_completion_width "$completion_time" $max_raw_width "$raw_score" $max_calc_width "$calc_info")"
                     ;;
                 *)
-                    echo -e "$(printf "│ ${GREEN}%-*s${NC} │ %-*s │ ${YELLOW}%-*s${NC} │ ${MAGENTA}%-*s${NC} │ ${BOLD}%-*s${NC} │ %-*s │" $max_node_width "$node_name" $max_strategy_width "$display_strategy" $max_completion_width "$completion_time" $max_raw_width "$raw_score" $max_norm_width "$norm_score" $max_calc_width "$calc_info")"
+                    echo -e "$(printf "│ ${GREEN}%-*s${NC} │ %-*s │ ${YELLOW}%-*s${NC} │ ${MAGENTA}%-*s${NC} │ %-*s │" $max_node_width "$node_name" $max_strategy_width "$display_strategy" $max_completion_width "$completion_time" $max_raw_width "$raw_score" $max_calc_width "$calc_info")"
                     ;;
             esac
         else
             # Non-chosen nodes
-            echo "$(printf "│ %-*s │ %-*s │ %-*s │ %-*s │ %-*s │ %-*s │" $max_node_width "$node_name" $max_strategy_width "$display_strategy" $max_completion_width "$completion_time" $max_raw_width "$raw_score" $max_norm_width "$norm_score" $max_calc_width "$calc_info")"
+            echo "$(printf "│ %-*s │ %-*s │ %-*s │ %-*s │ %-*s │" $max_node_width "$node_name" $max_strategy_width "$display_strategy" $max_completion_width "$completion_time" $max_raw_width "$raw_score" $max_calc_width "$calc_info")"
         fi
     done
     
