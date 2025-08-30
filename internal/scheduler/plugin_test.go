@@ -3394,6 +3394,7 @@ func TestReservePluginInterfaceConformance(t *testing.T) {
 	})
 
 	t.Log("✅ Reserve plugin interface conformance verified")
+}
 
 // =================================================================
 // Hierarchy Fix Validation Tests
