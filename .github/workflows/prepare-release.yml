@@ -1,0 +1,262 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.2.3)'
+        required: true
+        type: string
+      release-type:
+        description: 'Type of release'
+        required: true
+        default: 'minor'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - prerelease
+      prerelease-identifier:
+        description: 'Prerelease identifier (e.g., alpha, beta, rc1)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare-release:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          PRERELEASE_ID="${{ github.event.inputs.prerelease-identifier }}"
+          RELEASE_TYPE="${{ github.event.inputs.release-type }}"
+          
+          # Build full version string
+          if [[ "$RELEASE_TYPE" == "prerelease" && -n "$PRERELEASE_ID" ]]; then
+            FULL_VERSION="${VERSION}-${PRERELEASE_ID}"
+          else
+            FULL_VERSION="$VERSION"
+          fi
+          
+          echo "FULL_VERSION=$FULL_VERSION" >> $GITHUB_ENV
+          
+          # Validate semantic versioning
+          if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Invalid version format: $VERSION"
+            echo "Expected format: 1.2.3"
+            exit 1
+          fi
+          
+          if [[ "$RELEASE_TYPE" == "prerelease" && -z "$PRERELEASE_ID" ]]; then
+            echo "❌ Prerelease identifier required for prerelease type"
+            exit 1
+          fi
+          
+          echo "✅ Version validation passed: v$FULL_VERSION"
+
+      - name: Check if version exists
+        run: |
+          FULL_VERSION="${{ env.FULL_VERSION }}"
+          
+          if git rev-parse "v$FULL_VERSION" >/dev/null 2>&1; then
+            echo "❌ Version v$FULL_VERSION already exists!"
+            exit 1
+          fi
+          
+          echo "✅ Version v$FULL_VERSION is available"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          VERSION="${{ env.FULL_VERSION }}"
+          
+          # Get latest tag for changelog generation
+          LATEST_TAG=$(git tag -l "v*.*.*" | sort -V | tail -n1)
+          echo "Latest tag: $LATEST_TAG"
+          
+          # Create changelog
+          cat > CHANGELOG_DRAFT.md << 'EOF'
+          # Changelog for v$VERSION
+          
+          ## 🚀 What's Changed
+          
+          ### 🔧 Features & Improvements
+          <!-- Add new features and improvements here -->
+          
+          ### 🐛 Bug Fixes  
+          <!-- Add bug fixes here -->
+          
+          ### 🔧 Other Changes
+          <!-- Add other changes here -->
+          
+          ### 📝 Commits Since $LATEST_TAG
+          EOF
+          
+          # Add commit log since last tag
+          if [[ -n "$LATEST_TAG" ]]; then
+            echo "" >> CHANGELOG_DRAFT.md
+            git log --oneline --no-merges ${LATEST_TAG}..HEAD >> CHANGELOG_DRAFT.md || echo "No new commits" >> CHANGELOG_DRAFT.md
+          fi
+          
+          echo "changelog-file=CHANGELOG_DRAFT.md" >> $GITHUB_OUTPUT
+
+      - name: Update version in files
+        run: |
+          VERSION="${{ env.FULL_VERSION }}"
+          BASE_VERSION="${{ github.event.inputs.version }}"
+          
+          echo "Updating version to v$VERSION"
+          
+          # Update Chart.yaml
+          sed -i "s/^version:.*/version: $BASE_VERSION/" charts/chronos-kubernetes-scheduler/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"v$VERSION\"/" charts/chronos-kubernetes-scheduler/Chart.yaml
+          
+          # Update values.yaml default image tag
+          sed -i "s/tag: .*/tag: \"v$VERSION\"/" charts/chronos-kubernetes-scheduler/values.yaml
+          
+          # Update any version references in README if they exist
+          if [ -f README.md ]; then
+            # Update image references in README (if any)
+            sed -i "s|ghcr.io/${{ github.repository }}:v[0-9]*\.[0-9]*\.[0-9]*|ghcr.io/${{ github.repository }}:v$VERSION|g" README.md || true
+          fi
+          
+          echo "✅ Version updated in configuration files"
+
+      - name: Create release preparation PR
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: prepare release v${{ env.FULL_VERSION }}"
+          title: "🚀 Prepare release v${{ env.FULL_VERSION }}"
+          body: |
+            ## 🚀 Release Preparation: v${{ env.FULL_VERSION }}
+            
+            This PR prepares the release for version **v${{ env.FULL_VERSION }}**.
+            
+            ### 📋 Changes Made
+            - ✅ Updated Chart.yaml version to `${{ github.event.inputs.version }}`
+            - ✅ Updated Chart.yaml appVersion to `v${{ env.FULL_VERSION }}`
+            - ✅ Updated values.yaml default image tag to `v${{ env.FULL_VERSION }}`
+            - ✅ Updated version references in documentation
+            - ✅ Generated changelog draft
+            
+            ### 🚦 Next Steps
+            1. **Review** this PR for accuracy
+            2. **Update** the changelog in `CHANGELOG_DRAFT.md` with proper release notes
+            3. **Merge** this PR to master
+            4. **Create the release tag** by running:
+               ```bash
+               git tag v${{ env.FULL_VERSION }}
+               git push origin v${{ env.FULL_VERSION }}
+               ```
+            5. The **release workflow** will automatically trigger and create the GitHub release
+            
+            ### 🔗 Release Type
+            **${{ github.event.inputs.release-type }}** release
+            
+            ### ⚠️ Important
+            - Ensure all tests pass before merging
+            - Verify the changelog is accurate and complete
+            - The actual release will be created when you push the git tag
+            
+            ---
+            
+            > This PR was automatically generated by the **Prepare Release** workflow.
+          branch: prepare-release-v${{ env.FULL_VERSION }}
+          branch-suffix: timestamp
+          delete-branch: true
+          labels: |
+            release
+            automation
+            
+      - name: Create release instructions
+        run: |
+          VERSION="${{ env.FULL_VERSION }}"
+          
+          cat > RELEASE_INSTRUCTIONS.md << EOF
+          # 🚀 Release Instructions for v$VERSION
+          
+          ## Steps to Complete the Release
+          
+          ### 1. Review the Preparation PR
+          A pull request has been created to prepare the release. Please:
+          - Review all version updates
+          - Update the changelog with proper release notes
+          - Ensure all tests pass
+          
+          ### 2. Merge the PR
+          Once satisfied with the changes, merge the preparation PR.
+          
+          ### 3. Create and Push the Release Tag
+          After merging, create the release tag:
+          
+          \`\`\`bash
+          # Fetch latest changes
+          git checkout master
+          git pull origin master
+          
+          # Create and push the tag
+          git tag v$VERSION
+          git push origin v$VERSION
+          \`\`\`
+          
+          ### 4. Monitor the Release
+          The release workflow will automatically:
+          - ✅ Run comprehensive tests
+          - ✅ Build multi-platform binaries
+          - ✅ Build and push container images
+          - ✅ Package Helm charts
+          - ✅ Generate Kubernetes manifests
+          - ✅ Run security scans
+          - ✅ Create GitHub release with all artifacts
+          - ✅ Sign container images with cosign
+          - ✅ Generate SBOM
+          
+          ### 5. Verify the Release
+          Once complete, verify:
+          - GitHub release is created with all artifacts
+          - Container images are available at ghcr.io/${{ github.repository }}:v$VERSION
+          - Helm chart is packaged and available
+          - All security scans pass
+          
+          ## 🔗 Useful Links
+          - [GitHub Actions](https://github.com/${{ github.repository }}/actions)
+          - [Container Registry](https://github.com/${{ github.repository }}/pkgs/container/chronos-kubernetes-scheduler)
+          - [Releases](https://github.com/${{ github.repository }}/releases)
+          
+          ---
+          
+          Happy releasing! 🎉
+          EOF
+          
+          echo "📋 Release instructions created in RELEASE_INSTRUCTIONS.md"
+          cat RELEASE_INSTRUCTIONS.md
+
+      - name: Output summary
+        run: |
+          echo "## 🚀 Release Preparation Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** v${{ env.FULL_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Type:** ${{ github.event.inputs.release-type }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Completed" >> $GITHUB_STEP_SUMMARY
+          echo "- Created preparation PR with version updates" >> $GITHUB_STEP_SUMMARY
+          echo "- Generated changelog template" >> $GITHUB_STEP_SUMMARY
+          echo "- Updated Chart.yaml and values.yaml" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🚦 Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Review and merge the preparation PR" >> $GITHUB_STEP_SUMMARY
+          echo "2. Create git tag: \`git tag v${{ env.FULL_VERSION }} && git push origin v${{ env.FULL_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. Release workflow will automatically handle the rest!" >> $GITHUB_STEP_SUMMARY

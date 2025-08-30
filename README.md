@@ -92,8 +92,34 @@ spec:
 
 ### 2. Deploy the Scheduler
 
+#### Using Helm (Recommended)
+
 ```bash
-# Install
+# Add Helm repository (for releases)
+helm repo add chronos https://rohitraut3366.github.io/chronos-kubernetes-scheduler/
+helm repo update
+
+# Install latest release
+helm install chronos-scheduler chronos/chronos-kubernetes-scheduler
+
+# Or install specific version
+helm install chronos-scheduler chronos/chronos-kubernetes-scheduler --version 1.2.3
+```
+
+#### Using Pre-built Manifests
+
+```bash
+# Install latest release
+kubectl apply -f https://github.com/rohitraut3366/chronos-kubernetes-scheduler/releases/latest/download/chronos-scheduler-default.yaml
+
+# Or install specific version
+kubectl apply -f https://github.com/rohitraut3366/chronos-kubernetes-scheduler/releases/download/v1.2.3/chronos-scheduler-default.yaml
+```
+
+#### Development Installation
+
+```bash
+# Install from source (development)
 helm install chronos-scheduler ./charts/chronos-kubernetes-scheduler
 
 # Install with custom namespace
