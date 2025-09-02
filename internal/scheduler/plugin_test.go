@@ -23,6 +23,7 @@ import (
 	"k8s.io/client-go/tools/events"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework/parallelize"
+	"k8s.io/kubernetes/pkg/scheduler/util/assumecache"
 )
 
 // =================================================================
@@ -2255,6 +2256,10 @@ func (h *comprehensiveMockHandle) SharedInformerFactory() informers.SharedInform
 // Corrected method to match the required interface.
 func (h *comprehensiveMockHandle) Parallelizer() parallelize.Parallelizer {
 	return parallelize.NewParallelizer(1) // Use the actual Parallelizer with 1 worker
+}
+
+func (h *comprehensiveMockHandle) ResourceClaimCache() *assumecache.AssumeCache {
+	return nil
 }
 
 // Additional required methods with correct signatures
