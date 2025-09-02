@@ -11,43 +11,20 @@ data:
     kind: KubeSchedulerConfiguration
     profiles:
     - schedulerName: {{ .Values.scheduler.name }}
+      {{- $profile := index .Values.profiles .Values.scheduler.profileName }}
+      {{- if not $profile }}
+        {{- fail (printf "Profile '%s' not found in profiles. Available profiles: %s" .Values.scheduler.profileName (keys .Values.profiles | join ", ")) }}
+      {{- end }}
+      {{- if not $profile.plugins }}
+        {{- fail (printf "Profile '%s' is missing required 'plugins' section" .Values.scheduler.profileName) }}
+      {{- end }}
+      {{- if not $profile.pluginConfig }}
+        {{- fail (printf "Profile '%s' is missing required 'pluginConfig' section" .Values.scheduler.profileName) }}
+      {{- end }}
       plugins:
-        # Scoring plugins - hierarchical priority
-        score:
-          enabled:
-          - name: {{ .Values.scheduler.plugin.name }}
-            weight: {{ .Values.scheduler.plugin.weight | default 100 }}  # Primary: Time-based logic
-          - name: NodeResourcesFit
-            weight: {{ .Values.scheduler.nodeResourcesFit.weight | default 1 }}   # Secondary: Resource tie-breaking
-          disabled:
-          - name: "*"  # Disable all other scoring plugins for predictable behavior
-        # Filter plugins - keep standard Kubernetes filters
-        filter:
-          enabled:
-          - name: NodeResourcesFit
-          - name: NodeAffinity
-          - name: PodTopologySpread
-          - name: TaintToleration
-          - name: NodePorts
-          - name: NodeVolumeLimits
-          - name: VolumeBinding
+        {{- $profile.plugins | toYaml | nindent 8 }}
       pluginConfig:
-      # Chronos plugin configuration
-      - name: {{ .Values.scheduler.plugin.name }}
-        args:
-          jobDurationAnnotation: {{ .Values.scheduler.plugin.jobDurationAnnotation | quote }}
-      # NodeResourcesFit plugin configuration for sophisticated resource scoring
-      - name: NodeResourcesFit
-        args:
-          apiVersion: kubescheduler.config.k8s.io/v1
-          kind: NodeResourcesFitArgs
-          scoringStrategy:
-            type: {{ .Values.scheduler.nodeResourcesFit.scoringStrategy | default "MostAllocated" }}
-            resources:
-            - name: cpu
-              weight: {{ .Values.scheduler.nodeResourcesFit.resources.cpu.weight | default 1 }}
-            - name: memory  
-              weight: {{ .Values.scheduler.nodeResourcesFit.resources.memory.weight | default 1 }}
+        {{- $profile.pluginConfig | toYaml | nindent 6 }}
     {{- if .Values.scheduler.leaderElection.enabled }}
     leaderElection:
       leaderElect: true
