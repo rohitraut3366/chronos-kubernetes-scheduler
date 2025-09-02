@@ -12,31 +12,22 @@ data:
     profiles:
     - schedulerName: {{ .Values.scheduler.name }}
       plugins:
-        # Scoring plugins - hierarchical priority
         score:
           enabled:
           - name: {{ .Values.scheduler.plugin.name }}
-            weight: {{ .Values.scheduler.plugin.weight | default 100 }}  # Primary: Time-based logic
+            weight: {{ .Values.scheduler.plugin.weight | default 100 }}
           - name: NodeResourcesFit
-            weight: {{ .Values.scheduler.nodeResourcesFit.weight | default 1 }}   # Secondary: Resource tie-breaking
+            weight: {{ .Values.scheduler.nodeResourcesFit.weight | default 1 }}
           disabled:
-          - name: "*"  # Disable all other scoring plugins for predictable behavior
-        # Filter plugins - keep standard Kubernetes filters
-        filter:
+          - name: "*"
+        multiPoint:
           enabled:
           - name: NodeResourcesFit
-          - name: NodeAffinity
-          - name: PodTopologySpread
-          - name: TaintToleration
-          - name: NodePorts
-          - name: NodeVolumeLimits
-          - name: VolumeBinding
+            weight: 1
       pluginConfig:
-      # Chronos plugin configuration
       - name: {{ .Values.scheduler.plugin.name }}
         args:
           jobDurationAnnotation: {{ .Values.scheduler.plugin.jobDurationAnnotation | quote }}
-      # NodeResourcesFit plugin configuration for sophisticated resource scoring
       - name: NodeResourcesFit
         args:
           apiVersion: kubescheduler.config.k8s.io/v1
@@ -46,7 +37,7 @@ data:
             resources:
             - name: cpu
               weight: {{ .Values.scheduler.nodeResourcesFit.resources.cpu.weight | default 1 }}
-            - name: memory  
+            - name: memory
               weight: {{ .Values.scheduler.nodeResourcesFit.resources.memory.weight | default 1 }}
     {{- if .Values.scheduler.leaderElection.enabled }}
     leaderElection:
