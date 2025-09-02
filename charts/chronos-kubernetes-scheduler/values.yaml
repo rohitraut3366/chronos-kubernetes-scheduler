@@ -128,7 +128,7 @@ securityContext:
 resources:
   limits:
     cpu: 2
-    memory: 8Gi
+    memory: 4Gi
   requests:
     cpu: 2
     memory: 4Gi
@@ -274,13 +274,3 @@ restartPolicy: Always
 
 # -- Termination grace period
 terminationGracePeriodSeconds: 30
-
-# -- Test configuration (for helm test)
-tests:
-  # -- Enable tests
-  enabled: true
-  # -- Test image
-  image:
-    repository: busybox
-    tag: "1.36"
-    pullPolicy: IfNotPresent
