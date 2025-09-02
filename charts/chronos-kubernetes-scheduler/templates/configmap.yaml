@@ -11,34 +11,12 @@ data:
     kind: KubeSchedulerConfiguration
     profiles:
     - schedulerName: {{ .Values.scheduler.name }}
+      {{- with (index .Values.profiles .Values.scheduler.profileName) }}
       plugins:
-        score:
-          enabled:
-          - name: {{ .Values.scheduler.plugin.name }}
-            weight: {{ .Values.scheduler.plugin.weight | default 100 }}
-          - name: NodeResourcesFit
-            weight: {{ .Values.scheduler.nodeResourcesFit.weight | default 1 }}
-          disabled:
-          - name: "*"
-        multiPoint:
-          enabled:
-          - name: NodeResourcesFit
-            weight: 1
+        {{- .plugins | toYaml | nindent 8 }}
       pluginConfig:
-      - name: {{ .Values.scheduler.plugin.name }}
-        args:
-          jobDurationAnnotation: {{ .Values.scheduler.plugin.jobDurationAnnotation | quote }}
-      - name: NodeResourcesFit
-        args:
-          apiVersion: kubescheduler.config.k8s.io/v1
-          kind: NodeResourcesFitArgs
-          scoringStrategy:
-            type: {{ .Values.scheduler.nodeResourcesFit.scoringStrategy | default "MostAllocated" }}
-            resources:
-            - name: cpu
-              weight: {{ .Values.scheduler.nodeResourcesFit.resources.cpu.weight | default 1 }}
-            - name: memory
-              weight: {{ .Values.scheduler.nodeResourcesFit.resources.memory.weight | default 1 }}
+        {{- .pluginConfig | toYaml | nindent 6 }}
+      {{- end }}
     {{- if .Values.scheduler.leaderElection.enabled }}
     leaderElection:
       leaderElect: true
