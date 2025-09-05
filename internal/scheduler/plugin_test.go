@@ -2662,26 +2662,28 @@ func TestQueueSortPluginFunctionality(t *testing.T) {
 
 func TestGetPodDurationFunction(t *testing.T) {
 
-	chronos := &Chronos{}
-
 	testCases := []struct {
-		name     string
-		pod      *v1.Pod
-		expected int64
+		name       string
+		pod        *v1.Pod
+		expected   int64
+		shouldBeOk bool
 	}{
-		{"ValidInteger", mockPodWithDuration("test", 600), 600},
-		{"ValidDecimal", mockPodWithDurationString("test", "600.75"), 601},
-		{"NoAnnotation", &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"}}, -1},
-		{"InvalidAnnotation", mockPodWithDurationString("test", "invalid"), -1},
-		{"ZeroDuration", mockPodWithDurationString("test", "0"), 0},
-		{"NegativeDuration", mockPodWithDurationString("test", "-100"), -100},
+		{"ValidInteger", mockPodWithDuration("test", 600), 600, true},
+		{"ValidDecimal", mockPodWithDurationString("test", "600.75"), 601, true},
+		{"NoAnnotation", &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"}}, 0, false},
+		{"InvalidAnnotation", mockPodWithDurationString("test", "invalid"), 0, false},
+		{"ZeroDuration", mockPodWithDurationString("test", "0"), 0, true},
+		{"NegativeDuration", mockPodWithDurationString("test", "-100"), 0, false},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := chronos.getPodDuration(tc.pod)
-			assert.Equal(t, tc.expected, result)
-			t.Logf(" %s: Duration=%d", tc.name, result)
+			result, ok := getPodDuration(tc.pod)
+			assert.Equal(t, tc.shouldBeOk, ok, "Unexpected ok value")
+			if tc.shouldBeOk {
+				assert.Equal(t, tc.expected, result, "Unexpected duration value")
+			}
+			t.Logf(" %s: Duration=%d, Ok=%t", tc.name, result, ok)
 		})
 	}
 }
@@ -2990,103 +2992,20 @@ func createQueuedPodInfoWithPriorityAndTimestamp(name string, duration int64, pr
 func TestReservePluginFunctionality(t *testing.T) {
 
 	tests := []struct {
-		name               string
-		envValue           string
-		customDelaySeconds string
-		expectedDelay      bool
-		expectedStatus     *framework.Status
-		description        string
+		name           string
+		expectedStatus *framework.Status
+		description    string
 	}{
 		{
-			name:               "ReserveDelayEnabled",
-			envValue:           "true",
-			customDelaySeconds: "",
-			expectedDelay:      true,
-			expectedStatus:     nil,
-			description:        "Reserve should add delay when CHRONOS_RESERVE_DELAY=true",
-		},
-		{
-			name:               "ReserveDelayDisabled",
-			envValue:           "false",
-			customDelaySeconds: "",
-			expectedDelay:      false,
-			expectedStatus:     nil,
-			description:        "Reserve should skip delay when CHRONOS_RESERVE_DELAY=false",
-		},
-		{
-			name:               "ReserveDelayEmpty",
-			envValue:           "",
-			customDelaySeconds: "",
-			expectedDelay:      false,
-			expectedStatus:     nil,
-			description:        "Reserve should skip delay when CHRONOS_RESERVE_DELAY is empty",
-		},
-		{
-			name:               "ReserveDelayUnset",
-			envValue:           "unset", // Special value to unset the env var
-			customDelaySeconds: "",
-			expectedDelay:      false,
-			expectedStatus:     nil,
-			description:        "Reserve should skip delay when CHRONOS_RESERVE_DELAY is not set",
-		},
-		{
-			name:               "ReserveDelayCustomDuration",
-			envValue:           "true",
-			customDelaySeconds: "1",
-			expectedDelay:      true,
-			expectedStatus:     nil,
-			description:        "Reserve should use custom 1s delay when CHRONOS_RESERVE_DELAY_SECONDS=1",
-		},
-		{
-			name:               "ReserveDelayMaxBound",
-			envValue:           "true",
-			customDelaySeconds: "30",
-			expectedDelay:      true,
-			expectedStatus:     nil,
-			description:        "Reserve should accept maximum delay of 30 seconds",
-		},
-		{
-			name:               "ReserveDelayExceedsMax",
-			envValue:           "true",
-			customDelaySeconds: "60",
-			expectedDelay:      true,
-			expectedStatus:     nil,
-			description:        "Reserve should cap delay at 30 seconds when CHRONOS_RESERVE_DELAY_SECONDS exceeds maximum",
-		},
-		{
-			name:               "ReserveDelayInvalidValue",
-			envValue:           "true",
-			customDelaySeconds: "invalid",
-			expectedDelay:      true,
-			expectedStatus:     nil,
-			description:        "Reserve should use default 2s delay when CHRONOS_RESERVE_DELAY_SECONDS is invalid",
-		},
-		{
-			name:               "ReserveDelayNegativeValue",
-			envValue:           "true",
-			customDelaySeconds: "-5",
-			expectedDelay:      true,
-			expectedStatus:     nil,
-			description:        "Reserve should use default 2s delay when CHRONOS_RESERVE_DELAY_SECONDS is negative",
+			name:           "ReserveAlwaysAdds2SecondDelay",
+			expectedStatus: nil,
+			description:    "Reserve should always add a 2-second delay for sequential scheduling",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup environment variables
-			if tt.envValue == "unset" {
-				os.Unsetenv("CHRONOS_RESERVE_DELAY")
-			} else {
-				os.Setenv("CHRONOS_RESERVE_DELAY", tt.envValue)
-			}
-			defer os.Unsetenv("CHRONOS_RESERVE_DELAY") // Cleanup
-
-			if tt.customDelaySeconds != "" {
-				os.Setenv("CHRONOS_RESERVE_DELAY_SECONDS", tt.customDelaySeconds)
-			}
-			defer os.Unsetenv("CHRONOS_RESERVE_DELAY_SECONDS") // Cleanup
-
-			// Create plugin instance using New() to properly initialize cached config
+			// Create plugin instance
 			pluginInterface, err := New(context.Background(), nil, nil)
 			require.NoError(t, err)
 			plugin := pluginInterface.(*Chronos)
@@ -3104,7 +3023,7 @@ func TestReservePluginFunctionality(t *testing.T) {
 			state := framework.NewCycleState()
 			nodeName := "test-node"
 
-			// Measure execution time to verify delay behavior
+			// Measure execution time to verify 2-second delay
 			startTime := time.Now()
 			status := plugin.Reserve(ctx, state, pod, nodeName)
 			executionTime := time.Since(startTime)
@@ -3114,36 +3033,12 @@ func TestReservePluginFunctionality(t *testing.T) {
 				t.Errorf(" %s: Expected status %v, got %v", tt.name, tt.expectedStatus, status)
 			}
 
-			// Verify delay behavior
-			if tt.expectedDelay {
-				// Determine expected delay duration with security bounds
-				expectedSeconds := 2 // default
-				const maxReserveDelaySeconds = 30
-				if tt.customDelaySeconds != "" {
-					if parsed, err := strconv.Atoi(tt.customDelaySeconds); err == nil && parsed > 0 {
-						if parsed > maxReserveDelaySeconds {
-							expectedSeconds = maxReserveDelaySeconds // should be capped
-						} else {
-							expectedSeconds = parsed
-						}
-					}
-					// For invalid values, expectedSeconds remains default (2)
-				}
-
-				// Should take at least the expected duration (with some tolerance for execution overhead)
-				minExpected := time.Duration(expectedSeconds*900) * time.Millisecond // 90% tolerance
-				if executionTime < minExpected {
-					t.Errorf(" %s: Expected delay of ~%ds, but execution took only %v", tt.name, expectedSeconds, executionTime)
-				}
-				t.Logf(" %s: Delay verified - execution took %v (expected ~%ds)", tt.name, executionTime, expectedSeconds)
-			} else {
-				// Should be very fast (less than 100ms)
-				if executionTime > 100*time.Millisecond {
-					t.Errorf(" %s: Expected no delay, but execution took %v", tt.name, executionTime)
-				}
-				t.Logf(" %s: No delay verified - execution took %v", tt.name, executionTime)
+			// Verify 2-second delay (with 90% tolerance for execution overhead)
+			minExpected := time.Duration(1800) * time.Millisecond // 1.8s (90% of 2s)
+			if executionTime < minExpected {
+				t.Errorf(" %s: Expected delay of ~2s, but execution took only %v", tt.name, executionTime)
 			}
-
+			t.Logf(" %s: Delay verified - execution took %v (expected ~2s)", tt.name, executionTime)
 			t.Logf(" %s: %s", tt.name, tt.description)
 		})
 	}
@@ -3215,35 +3110,20 @@ func TestUnreservePluginFunctionality(t *testing.T) {
 func TestReserveUnreserveIntegration(t *testing.T) {
 
 	tests := []struct {
-		name          string
-		envValue      string
-		podCount      int
-		expectedDelay bool
-		description   string
+		name        string
+		podCount    int
+		description string
 	}{
 		{
-			name:          "ReserveDelayMultiplePods",
-			envValue:      "true",
-			podCount:      3,
-			expectedDelay: true,
-			description:   "Multiple pods should each experience delay when reserve delay is enabled",
-		},
-		{
-			name:          "FastReserveMultiplePods",
-			envValue:      "false",
-			podCount:      5,
-			expectedDelay: false,
-			description:   "Multiple pods should execute quickly when reserve delay is disabled",
+			name:        "ReserveDelayMultiplePods",
+			podCount:    3,
+			description: "Multiple pods should each experience 2-second delay for sequential scheduling",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup environment
-			os.Setenv("CHRONOS_RESERVE_DELAY", tt.envValue)
-			defer os.Unsetenv("CHRONOS_RESERVE_DELAY")
-
-			// Create plugin instance using New() to properly initialize cached config
+			// Create plugin instance
 			pluginInterface, err := New(context.Background(), nil, nil)
 			require.NoError(t, err)
 			plugin := pluginInterface.(*Chronos)
@@ -3282,19 +3162,11 @@ func TestReserveUnreserveIntegration(t *testing.T) {
 				}
 			}
 
-			// Verify total timing behavior
-			if tt.expectedDelay {
-				expectedMinTime := time.Duration(tt.podCount) * 1800 * time.Millisecond // ~1.8s per pod
-				if totalReserveTime < expectedMinTime {
-					t.Errorf(" %s: Expected total Reserve time >= %v, got %v",
-						tt.name, expectedMinTime, totalReserveTime)
-				}
-			} else {
-				maxExpectedTime := time.Duration(tt.podCount) * 50 * time.Millisecond // 50ms per pod max
-				if totalReserveTime > maxExpectedTime {
-					t.Errorf(" %s: Expected total Reserve time <= %v, got %v",
-						tt.name, maxExpectedTime, totalReserveTime)
-				}
+			// Verify total timing behavior - each pod should take ~2s
+			expectedMinTime := time.Duration(tt.podCount) * 1800 * time.Millisecond // ~1.8s per pod (90% tolerance)
+			if totalReserveTime < expectedMinTime {
+				t.Errorf(" %s: Expected total Reserve time >= %v, got %v",
+					tt.name, expectedMinTime, totalReserveTime)
 			}
 
 			t.Logf(" %s: %s (total Reserve time: %v for %d pods)",

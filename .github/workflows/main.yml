@@ -148,9 +148,6 @@ jobs:
           profileName: "chronos-optimized-queue-sort-reserve"
           leaderElection:
             enabled: false  # Single replica in CI
-          plugin:
-            queueSort:
-              enabled: true  # Enable QueueSort plugin for testing
         
         logging:
           level: 6
@@ -158,10 +155,6 @@ jobs:
         extraArgs:
           - "--logtostderr=true"
           - "--stderrthreshold=INFO"
-
-        extraEnv:
-          - name: CHRONOS_RESERVE_DELAY
-            value: "true"
 
         resources:
           requests:
