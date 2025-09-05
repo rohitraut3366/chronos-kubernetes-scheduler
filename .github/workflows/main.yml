@@ -146,17 +146,12 @@ jobs:
           pullPolicy: Never
         
         scheduler:
+          # -- Scheduler name (must match the schedulerName in pods)
           name: chronos-kubernetes-scheduler
+          # -- Profile name to use from profiles section
+          profileName: "chronos-optimized-queue-sort-reserve"
           leaderElection:
-            enabled: false  # Single replica in CI
-          parallelism: 1  # Sequential scheduling for reliable QueueSort testing
-          plugin:
-            name: Chronos
-            weight: 100
-            jobDurationAnnotation: "scheduling.workload.io/expected-duration-seconds"
-            # Enable QueueSort plugin for testing
-            queueSort:
-              enabled: true  # Enable custom queue sorting (LPT heuristic)
+            enabled: false
         
         # Override logging level for queue heap operations debugging
         logging:

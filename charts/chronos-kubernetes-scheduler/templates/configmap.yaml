@@ -28,15 +28,5 @@ data:
         {{- $profile.plugins | toYaml | nindent 8 }}
       pluginConfig:
         {{- $profile.pluginConfig | toYaml | nindent 6 }}
-    {{- if .Values.scheduler.leaderElection.enabled }}
     leaderElection:
-      leaderElect: true
-      leaseDuration: {{ .Values.scheduler.leaderElection.leaseDuration }}
-      renewDeadline: {{ .Values.scheduler.leaderElection.renewDeadline }}
-      retryPeriod: {{ .Values.scheduler.leaderElection.retryPeriod }}
-      resourceName: {{ include "chronos-kubernetes-scheduler.fullname" . }}
-      resourceNamespace: {{ .Release.Namespace | quote }}
-    {{- else }}
-    leaderElection:
-      leaderElect: false
-    {{- end }}
+      leaderElect: {{ .Values.scheduler.leaderElection.enabled | default true }}

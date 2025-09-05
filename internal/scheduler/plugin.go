@@ -375,25 +375,16 @@ func (s *Chronos) NormalizeScore(ctx context.Context, state *framework.CycleStat
 // ⚠️  TESTING ONLY - DO NOT USE IN PRODUCTION ⚠️
 // Reserve implements the Reserve plugin interface to force add delay to scheduling.
 // This ensures that QueueSort order is noticeable in scheduling order.
-// Set CHRONOS_RESERVE_DELAY=true to enable artificial delays for testing.
-// Set CHRONOS_RESERVE_DELAY_SECONDS=N to configure delay duration (default: 2 seconds, max: 30 seconds).
 func (s *Chronos) Reserve(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) *framework.Status {
-	// Use cached configuration instead of reading environment variable every time
 	if !s.reserveDelayEnabled {
-		return nil // Skip delay if not enabled
+		return nil
 	}
-
-	// Add artificial delay to force sequential scheduling
-	// This ensures pods are scheduled in exact queue order
 	delay := time.Duration(s.reserveDelaySeconds) * time.Second
 	klog.V(4).Infof("Chronos Reserve: Adding %v delay for pod %s", delay, pod.Name)
 	time.Sleep(delay)
-	klog.V(4).Infof("Chronos Reserve: Delay completed for pod %s", pod.Name)
 	return nil
 }
 
-// Unreserve implements the Unreserve plugin interface (required by ReservePlugin).
 func (s *Chronos) Unreserve(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) {
-	// No action needed for unreserve in this implementation
-	klog.V(4).Infof("🔄 Chronos Unreserve: Called for pod %s", pod.Name)
+	klog.V(4).Infof("Chronos Unreserve: Called for pod %s", pod.Name)
 }
