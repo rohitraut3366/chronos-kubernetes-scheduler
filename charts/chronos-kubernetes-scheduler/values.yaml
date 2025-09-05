@@ -179,7 +179,7 @@ affinity: {}
 # -- Pod disruption budget
 podDisruptionBudget:
   # -- Enable pod disruption budget
-  enabled: false
+  enabled: true
   # -- Minimum available pods
   minAvailable: 1
   # -- Maximum unavailable pods (alternative to minAvailable)
@@ -283,20 +283,8 @@ initContainers: []
   # - name: init-container
   #   image: init:latest
 
-# -- Network policy
-networkPolicy:
-  # -- Enable network policy
-  enabled: false
-  # -- Ingress rules
-  ingress: []
-  # -- Egress rules  
-  egress: []
-
 # -- Priority class for scheduler pods
 priorityClassName: system-cluster-critical
-
-# -- DNS policy
-dnsPolicy: ClusterFirst
 
 # -- Restart policy
 restartPolicy: Always
