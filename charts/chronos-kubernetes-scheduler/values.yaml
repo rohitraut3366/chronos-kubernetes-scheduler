@@ -35,39 +35,8 @@ replicaCount: 3
 scheduler:
   # -- Scheduler name (must match the schedulerName in pods)
   name: chronos-kubernetes-scheduler
-  
-  # -- Plugin configuration
-  plugin:
-    # -- Plugin name
-    name: Chronos
-    # -- Plugin weight (higher = more influence)
-    weight: 100
-    # -- Job duration annotation key
-    jobDurationAnnotation: "scheduling.workload.io/expected-duration-seconds"
-    
-    # -- Queue sort configuration
-    queueSort:
-      # -- Enable custom queue sorting (duration-based LPT heuristic)
-      enabled: false  # Default to false for backward compatibility
-
-  # -- NodeResourcesFit plugin configuration for resource-aware tie-breaking
-  nodeResourcesFit:
-    # -- Plugin weight (should be lower than Chronos for tie-breaking)
-    weight: 1
-    # -- Scoring strategy: "MostAllocated" (consolidation), "LeastAllocated" (spreading), or "RequestedToCapacityRatio" (custom)
-    scoringStrategy: "MostAllocated"
-    
-    # -- Resource-specific configuration
-    resources:
-      # -- CPU resource configuration  
-      cpu:
-        # -- CPU resource weight
-        weight: 1
-      
-      # -- Memory resource configuration
-      memory:
-        # -- Memory resource weight  
-        weight: 1
+  # -- Profile name to use from profiles section
+  profileName: "chronos-optimized"
   
   # -- Leader election settings (for HA)
   leaderElection:
@@ -78,6 +47,39 @@ scheduler:
     renewDeadline: 10s
     # -- Retry period
     retryPeriod: 2s
+
+# -- Scheduler profiles - define multiple configurations and switch between them
+profiles:
+  # -- Default Chronos profile: Time-based scheduling with resource tie-breaking
+  chronos-optimized:
+    plugins:
+      score:
+        enabled:
+        - name: Chronos
+          weight: 100
+        - name: NodeResourcesFit
+          weight: 1
+        disabled:
+        - name: "*"
+      multiPoint:
+        enabled:
+        - name: NodeResourcesFit
+          weight: 1
+    pluginConfig:
+    - name: Chronos
+      args:
+        jobDurationAnnotation: "scheduling.workload.io/expected-duration-seconds"
+    - name: NodeResourcesFit
+      args:
+        apiVersion: kubescheduler.config.k8s.io/v1
+        kind: NodeResourcesFitArgs
+        scoringStrategy:
+          type: MostAllocated
+          resources:
+          - name: cpu
+            weight: 1
+          - name: memory
+            weight: 1
 
 # -- Service account configuration
 serviceAccount:
@@ -125,7 +127,7 @@ securityContext:
 resources:
   limits:
     cpu: 2
-    memory: 8Gi
+    memory: 4Gi
   requests:
     cpu: 2
     memory: 4Gi
@@ -271,13 +273,3 @@ restartPolicy: Always
 
 # -- Termination grace period
 terminationGracePeriodSeconds: 30
-
-# -- Test configuration (for helm test)
-tests:
-  # -- Enable tests
-  enabled: true
-  # -- Test image
-  image:
-    repository: busybox
-    tag: "1.36"
-    pullPolicy: IfNotPresent
