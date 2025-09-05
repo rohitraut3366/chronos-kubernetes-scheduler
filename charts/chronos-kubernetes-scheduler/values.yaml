@@ -35,25 +35,19 @@ replicaCount: 3
 scheduler:
   # -- Scheduler name (must match the schedulerName in pods)
   name: chronos-kubernetes-scheduler
-  
   # -- Profile name to use from profiles section
   profileName: "chronos-optimized"
-  
-  # -- Leader election settings (for HA)
-  leaderElection:
-    enabled: true
-    # -- Lease duration
-    leaseDuration: 15s
-    # -- Renew deadline  
-    renewDeadline: 10s
-    # -- Retry period
-    retryPeriod: 2s
 
 # -- Scheduler profiles - define multiple configurations and switch between them
 profiles:
   # -- Default Chronos profile: Time-based scheduling with resource tie-breaking
   chronos-optimized:
     plugins:
+      queueSort:
+        enabled:
+        - name: Chronos
+        disabled:
+        - name: "*"
       score:
         enabled:
         - name: Chronos
@@ -68,8 +62,43 @@ profiles:
           weight: 1
     pluginConfig:
     - name: Chronos
+    - name: NodeResourcesFit
       args:
-        jobDurationAnnotation: "scheduling.workload.io/expected-duration-seconds"
+        apiVersion: kubescheduler.config.k8s.io/v1
+        kind: NodeResourcesFitArgs
+        scoringStrategy:
+          type: MostAllocated
+          resources:
+          - name: cpu
+            weight: 1
+          - name: memory
+            weight: 1
+
+  # Only for simulation testing - DO NOT USE IN PRODUCTION
+  chronos-optimized-queue-sort-reserve:
+    plugins:
+      queueSort:
+        enabled:
+        - name: Chronos
+        disabled:
+        - name: "*"
+      score:
+        enabled:
+        - name: Chronos
+          weight: 100
+        - name: NodeResourcesFit
+          weight: 1
+        disabled:
+        - name: "*"
+      reserve:
+        enabled:
+        - name: Chronos
+      multiPoint:
+        enabled:
+        - name: NodeResourcesFit
+          weight: 1
+    pluginConfig:
+    - name: Chronos
     - name: NodeResourcesFit
       args:
         apiVersion: kubescheduler.config.k8s.io/v1
@@ -150,7 +179,7 @@ affinity: {}
 # -- Pod disruption budget
 podDisruptionBudget:
   # -- Enable pod disruption budget
-  enabled: false
+  enabled: true
   # -- Minimum available pods
   minAvailable: 1
   # -- Maximum unavailable pods (alternative to minAvailable)
@@ -254,20 +283,8 @@ initContainers: []
   # - name: init-container
   #   image: init:latest
 
-# -- Network policy
-networkPolicy:
-  # -- Enable network policy
-  enabled: false
-  # -- Ingress rules
-  ingress: []
-  # -- Egress rules  
-  egress: []
-
 # -- Priority class for scheduler pods
 priorityClassName: system-cluster-critical
-
-# -- DNS policy
-dnsPolicy: ClusterFirst
 
 # -- Restart policy
 restartPolicy: Always
