@@ -591,7 +591,6 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		nodeInfoHuge.SetNode(nodeHuge)
 		assert.Equal(t, "huge-capacity", nodeInfoHuge.Node().Name, "Node should be set correctly")
 
-		t.Logf("Resource utilization edge cases handled correctly")
 	})
 
 	t.Run("BinPackingEdgeCases", func(t *testing.T) {
@@ -970,7 +969,6 @@ func TestMainEntryPoints(t *testing.T) {
 		_, ok = pod2.Annotations[JobDurationAnnotation]
 		assert.False(t, ok, "Should not find duration annotation")
 
-		t.Logf("Annotation parsing works correctly")
 	})
 
 	// Test ScoreExtensions function
@@ -982,7 +980,6 @@ func TestMainEntryPoints(t *testing.T) {
 		assert.NotNil(t, extensions, "ScoreExtensions should not be nil")
 		assert.Equal(t, plugin, extensions, "ScoreExtensions should return the plugin itself")
 
-		t.Logf("ScoreExtensions function works correctly")
 	})
 
 	// Test parts of Score function we CAN test without complex mocking
@@ -1746,7 +1743,6 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 		expectedAnnotationLength := len(JobDurationAnnotation)
 		assert.Equal(t, 48, expectedAnnotationLength, "Annotation constant should have expected length")
 
-		t.Logf("All package-level constants accessible and correctly valued")
 	})
 
 	t.Run("HierarchicalScoringMethodsComprehensive", func(t *testing.T) {
@@ -2108,7 +2104,7 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 		assert.True(t, status.IsSuccess(), "Score should succeed with overdue pods")
 		assert.Greater(t, score, int64(0), "Should still calculate positive score")
 
-		t.Logf("Overdue pod clamping test: Score=%d (overdue pods handled correctly)", score)
+		t.Logf("Overdue pod clamping test: Score=%d", score)
 	})
 }
 
@@ -2710,7 +2706,6 @@ func TestEnvironmentVariableFlagCoverage(t *testing.T) {
 			chronos := plugin.(*Chronos)
 			assert.NotNil(t, chronos.handle)
 
-			t.Logf(" %s: Environment flag handled correctly", tt.name)
 		})
 	}
 }
