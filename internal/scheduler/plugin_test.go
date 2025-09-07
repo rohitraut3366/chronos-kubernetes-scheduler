@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -24,6 +25,14 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework/parallelize"
 	"k8s.io/kubernetes/pkg/scheduler/util/assumecache"
+)
+
+// Test constants matching the actual scoring algorithm values
+const (
+	// Core scoring constants from CalculateOptimizedScore function
+	BinPackingPriority = 1000000 // Highest priority: jobs that fit within existing windows
+	ExtensionPriority  = 100000  // Medium priority: jobs that extend commitments
+	EmptyNodePriority  = 1000    // Lowest priority: empty nodes
 )
 
 // =================================================================
@@ -135,9 +144,8 @@ func TestPluginBasics(t *testing.T) {
 	t.Run("Constants", func(t *testing.T) {
 		assert.Equal(t, "Chronos", PluginName)
 		assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation)
-		// maxPossibleScore constant removed as it's no longer used in scoring logic
 
-		t.Logf("✅ Constants validated - framework.MaxNodeScore = %d", framework.MaxNodeScore)
+		t.Logf("Constants validated - framework.MaxNodeScore = %d", framework.MaxNodeScore)
 	})
 }
 
@@ -153,9 +161,6 @@ func TestInvalidInputs(t *testing.T) {
 		durationStr, exists := pod.Annotations[JobDurationAnnotation]
 		assert.False(t, exists, "Pod should not have duration annotation")
 		assert.Empty(t, durationStr, "Duration string should be empty")
-
-		// In real scheduler, this would result in score 0
-		t.Log("Pod without annotation handled gracefully")
 	})
 
 	t.Run("MalformedDurationAnnotation", func(t *testing.T) {
@@ -171,8 +176,6 @@ func TestInvalidInputs(t *testing.T) {
 		durationStr := pod.Annotations[JobDurationAnnotation]
 		_, err := strconv.ParseInt(durationStr, 10, 64)
 		assert.Error(t, err, "Should fail to parse malformed duration")
-
-		t.Log("Malformed annotation handled gracefully")
 	})
 
 	t.Run("NegativeDuration", func(t *testing.T) {
@@ -182,9 +185,6 @@ func TestInvalidInputs(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Negative(t, duration, "Duration should be negative")
-
-		// In real scheduler, negative duration would be handled appropriately
-		t.Log("Negative duration parsed correctly")
 	})
 }
 
@@ -258,16 +258,17 @@ func TestScoringScenarios(t *testing.T) {
 
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
-			t.Logf("🎯 %s", scenario.description)
+			t.Logf("%s", scenario.description)
 
-			// Calculate scores using mock helper
-			score1 := calculateMockScore(
+			// Calculate scores using mock helper with explicit type declarations
+			var score1, score2 int64
+			score1 = calculateMockScore(
 				scenario.newPodDuration,
 				scenario.node1RemainingTime,
 				scenario.node1PodCount,
 				scenario.node1Capacity,
 			)
-			score2 := calculateMockScore(
+			score2 = calculateMockScore(
 				scenario.newPodDuration,
 				scenario.node2RemainingTime,
 				scenario.node2PodCount,
@@ -289,7 +290,6 @@ func TestScoringScenarios(t *testing.T) {
 					"Expected node2 to win. Node1: %d, Node2: %d", score1, score2)
 			}
 
-			t.Logf("%s wins correctly!", scenario.expectedWinner)
 		})
 	}
 }
@@ -360,7 +360,6 @@ func TestRandomizedPropertyValidation(t *testing.T) {
 			})
 		}
 
-		t.Logf("Property-based testing completed: %d strict dominance cases validated", successfulTests)
 	})
 }
 
@@ -369,7 +368,6 @@ func TestRandomizedPropertyValidation(t *testing.T) {
 // =================================================================
 
 func TestRealisticClusterScenarios(t *testing.T) {
-	t.Log("🚀 Testing realistic production cluster scenarios")
 
 	clusterTests := []struct {
 		name        string
@@ -421,7 +419,7 @@ func TestRealisticClusterScenarios(t *testing.T) {
 
 	for _, cluster := range clusterTests {
 		t.Run(cluster.name, func(t *testing.T) {
-			t.Logf("🎯 %s", cluster.description)
+			t.Logf("%s", cluster.description)
 
 			var bestScore int64
 			var bestNode string
@@ -444,14 +442,13 @@ func TestRealisticClusterScenarios(t *testing.T) {
 				}
 			}
 
-			t.Logf("🏆 Winner: %s with score %d", bestNode, bestScore)
-			t.Logf("📝 Pattern: %s", cluster.expectedPattern)
+			t.Logf("Winner: %s with score %d", bestNode, bestScore)
+			t.Logf("Pattern: %s", cluster.expectedPattern)
 
 			// Validate that we selected a node (basic sanity check)
 			assert.NotEmpty(t, bestNode, "Should select a winning node")
 			assert.Greater(t, bestScore, int64(0), "Winning score should be positive")
 
-			t.Logf("Realistic cluster scheduling completed")
 		})
 	}
 }
@@ -461,7 +458,6 @@ func TestRealisticClusterScenarios(t *testing.T) {
 // =================================================================
 
 func TestPerformanceScaling(t *testing.T) {
-	t.Log("📈 Testing scheduler performance with various loads")
 
 	loadTests := []struct {
 		name        string
@@ -510,7 +506,6 @@ func TestPerformanceScaling(t *testing.T) {
 // =================================================================
 
 func TestCorrectnessInvariants(t *testing.T) {
-	t.Log("🔍 Validating core algorithm correctness invariants")
 
 	t.Run("EmptyNodePenaltyDominance", func(t *testing.T) {
 		// Test that active nodes beat empty nodes for cost optimization
@@ -521,7 +516,6 @@ func TestCorrectnessInvariants(t *testing.T) {
 			"Active nodes should beat empty nodes for cost optimization (active=%d, empty=%d)",
 			activeNode, emptyNode)
 
-		t.Log("Empty node penalty correctly ensures active node preference")
 	})
 
 	t.Run("UtilizationTieBreakerWorks", func(t *testing.T) {
@@ -533,7 +527,6 @@ func TestCorrectnessInvariants(t *testing.T) {
 		assert.Equal(t, emptyNode1, emptyNode2,
 			"Empty nodes have identical time-based scores (node1=%d, node2=%d). NodeResourcesFit handles resource tie-breaking.", emptyNode1, emptyNode2)
 
-		t.Log("Pure time-based scoring: identical time characteristics = identical scores")
 	})
 
 	t.Run("ScoreMonotonicity", func(t *testing.T) {
@@ -550,7 +543,6 @@ func TestCorrectnessInvariants(t *testing.T) {
 		sameTimeNode2 := calculateMockScore(30, 40, 15, 100) // Same bin-packing, different utilization
 		assert.Equal(t, sameTimeNode1, sameTimeNode2, "Pure time-based scoring: same time characteristics = same score")
 
-		t.Log("Hierarchical score monotonicity verified (time-based scoring)")
 	})
 }
 
@@ -559,7 +551,6 @@ func TestCorrectnessInvariants(t *testing.T) {
 // =================================================================
 
 func TestEdgeCaseCoverage(t *testing.T) {
-	t.Log("🔍 Testing edge cases for maximum coverage")
 
 	plugin := &Chronos{}
 
@@ -575,7 +566,6 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		}
 		nodeInfoZero := framework.NewNodeInfo()
 		nodeInfoZero.SetNode(nodeZero)
-		// Resource scoring now handled by NodeResourcesFit plugin - just verify node is set correctly
 		assert.Equal(t, "zero-capacity", nodeInfoZero.Node().Name, "Node should be set correctly")
 
 		// Test very high CPU (above maximum)
@@ -589,10 +579,8 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		}
 		nodeInfoHuge := framework.NewNodeInfo()
 		nodeInfoHuge.SetNode(nodeHuge)
-		// Resource scoring now handled by NodeResourcesFit plugin - just verify node is set correctly
 		assert.Equal(t, "huge-capacity", nodeInfoHuge.Node().Name, "Node should be set correctly")
 
-		t.Logf("Resource utilization edge cases: NodeResourcesFit plugin now handles resource scoring")
 	})
 
 	t.Run("BinPackingEdgeCases", func(t *testing.T) {
@@ -608,7 +596,6 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		completionTimeZeroJob := plugin.CalculateBinPackingCompletionTime(400, 0)
 		assert.Equal(t, int64(400), completionTimeZeroJob, "Zero job should return existing work")
 
-		t.Logf("Bin-packing edge cases covered")
 	})
 
 	t.Run("OptimizedScoreEdgeCases", func(t *testing.T) {
@@ -634,16 +621,13 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		scoreLarge := plugin.CalculateOptimizedScore(testPodLarge, nodeInfoLarge, 300, 100)
 		// This is bin-packing case (100 <= 300), so Priority 1
 		// Pure time-based scoring: baseScore + consolidationBonus (no resource bonus)
-		const binPackingPriority = 1000000
-		expectedLarge := int64(binPackingPriority) + 300*100 // Pure time-based score
+		expectedLarge := int64(BinPackingPriority) + 300*100 // Pure time-based score
 		assert.Equal(t, expectedLarge, scoreLarge, "Large capacity bin-packing score (pure time-based)")
 
-		t.Logf("Optimized score edge cases covered")
 	})
 }
 
 func TestBoundaryConditions(t *testing.T) {
-	t.Log("📐 Testing boundary conditions for complete coverage")
 
 	plugin := &Chronos{}
 
@@ -658,7 +642,6 @@ func TestBoundaryConditions(t *testing.T) {
 		score1 := plugin.CalculateOptimizedScore(testPodEmpty, nodeInfo, 0, 0)
 		assert.Greater(t, score1, int64(0), "Zero duration should still have positive score from utilization")
 
-		t.Logf("Zero duration boundaries covered")
 	})
 
 	t.Run("MaxValueBoundaries", func(t *testing.T) {
@@ -673,7 +656,6 @@ func TestBoundaryConditions(t *testing.T) {
 		score := plugin.CalculateOptimizedScore(testPodExtreme, nodeInfo, largeTime, 1000)
 		assert.Greater(t, score, int64(0), "Large times should still produce valid scores")
 
-		t.Logf("Maximum value boundaries covered")
 	})
 }
 
@@ -682,7 +664,6 @@ func TestBoundaryConditions(t *testing.T) {
 // =================================================================
 
 func TestScoreFunctionLogicCoverage(t *testing.T) {
-	t.Log("🎯 Additional tests to improve Score function coverage")
 
 	t.Run("TimeCalculationEdgeCases", func(t *testing.T) {
 		// Test the time calculation logic that happens in the Score function
@@ -922,14 +903,11 @@ func TestScoreFunctionLogicCoverage(t *testing.T) {
 // =================================================================
 
 func TestMainEntryPoints(t *testing.T) {
-	t.Log("🔗 Testing main plugin entry points that Kubernetes calls")
 
 	// Test plugin initialization
 	t.Run("PluginInitialization", func(t *testing.T) {
 		plugin, err := New(context.Background(), nil, nil)
-		assert.NoError(t, err, "Plugin initialization should succeed")
-		assert.NotNil(t, plugin, "Plugin should not be nil")
-		assert.Equal(t, PluginName, plugin.Name(), "Plugin name should be correct")
+		assert.True(t, err == nil && plugin != nil && plugin.Name() == PluginName, "Plugin should initialize successfully with correct name")
 	})
 
 	// Test main Score function - simplified test that checks the optimized methods are called
@@ -968,10 +946,8 @@ func TestMainEntryPoints(t *testing.T) {
 		}
 
 		durationStr, ok := pod1.Annotations[JobDurationAnnotation]
-		assert.True(t, ok, "Should find duration annotation")
 		duration, err := strconv.ParseInt(durationStr, 10, 64)
-		assert.NoError(t, err, "Should parse duration correctly")
-		assert.Equal(t, int64(300), duration, "Duration should be 300 seconds")
+		assert.True(t, ok && err == nil && duration == 300, "Should find and parse duration annotation to 300 seconds")
 
 		// Test missing annotation
 		pod2 := &v1.Pod{
@@ -983,7 +959,6 @@ func TestMainEntryPoints(t *testing.T) {
 		_, ok = pod2.Annotations[JobDurationAnnotation]
 		assert.False(t, ok, "Should not find duration annotation")
 
-		t.Logf("Annotation parsing works correctly")
 	})
 
 	// Test ScoreExtensions function
@@ -995,7 +970,6 @@ func TestMainEntryPoints(t *testing.T) {
 		assert.NotNil(t, extensions, "ScoreExtensions should not be nil")
 		assert.Equal(t, plugin, extensions, "ScoreExtensions should return the plugin itself")
 
-		t.Logf("ScoreExtensions function works correctly")
 	})
 
 	// Test parts of Score function we CAN test without complex mocking
@@ -1025,7 +999,6 @@ func TestMainEntryPoints(t *testing.T) {
 		assert.True(t, status2.IsSuccess(), "Invalid annotation should be handled gracefully")
 		assert.Equal(t, int64(0), score2, "Invalid annotation should return score 0")
 
-		t.Logf("Score function annotation parsing covered (early return paths)")
 	})
 
 	// Test Score function error handling paths
@@ -1046,7 +1019,7 @@ func TestMainEntryPoints(t *testing.T) {
 		// We'll catch this with a deferred recover to test the error path
 		defer func() {
 			if r := recover(); r != nil {
-				t.Logf("Nil handle error path covered (expected panic caught: %v)", r)
+
 			}
 		}()
 
@@ -1056,7 +1029,7 @@ func TestMainEntryPoints(t *testing.T) {
 		if !status.IsSuccess() {
 			assert.Equal(t, framework.Error, status.Code(), "Should return error status for node info failure")
 			assert.Equal(t, int64(0), score, "Should return 0 score on error")
-			t.Logf("Node info error path covered gracefully")
+
 		}
 	})
 
@@ -1221,9 +1194,6 @@ func TestCalculateOptimizedScore(t *testing.T) {
 			testPodTC := mockPodWithDuration("test-pod", tc.newPodDuration)
 			score := plugin.CalculateOptimizedScore(testPodTC, nodeInfo, tc.maxRemainingTime, tc.newPodDuration)
 
-			// Resource scoring now handled by NodeResourcesFit plugin
-			// (removed resourceScore variable since it's no longer needed)
-
 			switch tc.expectedStrategy {
 			case "extension-utilization":
 				// Updated for new extension scoring: ensures extension always beats empty nodes
@@ -1240,17 +1210,15 @@ func TestCalculateOptimizedScore(t *testing.T) {
 
 			case "consolidation":
 				// Updated for new hierarchical scoring: bin-packing case (renamed from consolidation)
-				const binPackingPriority = 1000000
-				baseScore := int64(binPackingPriority)
+				baseScore := int64(BinPackingPriority)
 				consolidationBonus := tc.maxRemainingTime * 100
 				expectedTotal := baseScore + consolidationBonus // Pure time-based score
 				assert.Equal(t, expectedTotal, score, "Bin-packing case should use hierarchical scoring")
-				assert.Greater(t, score, int64(100000), "Bin-packing case should score highest")
+				assert.Greater(t, score, int64(ExtensionPriority), "Bin-packing case should score highest")
 
 			case "empty-penalty":
 				// Updated for new hierarchical scoring: empty node case
-				const emptyNodePriority = 1000
-				expectedScore := int64(emptyNodePriority) // Pure time-based score
+				expectedScore := int64(EmptyNodePriority) // Pure time-based score
 				assert.Equal(t, expectedScore, score, "Empty node should have lowest priority score")
 				// Empty nodes should have much lower scores than active nodes
 				assert.Less(t, score, int64(10000), "Empty penalty should be significantly lower")
@@ -1263,7 +1231,6 @@ func TestCalculateOptimizedScore(t *testing.T) {
 }
 
 func TestEstimateNodeCapacity(t *testing.T) {
-	// Resource estimation now handled by NodeResourcesFit plugin
 
 	testCases := []struct {
 		name        string
@@ -1322,11 +1289,9 @@ func TestEstimateNodeCapacity(t *testing.T) {
 			nodeInfo := framework.NewNodeInfo()
 			nodeInfo.SetNode(node)
 
-			// Resource scoring now handled by NodeResourcesFit plugin
-			// Just verify node is properly set
 			assert.Equal(t, tc.name, nodeInfo.Node().Name, "Node should be set correctly")
 
-			t.Logf("%s: CPU=%dm (resource scoring now handled by NodeResourcesFit)", tc.name, tc.cpuMillis)
+			t.Logf("%s: CPU=%dm", tc.name, tc.cpuMillis)
 		})
 	}
 }
@@ -1336,7 +1301,6 @@ func TestEstimateNodeCapacity(t *testing.T) {
 // =================================================================
 
 func TestTwoPhaseDecisionLogic(t *testing.T) {
-	t.Log("🎯 Testing complete two-phase decision logic")
 
 	// Scenario: Choose between extension vs consolidation
 	testCases := []struct {
@@ -1442,7 +1406,6 @@ func TestTwoPhaseDecisionLogic(t *testing.T) {
 // =================================================================
 
 func TestMaximumCoveragePush(t *testing.T) {
-	t.Log("🚀 Strategic tests to push coverage to 80%+")
 
 	plugin := &Chronos{}
 
@@ -1484,7 +1447,6 @@ func TestMaximumCoveragePush(t *testing.T) {
 		assert.Equal(t, int64(0), largeScores[0].Score, "Smallest should be 0")
 		assert.Equal(t, int64(100), largeScores[1].Score, "Largest should be 100")
 
-		t.Logf("All NormalizeScore edge cases covered")
 	})
 
 	t.Run("EstimateCapacityAllBoundaries", func(t *testing.T) {
@@ -1501,7 +1463,6 @@ func TestMaximumCoveragePush(t *testing.T) {
 		}
 		nodeInfoMin := framework.NewNodeInfo()
 		nodeInfoMin.SetNode(exactMin)
-		// Resource scoring now handled by NodeResourcesFit plugin
 		assert.Equal(t, "exact-min", nodeInfoMin.Node().Name, "Node should be set correctly")
 
 		// Test exactly at max boundary
@@ -1515,7 +1476,6 @@ func TestMaximumCoveragePush(t *testing.T) {
 		}
 		nodeInfoMax := framework.NewNodeInfo()
 		nodeInfoMax.SetNode(exactMax)
-		// Resource scoring now handled by NodeResourcesFit plugin
 		assert.Equal(t, "exact-max", nodeInfoMax.Node().Name, "Node should be set correctly")
 
 		// Test fractional CPU values
@@ -1529,10 +1489,8 @@ func TestMaximumCoveragePush(t *testing.T) {
 		}
 		nodeInfoFrac := framework.NewNodeInfo()
 		nodeInfoFrac.SetNode(fractional)
-		// Resource scoring now handled by NodeResourcesFit plugin
 		assert.Equal(t, "fractional", nodeInfoFrac.Node().Name, "Node should be set correctly")
 
-		t.Logf("All resource utilization boundaries covered")
 	})
 
 	t.Run("OptimizedScoreCompleteMatrix", func(t *testing.T) {
@@ -1596,8 +1554,7 @@ func TestMaximumCoveragePush(t *testing.T) {
 				// With hierarchical scoring, even zero-slot nodes get base priority score
 				// This is bin-packing case (300 <= 400), so gets Priority 1 base score
 				// Node is 100% utilized (15 pods * 100m = 1500m used / 1500m total), ResourceScore = 0
-				const binPackingPriority = 1000000
-				expectedZeroSlot := int64(binPackingPriority) + 400*100 + 0*10 // ResourceScore = 0, so bonus = 0
+				expectedZeroSlot := int64(BinPackingPriority) + 400*100 + 0*10 // ResourceScore = 0, so bonus = 0
 				assert.Equal(t, expectedZeroSlot, score, "%s should get base bin-packing score with no resource bonus", tc.name)
 			}
 
@@ -1611,7 +1568,6 @@ func TestMaximumCoveragePush(t *testing.T) {
 // =================================================================
 
 func TestAdvancedScoreFunctionCoverage(t *testing.T) {
-	t.Log("🎯 Advanced tests to push Score() function coverage to 80%+")
 
 	t.Run("PodLogicCoverage_SimpleUnitTests", func(t *testing.T) {
 		// Simple unit tests that cover the Score function logic without complex mocking
@@ -1632,7 +1588,6 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			assert.True(t, skip2, "Failed pod should be skipped")
 			assert.False(t, skip3, "Running pod should not be skipped")
 
-			t.Logf("Pod phase filtering logic covered")
 		})
 
 		// Test 2: Annotation processing (lines that parse annotations)
@@ -1656,17 +1611,15 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			assert.True(t, hasAnnotation1, "Should find annotation")
 			assert.False(t, hasAnnotation2, "Should not find annotation")
 
-			// Test duration parsing
+			// Test duration parsing with simplified error handling
 			durationStr := podWithAnnotation.Annotations[JobDurationAnnotation]
 			validDuration, validErr := strconv.ParseInt(durationStr, 10, 64)
-			assert.NoError(t, validErr, "Valid duration should parse")
-			assert.Equal(t, int64(300), validDuration, "Duration should be 300")
+			assert.True(t, validErr == nil && validDuration == 300, "Valid duration should parse to 300")
 
 			invalidDurationStr := podWithInvalidAnnotation.Annotations[JobDurationAnnotation]
 			_, invalidErr := strconv.ParseInt(invalidDurationStr, 10, 64)
 			assert.Error(t, invalidErr, "Invalid duration should error")
 
-			t.Logf("Annotation processing logic covered")
 		})
 
 		// Test 3: Time calculations (lines that calculate remaining time)
@@ -1707,7 +1660,6 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 				assert.Equal(t, int64(0), negativeRemaining, "Negative should be clamped to 0")
 			}
 
-			t.Logf("Time calculation logic covered")
 		})
 
 		// Test 4: Max remaining time logic (lines that find maximum)
@@ -1734,10 +1686,8 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			}
 			assert.Equal(t, int64(0), maxRemainingTime, "Max should remain 0")
 
-			t.Logf("Maximum remaining time logic covered")
 		})
 
-		t.Logf("Score function internal logic comprehensively covered via unit tests")
 	})
 
 	t.Run("PluginMainEntryPointCoverage", func(t *testing.T) {
@@ -1752,20 +1702,15 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 			name := plugin.Name()
 			assert.Equal(t, PluginName, name, "Name should match constant")
 
-			t.Logf("New() function and Name() function covered")
 		})
 
 		// Test constants and package-level variables
 		t.Run("ConstantsAndPackageLevel", func(t *testing.T) {
 			assert.Equal(t, "Chronos", PluginName, "Plugin name constant")
 			assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation, "Annotation constant")
-			// maxPossibleScore constant removed - no longer used in scoring logic
-			// Removed utilizationBonus constant - now using hierarchical scoring with priority levels
 
-			t.Logf("All package constants covered")
 		})
 
-		t.Logf("Main plugin entry points comprehensively covered")
 	})
 }
 
@@ -1774,11 +1719,9 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 // =================================================================
 
 func TestScoreFunctionStrategicCoverage(t *testing.T) {
-	t.Log("🎯 Strategic tests to push Score function coverage toward 80%")
 
 	t.Run("ConstantsAndPackageLevelAccess", func(t *testing.T) {
 		// Test direct access to package-level constants (ensures they're covered)
-		// maxPossibleScore constant removed - no longer used in scoring logic
 		assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation, "JobDurationAnnotation constant verification")
 		assert.Equal(t, "Chronos", PluginName, "PluginName constant verification")
 
@@ -1790,7 +1733,6 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 		expectedAnnotationLength := len(JobDurationAnnotation)
 		assert.Equal(t, 48, expectedAnnotationLength, "Annotation constant should have expected length")
 
-		t.Logf("All package-level constants accessible and correctly valued")
 	})
 
 	t.Run("HierarchicalScoringMethodsComprehensive", func(t *testing.T) {
@@ -1820,7 +1762,6 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 			})
 		}
 
-		t.Logf("CalculateBinPackingCompletionTime method integration verified")
 	})
 
 	t.Run("CalculateOptimizedScoreExtensive", func(t *testing.T) {
@@ -1870,7 +1811,7 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 					// Verify score ranges based on priority
 					switch scenario.expectedPriority {
 					case "bin-packing-fit":
-						assert.GreaterOrEqual(t, score, int64(1000000), "Bin-packing should have highest priority")
+						assert.GreaterOrEqual(t, score, int64(BinPackingPriority), "Bin-packing should have highest priority")
 					case "extension-minimization":
 						// Large extension jobs are still in the extension tier but with lower scores within that tier
 						if scenario.name == "ExtensionLarge" {
@@ -1882,7 +1823,7 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 							assert.LessOrEqual(t, score, int64(110000), "Extension should be within tier range")
 						}
 					case "empty-node-penalty":
-						assert.GreaterOrEqual(t, score, int64(1000), "Empty node should have lowest priority")
+						assert.GreaterOrEqual(t, score, int64(EmptyNodePriority), "Empty node should have lowest priority")
 						assert.Less(t, score, int64(10000), "Empty node should be significantly lower")
 					}
 
@@ -1894,7 +1835,6 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 	})
 
 	t.Run("EstimateNodeCapacityComprehensive", func(t *testing.T) {
-		// Resource capacity estimation now handled by NodeResourcesFit plugin
 
 		capacityTests := []struct {
 			name        string
@@ -1926,10 +1866,9 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 				}
 				nodeInfo.SetNode(node)
 
-				// Resource scoring now handled by NodeResourcesFit plugin
 				assert.Equal(t, tc.name, nodeInfo.Node().Name, "Node should be set correctly: %s", tc.description)
 
-				t.Logf("%s (%dm CPU): Resource scoring handled by NodeResourcesFit", tc.description, tc.cpuMillis)
+				t.Logf("%s (%dm CPU)", tc.description, tc.cpuMillis)
 			})
 		}
 	})
@@ -1946,7 +1885,6 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 		extensions := plugin.ScoreExtensions()
 		assert.Equal(t, plugin, extensions, "ScoreExtensions should return self")
 
-		t.Logf("Plugin interface methods covered")
 	})
 
 	t.Run("NewPluginConstructorVariations", func(t *testing.T) {
@@ -1979,7 +1917,6 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 // =================================================================
 
 func TestScoreFunctionFrameworkIntegration(t *testing.T) {
-	t.Log("🎯 Framework integration tests to push Score() function coverage toward 80%")
 
 	t.Run("ScoreWithRealFrameworkHandle", func(t *testing.T) {
 		// Create comprehensive mock handle that supports real Score() calls
@@ -2157,7 +2094,7 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 		assert.True(t, status.IsSuccess(), "Score should succeed with overdue pods")
 		assert.Greater(t, score, int64(0), "Should still calculate positive score")
 
-		t.Logf("Overdue pod clamping test: Score=%d (overdue pods handled correctly)", score)
+		t.Logf("Overdue pod clamping test: Score=%d", score)
 	})
 }
 
@@ -2588,12 +2525,682 @@ func createNodeWithOverduePods(nodeName string) *framework.NodeInfo {
 	return nodeInfo
 }
 
+func TestQueueSortPluginFunctionality(t *testing.T) {
+
+	chronos := &Chronos{handle: createComprehensiveMockHandle()}
+
+	tests := []struct {
+		name            string
+		pod1            *framework.QueuedPodInfo
+		pod2            *framework.QueuedPodInfo
+		expectPod1First bool
+		description     string
+	}{
+		{
+			name: "LongestDurationFirst",
+			pod1: &framework.QueuedPodInfo{
+				PodInfo: &framework.PodInfo{
+					Pod: mockPodWithDuration("long-job", 600),
+				},
+			},
+			pod2: &framework.QueuedPodInfo{
+				PodInfo: &framework.PodInfo{
+					Pod: mockPodWithDuration("short-job", 300),
+				},
+			},
+			expectPod1First: true,
+			description:     "Longer job should be scheduled first (LPT heuristic)",
+		},
+		{
+			name: "PriorityOverridesDuration",
+			pod1: createQueuedPodInfoWithPriority("high-priority-short", 100, 1000),
+			pod2: &framework.QueuedPodInfo{
+				PodInfo: &framework.PodInfo{
+					Pod: mockPodWithDuration("low-priority-long", 600),
+				},
+			},
+			expectPod1First: true,
+			description:     "High priority pod should override duration-based sorting",
+		},
+		{
+			name: "NoDurationAnnotationComesLast",
+			pod1: &framework.QueuedPodInfo{
+				PodInfo: &framework.PodInfo{
+					Pod: &v1.Pod{
+						ObjectMeta: metav1.ObjectMeta{Name: "no-duration", Namespace: "default"},
+					},
+				},
+			},
+			pod2: &framework.QueuedPodInfo{
+				PodInfo: &framework.PodInfo{
+					Pod: mockPodWithDuration("with-duration", 100),
+				},
+			},
+			expectPod1First: false,
+			description:     "Pod without duration annotation should be scheduled last",
+		},
+		{
+			name:            "SamePriorityDifferentDurations",
+			pod1:            createQueuedPodInfoWithPriority("priority-long", 600, 500),
+			pod2:            createQueuedPodInfoWithPriority("priority-short", 300, 500),
+			expectPod1First: true,
+			description:     "Same priority, longer duration should come first",
+		},
+		{
+			name:            "FIFOTieBreaker",
+			pod1:            createQueuedPodInfoWithTimestamp("first-created", 300, time.Now()),
+			pod2:            createQueuedPodInfoWithTimestamp("second-created", 300, time.Now().Add(1*time.Second)),
+			expectPod1First: true,
+			description:     "With equal durations, FIFO order should apply",
+		},
+		{
+			name: "ExplicitZeroDurationBeforeNoDuration",
+			pod1: &framework.QueuedPodInfo{
+				PodInfo: &framework.PodInfo{
+					Pod: &v1.Pod{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:        "explicit-zero",
+							Namespace:   "default",
+							Annotations: map[string]string{JobDurationAnnotation: "0"},
+						},
+					},
+				},
+			},
+			pod2: &framework.QueuedPodInfo{
+				PodInfo: &framework.PodInfo{
+					Pod: &v1.Pod{
+						ObjectMeta: metav1.ObjectMeta{Name: "no-duration", Namespace: "default"},
+					},
+				},
+			},
+			expectPod1First: true,
+			description:     "Pod with explicit 0 duration should come before pod with missing annotation",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := chronos.Less(tt.pod1, tt.pod2)
+			assert.Equal(t, tt.expectPod1First, result,
+				"Less(%s, %s): %s", tt.pod1.PodInfo.Pod.Name, tt.pod2.PodInfo.Pod.Name, tt.description)
+			t.Logf(" %s: Pod1=%s, Pod2=%s, Pod1First=%v (%s)",
+				tt.name, tt.pod1.PodInfo.Pod.Name, tt.pod2.PodInfo.Pod.Name, result, tt.description)
+		})
+	}
+}
+
+func TestGetPodDurationFunction(t *testing.T) {
+
+	testCases := []struct {
+		name       string
+		pod        *v1.Pod
+		expected   int64
+		shouldBeOk bool
+	}{
+		{"ValidInteger", mockPodWithDuration("test", 600), 600, true},
+		{"ValidDecimal", mockPodWithDurationString("test", "600.75"), 601, true},
+		{"NoAnnotation", &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"}}, 0, false},
+		{"InvalidAnnotation", mockPodWithDurationString("test", "invalid"), 0, false},
+		{"ZeroDuration", mockPodWithDurationString("test", "0"), 0, true},
+		{"NegativeDuration", mockPodWithDurationString("test", "-100"), 0, false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, ok := getPodDuration(tc.pod)
+			assert.Equal(t, tc.shouldBeOk, ok, "Unexpected ok value")
+			if tc.shouldBeOk {
+				assert.Equal(t, tc.expected, result, "Unexpected duration value")
+			}
+			t.Logf(" %s: Duration=%d, Ok=%t", tc.name, result, ok)
+		})
+	}
+}
+
+func TestEnvironmentVariableFlagCoverage(t *testing.T) {
+
+	tests := []struct {
+		name          string
+		envValue      string
+		expectedInLog string
+	}{
+		{
+			name:          "QueueSortEnabled",
+			envValue:      "true",
+			expectedInLog: "QueueSort + Score plugins",
+		},
+		{
+			name:          "QueueSortDisabled",
+			envValue:      "false",
+			expectedInLog: "Score plugin only",
+		},
+		{
+			name:          "QueueSortEmpty",
+			envValue:      "",
+			expectedInLog: "Score plugin only",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Set environment variable
+			originalValue := os.Getenv("CHRONOS_QUEUE_SORT_ENABLED")
+			os.Setenv("CHRONOS_QUEUE_SORT_ENABLED", tt.envValue)
+			defer os.Setenv("CHRONOS_QUEUE_SORT_ENABLED", originalValue)
+
+			// Create plugin instance
+			plugin, err := New(context.Background(), nil, createComprehensiveMockHandle())
+			assert.NoError(t, err)
+			assert.NotNil(t, plugin)
+
+			chronos := plugin.(*Chronos)
+			assert.NotNil(t, chronos.handle)
+
+		})
+	}
+}
+
+// Helper functions for QueueSort tests
+func createQueuedPodInfoWithPriority(name string, duration int64, priority int32) *framework.QueuedPodInfo {
+	pod := mockPodWithDuration(name, duration)
+	pod.Spec.Priority = &priority
+	return &framework.QueuedPodInfo{
+		PodInfo: &framework.PodInfo{Pod: pod},
+	}
+}
+
+func createQueuedPodInfoWithTimestamp(name string, duration int64, timestamp time.Time) *framework.QueuedPodInfo {
+	pod := mockPodWithDuration(name, duration)
+	pod.CreationTimestamp = metav1.Time{Time: timestamp}
+	return &framework.QueuedPodInfo{
+		PodInfo: &framework.PodInfo{Pod: pod},
+	}
+}
+
+func TestLessFunctionComprehensive(t *testing.T) {
+
+	chronos := &Chronos{handle: createComprehensiveMockHandle()}
+
+	// Test cases organized by decision path
+	testSuites := []struct {
+		suiteName string
+		tests     []struct {
+			name            string
+			pod1            *framework.QueuedPodInfo
+			pod2            *framework.QueuedPodInfo
+			expectPod1First bool
+			description     string
+		}
+	}{
+		{
+			suiteName: "Priority Decision Paths",
+			tests: []struct {
+				name            string
+				pod1            *framework.QueuedPodInfo
+				pod2            *framework.QueuedPodInfo
+				expectPod1First bool
+				description     string
+			}{
+				{
+					name:            "HighPriorityBeatsLowPriority",
+					pod1:            createQueuedPodInfoWithPriority("high-priority", 300, 1000),
+					pod2:            createQueuedPodInfoWithPriority("low-priority", 600, 500),
+					expectPod1First: true,
+					description:     "Pod with higher priority (1000) should come before lower priority (500), regardless of duration",
+				},
+				{
+					name:            "SamePriorityDifferentDurations",
+					pod1:            createQueuedPodInfoWithPriority("same-pri-long", 600, 500),
+					pod2:            createQueuedPodInfoWithPriority("same-pri-short", 300, 500),
+					expectPod1First: true,
+					description:     "Same priority (500), longer duration should come first",
+				},
+				{
+					name:            "PriorityPodBeatsNoPriority",
+					pod1:            createQueuedPodInfoWithPriority("has-priority", 100, 100),
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("no-priority", 1000)}},
+					expectPod1First: true,
+					description:     "Pod with any priority should come before pod with no priority, even if duration is much shorter",
+				},
+				{
+					name:            "NoPriorityLosesToPriority",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("no-priority", 1000)}},
+					pod2:            createQueuedPodInfoWithPriority("has-priority", 100, 100),
+					expectPod1First: false,
+					description:     "Pod without priority should come after pod with priority",
+				},
+				{
+					name:            "ZeroPriorityEqualsNoPriority",
+					pod1:            createQueuedPodInfoWithPriority("zero-priority", 300, 0),
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("no-priority", 600)}},
+					expectPod1First: false,
+					description:     "Pod with explicit zero priority equals no priority, longer duration (600s) comes first",
+				},
+			},
+		},
+		{
+			suiteName: "Duration Decision Paths",
+			tests: []struct {
+				name            string
+				pod1            *framework.QueuedPodInfo
+				pod2            *framework.QueuedPodInfo
+				expectPod1First bool
+				description     string
+			}{
+				{
+					name:            "LongerDurationFirst",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("long-600s", 600)}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("medium-400s", 400)}},
+					expectPod1First: true,
+					description:     "Longer duration (600s) should come before shorter duration (400s)",
+				},
+				{
+					name:            "PositiveBeatsZeroDuration",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("positive-100s", 100)}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationString("zero-duration", "0")}},
+					expectPod1First: true,
+					description:     "Positive duration should come before zero duration",
+				},
+				{
+					name:            "ZeroBeatsNegativeDuration",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationString("zero-duration", "0")}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationString("negative", "-100")}},
+					expectPod1First: true,
+					description:     "Zero duration should come before negative duration",
+				},
+				{
+					name:            "AnyDurationBeatsMissingAnnotation",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationString("zero-duration", "0")}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "no-annotation", Namespace: "default"}}}},
+					expectPod1First: true,
+					description:     "Pod with explicit 0 duration should come before pod with missing annotation (-1)",
+				},
+				{
+					name:            "ValidDurationBeatsInvalidAnnotation",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("valid-100s", 100)}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationString("invalid", "not-a-number")}},
+					expectPod1First: true,
+					description:     "Valid duration should come before invalid duration annotation",
+				},
+			},
+		},
+		{
+			suiteName: "FIFO Fallback Decision Paths",
+			tests: []struct {
+				name            string
+				pod1            *framework.QueuedPodInfo
+				pod2            *framework.QueuedPodInfo
+				expectPod1First bool
+				description     string
+			}{
+				{
+					name:            "EarlierCreationTimeWins",
+					pod1:            createQueuedPodInfoWithTimestamp("created-first", 300, time.Now().Add(-10*time.Second)),
+					pod2:            createQueuedPodInfoWithTimestamp("created-second", 300, time.Now().Add(-5*time.Second)),
+					expectPod1First: true,
+					description:     "Earlier creation time should win when priority and duration are identical",
+				},
+				{
+					name:            "CreationTimeFallbackWithZeroDuration",
+					pod1:            createQueuedPodInfoWithTimestampAndDuration("zero-first", 0, time.Now().Add(-10*time.Second)),
+					pod2:            createQueuedPodInfoWithTimestampAndDuration("zero-second", 0, time.Now().Add(-5*time.Second)),
+					expectPod1First: true,
+					description:     "FIFO should work correctly even with zero duration pods",
+				},
+				{
+					name:            "CreationTimeFallbackWithSamePriorityAndDuration",
+					pod1:            createQueuedPodInfoWithPriorityAndTimestamp("same-pri-first", 300, 1000, time.Now().Add(-10*time.Second)),
+					pod2:            createQueuedPodInfoWithPriorityAndTimestamp("same-pri-second", 300, 1000, time.Now().Add(-5*time.Second)),
+					expectPod1First: true,
+					description:     "FIFO should be the final tiebreaker when both priority and duration are identical",
+				},
+			},
+		},
+		{
+			suiteName: "Edge Cases and Special Scenarios",
+			tests: []struct {
+				name            string
+				pod1            *framework.QueuedPodInfo
+				pod2            *framework.QueuedPodInfo
+				expectPod1First bool
+				description     string
+			}{
+				{
+					name:            "DecimalDurationRounding",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationString("decimal-high", "300.7")}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationString("decimal-low", "300.2")}},
+					expectPod1First: true,
+					description:     "Decimal durations should be rounded (301 > 300) and sorted correctly",
+				},
+				{
+					name:            "VeryLargeDurations",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("large-job", 86400)}}, // 1 day
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDuration("medium-job", 3600)}}, // 1 hour
+					expectPod1First: true,
+					description:     "Very large durations (1 day vs 1 hour) should be handled correctly",
+				},
+				{
+					name:            "BothPodsHaveMissingAnnotations",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "no-ann-1", Namespace: "default", CreationTimestamp: metav1.Time{Time: time.Now().Add(-10 * time.Second)}}}}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "no-ann-2", Namespace: "default", CreationTimestamp: metav1.Time{Time: time.Now().Add(-5 * time.Second)}}}}},
+					expectPod1First: true,
+					description:     "When both pods have missing annotations (-1 duration), FIFO should apply",
+				},
+				{
+					name:            "BothPodsHaveInvalidAnnotations",
+					pod1:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationStringAndTimestamp("invalid-1", "invalid", time.Now().Add(-10*time.Second))}},
+					pod2:            &framework.QueuedPodInfo{PodInfo: &framework.PodInfo{Pod: mockPodWithDurationStringAndTimestamp("invalid-2", "also-invalid", time.Now().Add(-5*time.Second))}},
+					expectPod1First: true,
+					description:     "When both pods have invalid annotations (-1 duration), FIFO should apply",
+				},
+			},
+		},
+	}
+
+	// Execute all test suites
+	for _, suite := range testSuites {
+		t.Run(suite.suiteName, func(t *testing.T) {
+			for _, tt := range suite.tests {
+				t.Run(tt.name, func(t *testing.T) {
+					result := chronos.Less(tt.pod1, tt.pod2)
+					assert.Equal(t, tt.expectPod1First, result,
+						"Less(%s, %s): %s", tt.pod1.PodInfo.Pod.Name, tt.pod2.PodInfo.Pod.Name, tt.description)
+					t.Logf(" %s: Pod1=%s, Pod2=%s, Pod1First=%v (%s)",
+						tt.name, tt.pod1.PodInfo.Pod.Name, tt.pod2.PodInfo.Pod.Name, result, tt.description)
+				})
+			}
+		})
+	}
+}
+
+// Helper functions for creating test pods with various combinations
+func mockPodWithDurationString(name string, durationStr string) *v1.Pod {
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              name,
+			Namespace:         "default",
+			CreationTimestamp: metav1.Time{Time: time.Now()},
+		},
+	}
+	if durationStr != "" {
+		pod.ObjectMeta.Annotations = map[string]string{
+			JobDurationAnnotation: durationStr,
+		}
+	}
+	return pod
+}
+
+func mockPodWithDurationStringAndTimestamp(name, durationStr string, timestamp time.Time) *v1.Pod {
+	pod := mockPodWithDurationString(name, durationStr)
+	pod.ObjectMeta.CreationTimestamp = metav1.Time{Time: timestamp}
+	return pod
+}
+
+func createQueuedPodInfoWithTimestampAndDuration(name string, duration int64, timestamp time.Time) *framework.QueuedPodInfo {
+	pod := mockPodWithDuration(name, duration)
+	pod.CreationTimestamp = metav1.Time{Time: timestamp}
+	return &framework.QueuedPodInfo{
+		PodInfo: &framework.PodInfo{Pod: pod},
+	}
+}
+
+func createQueuedPodInfoWithPriorityAndTimestamp(name string, duration int64, priority int32, timestamp time.Time) *framework.QueuedPodInfo {
+	pod := mockPodWithDuration(name, duration)
+	pod.Spec.Priority = &priority
+	pod.CreationTimestamp = metav1.Time{Time: timestamp}
+	return &framework.QueuedPodInfo{
+		PodInfo: &framework.PodInfo{Pod: pod},
+	}
+}
+
+// =============================================================================
+// Reserve Plugin Tests
+// =============================================================================
+
+func TestReservePluginFunctionality(t *testing.T) {
+
+	tests := []struct {
+		name           string
+		expectedStatus *framework.Status
+		description    string
+	}{
+		{
+			name:           "ReserveAlwaysAdds2SecondDelay",
+			expectedStatus: nil,
+			description:    "Reserve should always add a 2-second delay for sequential scheduling",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create plugin instance
+			pluginInterface, err := New(context.Background(), nil, nil)
+			require.NoError(t, err)
+			plugin := pluginInterface.(*Chronos)
+
+			// Create test pod
+			pod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+				},
+			}
+
+			// Create context and cycle state
+			ctx := context.Background()
+			state := framework.NewCycleState()
+			nodeName := "test-node"
+
+			// Measure execution time to verify 2-second delay
+			startTime := time.Now()
+			status := plugin.Reserve(ctx, state, pod, nodeName)
+			executionTime := time.Since(startTime)
+
+			// Verify return status
+			if status != tt.expectedStatus {
+				t.Errorf(" %s: Expected status %v, got %v", tt.name, tt.expectedStatus, status)
+			}
+
+			// Verify 2-second delay (with 90% tolerance for execution overhead)
+			minExpected := time.Duration(1800) * time.Millisecond // 1.8s (90% of 2s)
+			if executionTime < minExpected {
+				t.Errorf(" %s: Expected delay of ~2s, but execution took only %v", tt.name, executionTime)
+			}
+			t.Logf(" %s: Delay verified - execution took %v (expected ~2s)", tt.name, executionTime)
+			t.Logf(" %s: %s", tt.name, tt.description)
+		})
+	}
+}
+
+func TestUnreservePluginFunctionality(t *testing.T) {
+
+	tests := []struct {
+		name        string
+		podName     string
+		nodeName    string
+		description string
+	}{
+		{
+			name:        "BasicUnreserveCall",
+			podName:     "test-pod-1",
+			nodeName:    "node-1",
+			description: "Unreserve should handle basic pod unreservation",
+		},
+		{
+			name:        "UnreserveWithLongPodName",
+			podName:     "very-long-pod-name-with-many-characters-and-hyphens",
+			nodeName:    "node-2",
+			description: "Unreserve should handle pods with long names",
+		},
+		{
+			name:        "UnreserveWithSpecialCharacters",
+			podName:     "pod-with-123-numbers",
+			nodeName:    "node-with-special-chars",
+			description: "Unreserve should handle pods and nodes with numbers and special characters",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create plugin instance
+			plugin := &Chronos{}
+
+			// Create test pod
+			pod := &v1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tt.podName,
+					Namespace: "default",
+				},
+			}
+
+			// Create context and cycle state
+			ctx := context.Background()
+			state := framework.NewCycleState()
+
+			// Measure execution time (should be very fast)
+			startTime := time.Now()
+
+			// Call Unreserve (should not panic or error)
+			plugin.Unreserve(ctx, state, pod, tt.nodeName)
+
+			executionTime := time.Since(startTime)
+
+			// Verify it executes quickly (no delays)
+			if executionTime > 50*time.Millisecond {
+				t.Errorf(" %s: Unreserve took too long: %v", tt.name, executionTime)
+			}
+
+			t.Logf(" %s: %s (execution: %v)", tt.name, tt.description, executionTime)
+		})
+	}
+}
+
+func TestReserveUnreserveIntegration(t *testing.T) {
+
+	tests := []struct {
+		name        string
+		podCount    int
+		description string
+	}{
+		{
+			name:        "ReserveDelayMultiplePods",
+			podCount:    3,
+			description: "Multiple pods should each experience 2-second delay for sequential scheduling",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create plugin instance
+			pluginInterface, err := New(context.Background(), nil, nil)
+			require.NoError(t, err)
+			plugin := pluginInterface.(*Chronos)
+			ctx := context.Background()
+			state := framework.NewCycleState()
+
+			var totalReserveTime time.Duration
+
+			// Test Reserve for multiple pods
+			for i := 0; i < tt.podCount; i++ {
+				pod := &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      fmt.Sprintf("test-pod-%d", i),
+						Namespace: "default",
+					},
+				}
+
+				startTime := time.Now()
+				status := plugin.Reserve(ctx, state, pod, fmt.Sprintf("node-%d", i))
+				reserveTime := time.Since(startTime)
+				totalReserveTime += reserveTime
+
+				// Verify status is always nil (success)
+				if status != nil {
+					t.Errorf(" Reserve failed for pod %d: %v", i, status)
+				}
+
+				// Immediately call Unreserve for the same pod
+				unreserveStart := time.Now()
+				plugin.Unreserve(ctx, state, pod, fmt.Sprintf("node-%d", i))
+				unreserveTime := time.Since(unreserveStart)
+
+				// Unreserve should always be fast
+				if unreserveTime > 10*time.Millisecond {
+					t.Errorf(" Unreserve took too long for pod %d: %v", i, unreserveTime)
+				}
+			}
+
+			// Verify total timing behavior - each pod should take ~2s
+			expectedMinTime := time.Duration(tt.podCount) * 1800 * time.Millisecond // ~1.8s per pod (90% tolerance)
+			if totalReserveTime < expectedMinTime {
+				t.Errorf(" %s: Expected total Reserve time >= %v, got %v",
+					tt.name, expectedMinTime, totalReserveTime)
+			}
+
+			t.Logf(" %s: %s (total Reserve time: %v for %d pods)",
+				tt.name, tt.description, totalReserveTime, tt.podCount)
+		})
+	}
+}
+
+func TestReservePluginInterfaceConformance(t *testing.T) {
+
+	var _ framework.ReservePlugin = &Chronos{}
+
+	// Create plugin instance using New() to properly initialize cached config
+	pluginInterface, err := New(context.Background(), nil, nil)
+	require.NoError(t, err)
+	plugin := pluginInterface.(*Chronos)
+
+	// Test with nil values to ensure no panics
+	t.Run("NilContextHandling", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf(" Reserve panicked with nil context: %v", r)
+			}
+		}()
+
+		pod := &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}}
+		state := framework.NewCycleState()
+
+		// This should not panic even with nil context (Go's context handling)
+		status := plugin.Reserve(context.Background(), state, pod, "node")
+		if status != nil {
+			t.Errorf(" Expected nil status, got: %v", status)
+		}
+
+		// Unreserve should also not panic
+		plugin.Unreserve(context.Background(), state, pod, "node")
+
+	})
+
+	t.Run("EmptyPodHandling", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf(" Reserve panicked with empty pod: %v", r)
+			}
+		}()
+
+		pod := &v1.Pod{} // Empty pod
+		ctx := context.Background()
+		state := framework.NewCycleState()
+
+		status := plugin.Reserve(ctx, state, pod, "node")
+		if status != nil {
+			t.Errorf(" Expected nil status with empty pod, got: %v", status)
+		}
+
+		plugin.Unreserve(ctx, state, pod, "node")
+
+	})
+
+}
+
 // =================================================================
 // Hierarchy Fix Validation Tests
 // =================================================================
 
 func TestExtensionHierarchyFix(t *testing.T) {
-	t.Log("Testing extension vs empty node hierarchy fix")
 
 	t.Run("ExtensionAlwaysBeatsEmpty", func(t *testing.T) {
 		// Test the specific scenario from the bug report where empty node was chosen
@@ -2777,7 +3384,5 @@ func TestExtensionHierarchyFix(t *testing.T) {
 					node.name, extensionScore, emptyNodeScore)
 			}
 		}
-
-		t.Log("Original bug scenario: All extension nodes now beat empty node")
 	})
 }

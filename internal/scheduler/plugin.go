@@ -22,42 +22,56 @@ const (
 
 // Chronos is a scheduler plugin that uses bin-packing logic with extension minimization
 // to optimize resource utilization and minimize cluster commitment extensions.
+// Implements both QueueSort (for duration-based ordering) and Score (for node selection).
 type Chronos struct {
 	handle framework.Handle
 }
 
-// New initializes a new plugin and returns it.
+var _ framework.Plugin = &Chronos{}
+var _ framework.QueueSortPlugin = &Chronos{}
+var _ framework.ScorePlugin = &Chronos{}
+var _ framework.ScoreExtensions = &Chronos{}
+var _ framework.ReservePlugin = &Chronos{}
+
 func New(ctx context.Context, _ runtime.Object, h framework.Handle) (framework.Plugin, error) {
-	klog.Infof("Initializing Chronos plugin with bin-packing + extension minimization + utilization optimization")
-	return &Chronos{
+	chronos := &Chronos{
 		handle: h,
-	}, nil
+	}
+	klog.Infof("Chronos Scheduler initialized")
+	return chronos, nil
 }
 
-// Name returns the name of the plugin.
 func (s *Chronos) Name() string {
 	return PluginName
+}
+
+func getPodDuration(pod *v1.Pod) (int64, bool) {
+	durationStr, exists := pod.Annotations[JobDurationAnnotation]
+	if !exists {
+		return 0, false
+	}
+
+	durationFloat, err := strconv.ParseFloat(durationStr, 64)
+	if err != nil {
+		klog.Warningf("Could not parse duration annotation '%s' for pod %s: %v", durationStr, klog.KObj(pod), err)
+		return 0, false
+	}
+	if durationFloat < 0 {
+		return 0, false
+	}
+
+	return int64(math.Round(durationFloat)), true
 }
 
 // Score is the core scheduling logic. It calculates a score for each node based on
 // when the node is expected to become idle.
 func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.Pod, nodeName string) (int64, *framework.Status) {
-	// Only log at debug level to reduce hot path overhead
 	klog.V(4).Infof("Scoring pod %s/%s for node %s", p.Namespace, p.Name, nodeName)
 
-	// 1. Get the expected duration of the pod being scheduled.
-	newPodDurationStr, ok := p.Annotations[JobDurationAnnotation]
+	newPodDuration, ok := getPodDuration(p)
 	if !ok {
-		klog.Infof("Pod %s/%s is missing annotation %s, skipping.", p.Namespace, p.Name, JobDurationAnnotation)
 		return 0, framework.NewStatus(framework.Success)
 	}
-	// Parse duration - support both integer and decimal values
-	newPodDurationFloat, err := strconv.ParseFloat(newPodDurationStr, 64)
-	if err != nil {
-		klog.Warningf("Could not parse duration '%s' for pod %s/%s: %v", newPodDurationStr, p.Namespace, p.Name, err)
-		return 0, framework.NewStatus(framework.Success)
-	}
-	newPodDuration := int64(math.Round(newPodDurationFloat)) // Use math.Round for predictable conversion (e.g., 600.75 becomes 601)
 
 	// 2. Get node information.
 	nodeInfo, err := s.handle.SnapshotSharedLister().NodeInfos().Get(nodeName)
@@ -94,19 +108,8 @@ func (s *Chronos) calculateMaxRemainingTimeOptimized(pods []*framework.PodInfo) 
 			continue
 		}
 
-		// Fast annotation lookup with existence check
-		durationStr, exists := pod.Annotations[JobDurationAnnotation]
-		if !exists {
-			continue
-		}
-
-		// Parse duration - support both integer and decimal values
-		durationFloat, err := strconv.ParseFloat(durationStr, 64)
-		if err != nil {
-			continue
-		}
-		duration := int64(math.Round(durationFloat)) // Use math.Round for predictable conversion
-		if duration <= 0 {
+		duration, exists := getPodDuration(pod)
+		if !exists || duration <= 0 {
 			continue
 		}
 
@@ -199,7 +202,6 @@ func (s *Chronos) CalculateOptimizedScore(p *v1.Pod, nodeInfo *framework.NodeInf
 
 	} else {
 		// PRIORITY 3: Empty node - HEAVILY PENALIZED for cost optimization
-		// Avoid empty nodes to enable Karpenter termination and reduce costs
 		finalScore = int64(emptyNodePriority)
 		nodeStrategy = "EMPTY-NODE"
 		completionTime = fmt.Sprintf("%ds", newPodDuration)
@@ -212,12 +214,56 @@ func (s *Chronos) CalculateOptimizedScore(p *v1.Pod, nodeInfo *framework.NodeInf
 	return finalScore
 }
 
-// Resource calculation removed - NodeResourcesFit plugin handles all resource-aware tie-breaking
-// This keeps our plugin focused purely on time-based bin-packing optimization
-
 // ScoreExtensions of the Score plugin.
 func (s *Chronos) ScoreExtensions() framework.ScoreExtensions {
 	return s
+}
+
+// Less is a function used by the QueueSort extension point to sort pods in the scheduling queue.
+// It returns true if podInfo1 should be scheduled before podInfo2.
+// We sort by duration (longest first) to implement Longest Processing Time (LPT) heuristic.
+func (s *Chronos) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
+	klog.V(4).Infof("QueueSort: Comparing pods %s vs %s", podInfo1.Pod.Name, podInfo2.Pod.Name)
+
+	// Priority 1: Respect existing pod priorities (higher priority first)
+	var priority1, priority2 int32
+	if podInfo1.Pod.Spec.Priority != nil {
+		priority1 = *podInfo1.Pod.Spec.Priority
+	}
+	if podInfo2.Pod.Spec.Priority != nil {
+		priority2 = *podInfo2.Pod.Spec.Priority
+	}
+
+	if priority1 != priority2 {
+		result := priority1 > priority2
+		klog.V(4).Infof("QueueSort: Priority decision - %s(p=%d) vs %s(p=%d) = %t",
+			podInfo1.Pod.Name, priority1, podInfo2.Pod.Name, priority2, result)
+		return result
+	}
+
+	// Priority 2: Within same priority class, sort by duration (longest first)
+	duration1, ok1 := getPodDuration(podInfo1.Pod)
+	duration2, ok2 := getPodDuration(podInfo2.Pod)
+
+	if ok1 && ok2 {
+		if duration1 != duration2 {
+			result := duration1 > duration2
+			klog.V(4).Infof("QueueSort: Duration decision - %s(%ds) vs %s(%ds) = %t (longest first)",
+				podInfo1.Pod.Name, duration1, podInfo2.Pod.Name, duration2, result)
+			return result
+		}
+	} else if ok1 != ok2 {
+		result := ok1
+		klog.V(4).Infof("QueueSort: Duration annotation - %s(valid=%t) vs %s(valid=%t) = %t",
+			podInfo1.Pod.Name, ok1, podInfo2.Pod.Name, ok2, result)
+		return result
+	}
+
+	// Priority 3: If durations are equal, fall back to creation time (FIFO)
+	result := podInfo1.Pod.CreationTimestamp.Before(&podInfo2.Pod.CreationTimestamp)
+	klog.V(4).Infof("QueueSort: FIFO decision - %s vs %s = %t (earlier first)",
+		podInfo1.Pod.Name, podInfo2.Pod.Name, result)
+	return result
 }
 
 // NormalizeScore is the key to making this work for jobs of any duration.
@@ -246,8 +292,21 @@ func (s *Chronos) NormalizeScore(ctx context.Context, state *framework.CycleStat
 		// Formula to scale a value from one range [min, max] to another [0, 100].
 		normalized := (nodeScore.Score - minScore) * framework.MaxNodeScore / (maxScore - minScore)
 		scores[i].Score = normalized
-		klog.Infof("Pod: %s/%s, Node: %s, RawScore: %d, NormalizedScore: %d", pod.Namespace, pod.Name, nodeScore.Name, nodeScore.Score, normalized)
 	}
 
 	return nil
+}
+
+// ⚠️  TESTING ONLY - DO NOT USE IN PRODUCTION ⚠️
+// Reserve implements the Reserve plugin interface to force add delay to scheduling.
+// This ensures that QueueSort order is noticeable in scheduling order.
+func (s *Chronos) Reserve(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) *framework.Status {
+	delay := time.Duration(2) * time.Second
+	klog.V(4).Infof("Chronos Reserve: Adding %v delay for pod %s", delay, pod.Name)
+	time.Sleep(delay)
+	return nil
+}
+
+func (s *Chronos) Unreserve(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) {
+	klog.V(4).Infof("Chronos Unreserve: Called for pod %s", pod.Name)
 }
