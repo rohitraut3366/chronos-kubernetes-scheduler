@@ -215,9 +215,6 @@ func (s *Chronos) CalculateOptimizedScore(p *v1.Pod, nodeInfo *framework.NodeInf
 	return finalScore
 }
 
-// Resource calculation removed - NodeResourcesFit plugin handles all resource-aware tie-breaking
-// This keeps our plugin focused purely on time-based bin-packing optimization
-
 // ScoreExtensions of the Score plugin.
 func (s *Chronos) ScoreExtensions() framework.ScoreExtensions {
 	return s
