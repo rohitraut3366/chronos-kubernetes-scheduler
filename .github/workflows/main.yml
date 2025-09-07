@@ -14,6 +14,8 @@ concurrency:
 
 env:
   GO_VERSION: '1.25'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   integration-test:
@@ -580,3 +582,125 @@ jobs:
         # Show final status
         export KUBECONFIG=/tmp/kubeconfig
         kubectl get pods -A || true
+
+  release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    needs: integration-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && contains(github.event.head_commit.modified, 'charts/chronos-kubernetes-scheduler/Chart.yaml')
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: '3.14.0'
+          
+      - name: Install yq
+        uses: mikefarah/yq@v4.44.1
+
+      - name: Get Chart and App Versions
+        id: get_versions
+        run: |
+          CHART_VERSION=$(yq '.version' charts/chronos-kubernetes-scheduler/Chart.yaml)
+          APP_VERSION=$(yq '.appVersion' charts/chronos-kubernetes-scheduler/Chart.yaml)
+          
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "CHART_VERSION=$CHART_VERSION" >> "$GITHUB_ENV"
+          echo "TAG=$APP_VERSION" >> "$GITHUB_ENV"
+          echo "COMMIT_SHA=${GITHUB_SHA::8}" >> "$GITHUB_ENV"
+          
+          echo "✅ Extracted versions: Chart=$CHART_VERSION, App=$APP_VERSION, Commit=${GITHUB_SHA::8}"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if Container Image Exists
+        id: check_image_exists
+        run: |
+          IMAGE_URL="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.APP_VERSION }}"
+          if docker manifest inspect "$IMAGE_URL" >/dev/null 2>&1; then
+            echo "IMAGE_EXISTS=true" >> "$GITHUB_ENV"
+            echo "🔍 Image $IMAGE_URL already exists. Skipping build."
+          else
+            echo "IMAGE_EXISTS=false" >> "$GITHUB_ENV"
+            echo "🆕 Image $IMAGE_URL does not exist. Will build."
+          fi
+
+      - name: Build and Push Container Image
+        if: env.IMAGE_EXISTS == 'false'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.APP_VERSION }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.COMMIT_SHA }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          labels: |
+            org.opencontainers.image.title=Chronos Kubernetes Scheduler
+            org.opencontainers.image.description=A time-aware Kubernetes scheduler
+            org.opencontainers.image.version=${{ env.APP_VERSION }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: |
+            type=gha,mode=max
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+      - name: Login Helm to OCI Registry
+        run: |
+          helm registry login ${{ env.REGISTRY }} \
+            --username ${{ github.actor }} \
+            --password ${{ secrets.GITHUB_TOKEN }}
+          echo "✅ Helm logged in to OCI registry."
+
+      - name: Package Helm Chart
+        run: |
+          mkdir -p helm-releases
+          helm package ./charts/chronos-kubernetes-scheduler --destination ./helm-releases
+          echo "✅ Helm chart packaged."
+
+      - name: Push Helm Chart to OCI Registry
+        run: |
+          CHART_NAME="chronos-kubernetes-scheduler"
+          helm push ./helm-releases/${CHART_NAME}-${{ env.CHART_VERSION }}.tgz \
+            oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
+          echo "✅ Helm chart pushed to OCI registry."
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Release ${{ env.TAG }}
+          body: |
+            ## 🚀 Chronos Scheduler ${{ env.TAG }}
+            
+            **Container Image:** `${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.APP_VERSION }}`
+            **Commit:** `${{ env.COMMIT_SHA }}`
+            
+            ### Installation
+            ```bash
+            helm install chronos-scheduler oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts/chronos-kubernetes-scheduler --version ${{ env.CHART_VERSION }}
+            ```
+          files: |
+            helm-releases/*.tgz
+          make_latest: true
+          generate_release_notes: true

@@ -95,26 +95,18 @@ spec:
 #### Using Helm (Recommended)
 
 ```bash
-# Add Helm repository (for releases)
-helm repo add chronos https://rohitraut3366.github.io/chronos-kubernetes-scheduler/
-helm repo update
-
-# Install latest release
-helm install chronos-scheduler chronos/chronos-kubernetes-scheduler
+# Install latest release directly from OCI registry
+helm install chronos-scheduler oci://ghcr.io/rohitraut3366/charts/chronos-kubernetes-scheduler
 
 # Or install specific version
-helm install chronos-scheduler chronos/chronos-kubernetes-scheduler --version 1.2.3
+helm install chronos-scheduler oci://ghcr.io/rohitraut3366/charts/chronos-kubernetes-scheduler --version 1.2.3
+
+# Install with custom namespace
+helm install chronos-scheduler oci://ghcr.io/rohitraut3366/charts/chronos-kubernetes-scheduler \
+  --namespace chronos-system --create-namespace
 ```
 
-#### Using Pre-built Manifests
-
-```bash
-# Install latest release
-kubectl apply -f https://github.com/rohitraut3366/chronos-kubernetes-scheduler/releases/latest/download/chronos-scheduler-default.yaml
-
-# Or install specific version
-kubectl apply -f https://github.com/rohitraut3366/chronos-kubernetes-scheduler/releases/download/v1.2.3/chronos-scheduler-default.yaml
-```
+> **Note**: Requires Helm 3.8+ for OCI support. Charts are signed with cosign for security.
 
 #### Development Installation
 

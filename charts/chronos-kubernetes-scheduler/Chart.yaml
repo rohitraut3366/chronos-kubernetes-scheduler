@@ -12,66 +12,20 @@ appVersion: "v1.0.0"
 # Chart keywords for discoverability
 keywords:
   - kubernetes
-  - scheduler
-  - plugin
-  - performance
+  - scheduler-plugin
   - optimization
-  - load-balancing
 
 # Chart homepage and sources
-home: https://github.com/your-org/chronos-kubernetes-scheduler
+home: https://github.com/rohitraut3366/chronos-kubernetes-scheduler
 sources:
-  - https://github.com/your-org/chronos-kubernetes-scheduler
+  - https://github.com/rohitraut3366/chronos-kubernetes-scheduler
 
 # Chart maintainers
 maintainers:
-  - name: Your Name
-    email: your-email@example.com
+  - name: Rohit Raut
+    email: rohitraut3366@users.noreply.github.com
 
 # Chart annotations for additional metadata
 annotations:
   category: Infrastructure
   licenses: Apache-2.0
-  
-  # Changelog annotations (for release automation)
-  artifacthub.io/changes: |
-    - kind: fixed
-      description: Fixed readiness probe to use /healthz endpoint instead of missing /readyz endpoint
-    - kind: fixed
-      description: Removed invalid --port flag that was causing scheduler startup failure
-    - kind: changed
-      description: Reverted health checks to use HTTPS on secure port (10259) following standard Kubernetes scheduler pattern
-    - kind: fixed
-      description: Added automountServiceAccountToken for in-cluster Kubernetes API authentication
-    - kind: fixed
-      description: Removed conditional RBAC creation - RBAC is always required for schedulers
-    - kind: added
-      description: Added system:volume-scheduler ClusterRoleBinding for volume operations
-    - kind: fixed
-      description: Added comprehensive RBAC permissions for production scheduler deployment
-    - kind: fixed
-      description: Removed deprecated healthzBindAddress and metricsBindAddress fields
-    - kind: changed
-      description: Updated deployment to use command-line flags for metrics configuration
-    - kind: changed
-      description: Updated to Kubernetes v1.30 compatibility
-    - kind: changed  
-      description: Updated scheduler configuration API to kubescheduler.config.k8s.io/v1
-    - kind: removed
-      description: Removed deprecated scoreMultiplier configuration
-    - kind: added
-      description: Initial Helm chart for Chronos scheduler
-    - kind: added
-      description: Support for custom configuration values
-    - kind: added
-      description: RBAC and security configurations
-  
-  # Images annotations (for security scanning)
-  artifacthub.io/images: |
-    - name: chronos-kubernetes-scheduler
-      image: ghcr.io/your-org/chronos-kubernetes-scheduler:v1.0.0
-  
-  # Security and operational annotations
-  artifacthub.io/operator: "false"
-  artifacthub.io/prerelease: "false"
-  artifacthub.io/containsSecurityUpdates: "false"
