@@ -2049,7 +2049,7 @@ if __name__ == "__main__":
             success = simulator.run_queuesort_scenario(args.scenario, scenario)
         elif args.scenario.startswith("score_"):
             print(f"🔍 Running Score scenario: {args.scenario}")
-        success = simulator.run_scenario(args.scenario, scenario)
+            success = simulator.run_scenario(args.scenario, scenario)
         else:
             print(
                 f"❌ Unknown scenario type: {args.scenario} (must start with 'queuesort_' or 'score_')"
