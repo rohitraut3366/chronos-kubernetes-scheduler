@@ -19,7 +19,7 @@ import (
 
 // TestPluginIntegrationWithRealObjects tests our plugin with realistic K8s objects
 func TestPluginIntegrationWithRealObjects(t *testing.T) {
-	t.Log("🔗 Integration tests with realistic Kubernetes objects")
+	t.Log("Integration tests with realistic Kubernetes objects")
 
 	integrationScenarios := []struct {
 		name           string
@@ -119,7 +119,7 @@ func TestPluginIntegrationWithRealObjects(t *testing.T) {
 
 	for _, scenario := range integrationScenarios {
 		t.Run(scenario.name, func(t *testing.T) {
-			t.Logf("🎯 %s", scenario.description)
+			t.Logf("%s", scenario.description)
 
 			var bestScore int64 = -1
 			var bestNode string
@@ -145,7 +145,7 @@ func TestPluginIntegrationWithRealObjects(t *testing.T) {
 				// Calculate score using PRODUCTION plugin logic directly
 				score := calculateProductionScore(scenario.newPod, nodeInfo)
 
-				t.Logf("  📊 %s: score=%d (pods: %d)",
+				t.Logf("  %s: score=%d (pods: %d)",
 					nodeScenario.node.Name, score, len(nodeScenario.existingJobs))
 
 				if score > bestScore {
@@ -154,18 +154,17 @@ func TestPluginIntegrationWithRealObjects(t *testing.T) {
 				}
 			}
 
-			t.Logf("🏆 Winner: %s with score %d", bestNode, bestScore)
+			t.Logf("Winner: %s with score %d", bestNode, bestScore)
 			assert.Equal(t, scenario.expectedWinner, bestNode,
 				"Expected %s to win, got %s", scenario.expectedWinner, bestNode)
 
-			t.Log("✅ Integration test passed!")
 		})
 	}
 }
 
 // TestIntegrationErrorHandling tests error scenarios with real objects
 func TestIntegrationErrorHandling(t *testing.T) {
-	t.Log("🛡️ Testing integration error handling")
+	t.Log("Testing integration error handling")
 
 	node := createIntegrationNode("test-node", "4", "8Gi", "110")
 	nodeInfo := framework.NewNodeInfo()
@@ -199,21 +198,19 @@ func TestIntegrationErrorHandling(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			t.Logf("🧪 %s", testCase.description)
+			t.Logf("%s", testCase.description)
 
 			score := calculateProductionScore(testCase.pod, nodeInfo)
 
 			assert.Equal(t, testCase.expectedScore, score,
 				"Expected score %d, got %d for %s", testCase.expectedScore, score, testCase.description)
-
-			t.Logf("✅ Score: %d", score)
 		})
 	}
 }
 
 // TestIntegrationPerformance tests performance with realistic load
 func TestIntegrationPerformance(t *testing.T) {
-	t.Log("📈 Testing integration performance with realistic cluster load")
+	t.Log("Testing integration performance with realistic cluster load")
 
 	// Create a large-scale scenario
 	nodes := make([]*v1.Node, 20) // 20 nodes
@@ -271,7 +268,7 @@ func TestIntegrationPerformance(t *testing.T) {
 
 	duration := time.Since(start)
 
-	t.Logf("📊 Performance results:")
+	t.Logf("Performance results:")
 	t.Logf("  - Nodes evaluated: %d", len(nodes))
 	t.Logf("  - Total jobs: %d", len(allJobs))
 	t.Logf("  - Time taken: %v", duration)
@@ -281,7 +278,6 @@ func TestIntegrationPerformance(t *testing.T) {
 	assert.Less(t, duration, 10*time.Millisecond,
 		"Integration performance should be fast even with large clusters")
 
-	t.Log("✅ Integration performance test passed!")
 }
 
 // Helper types and functions
@@ -344,7 +340,6 @@ func calculateProductionScore(pod *v1.Pod, nodeInfo *framework.NodeInfo) int64 {
 		}
 	}
 
-	// ✅ CRITICAL FIX: Use actual production plugin logic
 	plugin := &Chronos{}
 	testPod := createIntegrationPod("test-pod", newPodDuration)
 	score := plugin.CalculateOptimizedScore(testPod, nodeInfo, maxRemainingTime, newPodDuration)
@@ -491,7 +486,7 @@ func simpleMockNodeInfo(nodeName string, podCount int, capacity int64) *framewor
 // =================================================================
 
 func TestOptimizedSchedulingIntegration(t *testing.T) {
-	t.Log("🚀 Testing optimized scheduling logic with realistic scenarios")
+	t.Log("Testing optimized scheduling logic with realistic scenarios")
 
 	testCases := []struct {
 		name           string
@@ -600,7 +595,7 @@ func TestOptimizedSchedulingIntegration(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Logf("🎯 %s: %s", tc.name, tc.description)
+			t.Logf("%s: %s", tc.name, tc.description)
 
 			// Create plugin
 			plugin := &Chronos{}
@@ -644,14 +639,12 @@ func TestOptimizedSchedulingIntegration(t *testing.T) {
 			assert.Equal(t, tc.expectedWinner, actualWinner,
 				"Expected %s to win (%s), but %s won with score %d",
 				tc.expectedWinner, tc.expectedReason, actualWinner, scores[winnerIndex])
-
-			t.Logf("✅ Winner: %s (Score: %d) - %s", actualWinner, scores[winnerIndex], tc.expectedReason)
 		})
 	}
 }
 
 func TestCostOptimizationScenarios(t *testing.T) {
-	t.Log("💰 Testing cost optimization through consolidation and empty node avoidance")
+	t.Log("Testing cost optimization through consolidation and empty node avoidance")
 
 	plugin := &Chronos{}
 
@@ -679,9 +672,6 @@ func TestCostOptimizationScenarios(t *testing.T) {
 			assert.Greater(t, activeScore, emptyScore,
 				"Job duration %ds should prefer active node (active=%d, empty=%d)",
 				jobDuration, activeScore, emptyScore)
-
-			t.Logf("✅ %dm job: Active=%d > Empty=%d (consolidation wins)",
-				jobDuration/60, activeScore, emptyScore)
 		}
 	})
 
@@ -713,8 +703,5 @@ func TestCostOptimizationScenarios(t *testing.T) {
 		// NodeResourcesFit plugin will handle resource-based tie-breaking
 		assert.Equal(t, scores[0], scores[1], "Identical time characteristics = identical scores")
 		assert.Equal(t, scores[1], scores[2], "Identical time characteristics = identical scores")
-
-		t.Logf("✅ Pure time-based scoring verified: High=%d = Med=%d = Low=%d (NodeResourcesFit handles resource tie-breaking)",
-			scores[0], scores[1], scores[2])
 	})
 }

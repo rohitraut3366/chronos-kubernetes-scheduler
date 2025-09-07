@@ -1982,8 +1982,8 @@ spec:
                         passed += 1
                 elif scenario_name.startswith("score_"):
                     print(f"\n🔍 Detected Score scenario: {scenario_name}")
-                    if self.run_scenario(scenario_name, scenario):
-                        passed += 1
+                if self.run_scenario(scenario_name, scenario):
+                    passed += 1
                 else:
                     print(
                         f"\n⚠️ Skipping scenario {scenario_name}: Unknown type (must start with 'queuesort_' or 'score_')"
@@ -2049,7 +2049,7 @@ if __name__ == "__main__":
             success = simulator.run_queuesort_scenario(args.scenario, scenario)
         elif args.scenario.startswith("score_"):
             print(f"🔍 Running Score scenario: {args.scenario}")
-            success = simulator.run_scenario(args.scenario, scenario)
+        success = simulator.run_scenario(args.scenario, scenario)
         else:
             print(
                 f"❌ Unknown scenario type: {args.scenario} (must start with 'queuesort_' or 'score_')"

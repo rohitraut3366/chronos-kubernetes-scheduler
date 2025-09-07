@@ -161,9 +161,6 @@ func TestInvalidInputs(t *testing.T) {
 		durationStr, exists := pod.Annotations[JobDurationAnnotation]
 		assert.False(t, exists, "Pod should not have duration annotation")
 		assert.Empty(t, durationStr, "Duration string should be empty")
-
-		// In real scheduler, this would result in score 0
-		t.Log("Pod without annotation handled gracefully")
 	})
 
 	t.Run("MalformedDurationAnnotation", func(t *testing.T) {
@@ -179,8 +176,6 @@ func TestInvalidInputs(t *testing.T) {
 		durationStr := pod.Annotations[JobDurationAnnotation]
 		_, err := strconv.ParseInt(durationStr, 10, 64)
 		assert.Error(t, err, "Should fail to parse malformed duration")
-
-		t.Log("Malformed annotation handled gracefully")
 	})
 
 	t.Run("NegativeDuration", func(t *testing.T) {
@@ -190,9 +185,6 @@ func TestInvalidInputs(t *testing.T) {
 
 		require.NoError(t, err)
 		assert.Negative(t, duration, "Duration should be negative")
-
-		// In real scheduler, negative duration would be handled appropriately
-		t.Log("Negative duration parsed correctly")
 	})
 }
 
@@ -298,7 +290,6 @@ func TestScoringScenarios(t *testing.T) {
 					"Expected node2 to win. Node1: %d, Node2: %d", score1, score2)
 			}
 
-			t.Logf("%s wins correctly!", scenario.expectedWinner)
 		})
 	}
 }
@@ -525,7 +516,6 @@ func TestCorrectnessInvariants(t *testing.T) {
 			"Active nodes should beat empty nodes for cost optimization (active=%d, empty=%d)",
 			activeNode, emptyNode)
 
-		t.Log("Empty node penalty correctly ensures active node preference")
 	})
 
 	t.Run("UtilizationTieBreakerWorks", func(t *testing.T) {
@@ -3155,7 +3145,6 @@ func TestReserveUnreserveIntegration(t *testing.T) {
 
 func TestReservePluginInterfaceConformance(t *testing.T) {
 
-	// Verify that Chronos implements ReservePlugin interface
 	var _ framework.ReservePlugin = &Chronos{}
 
 	// Create plugin instance using New() to properly initialize cached config
@@ -3395,7 +3384,5 @@ func TestExtensionHierarchyFix(t *testing.T) {
 					node.name, extensionScore, emptyNodeScore)
 			}
 		}
-
-		t.Log("Original bug scenario: All extension nodes now beat empty node")
 	})
 }
