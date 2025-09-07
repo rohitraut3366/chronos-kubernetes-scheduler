@@ -144,7 +144,6 @@ func TestPluginBasics(t *testing.T) {
 	t.Run("Constants", func(t *testing.T) {
 		assert.Equal(t, "Chronos", PluginName)
 		assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation)
-		// maxPossibleScore constant removed as it's no longer used in scoring logic
 
 		t.Logf("Constants validated - framework.MaxNodeScore = %d", framework.MaxNodeScore)
 	})
@@ -577,7 +576,6 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		}
 		nodeInfoZero := framework.NewNodeInfo()
 		nodeInfoZero.SetNode(nodeZero)
-		// Resource scoring now handled by NodeResourcesFit plugin - just verify node is set correctly
 		assert.Equal(t, "zero-capacity", nodeInfoZero.Node().Name, "Node should be set correctly")
 
 		// Test very high CPU (above maximum)
@@ -591,10 +589,9 @@ func TestEdgeCaseCoverage(t *testing.T) {
 		}
 		nodeInfoHuge := framework.NewNodeInfo()
 		nodeInfoHuge.SetNode(nodeHuge)
-		// Resource scoring now handled by NodeResourcesFit plugin - just verify node is set correctly
 		assert.Equal(t, "huge-capacity", nodeInfoHuge.Node().Name, "Node should be set correctly")
 
-		t.Logf("Resource utilization edge cases: NodeResourcesFit plugin now handles resource scoring")
+		t.Logf("Resource utilization edge cases handled correctly")
 	})
 
 	t.Run("BinPackingEdgeCases", func(t *testing.T) {
@@ -1210,9 +1207,6 @@ func TestCalculateOptimizedScore(t *testing.T) {
 			testPodTC := mockPodWithDuration("test-pod", tc.newPodDuration)
 			score := plugin.CalculateOptimizedScore(testPodTC, nodeInfo, tc.maxRemainingTime, tc.newPodDuration)
 
-			// Resource scoring now handled by NodeResourcesFit plugin
-			// (removed resourceScore variable since it's no longer needed)
-
 			switch tc.expectedStrategy {
 			case "extension-utilization":
 				// Updated for new extension scoring: ensures extension always beats empty nodes
@@ -1250,7 +1244,6 @@ func TestCalculateOptimizedScore(t *testing.T) {
 }
 
 func TestEstimateNodeCapacity(t *testing.T) {
-	// Resource estimation now handled by NodeResourcesFit plugin
 
 	testCases := []struct {
 		name        string
@@ -1309,11 +1302,9 @@ func TestEstimateNodeCapacity(t *testing.T) {
 			nodeInfo := framework.NewNodeInfo()
 			nodeInfo.SetNode(node)
 
-			// Resource scoring now handled by NodeResourcesFit plugin
-			// Just verify node is properly set
 			assert.Equal(t, tc.name, nodeInfo.Node().Name, "Node should be set correctly")
 
-			t.Logf("%s: CPU=%dm (resource scoring now handled by NodeResourcesFit)", tc.name, tc.cpuMillis)
+			t.Logf("%s: CPU=%dm", tc.name, tc.cpuMillis)
 		})
 	}
 }
@@ -1485,7 +1476,6 @@ func TestMaximumCoveragePush(t *testing.T) {
 		}
 		nodeInfoMin := framework.NewNodeInfo()
 		nodeInfoMin.SetNode(exactMin)
-		// Resource scoring now handled by NodeResourcesFit plugin
 		assert.Equal(t, "exact-min", nodeInfoMin.Node().Name, "Node should be set correctly")
 
 		// Test exactly at max boundary
@@ -1499,7 +1489,6 @@ func TestMaximumCoveragePush(t *testing.T) {
 		}
 		nodeInfoMax := framework.NewNodeInfo()
 		nodeInfoMax.SetNode(exactMax)
-		// Resource scoring now handled by NodeResourcesFit plugin
 		assert.Equal(t, "exact-max", nodeInfoMax.Node().Name, "Node should be set correctly")
 
 		// Test fractional CPU values
@@ -1513,7 +1502,6 @@ func TestMaximumCoveragePush(t *testing.T) {
 		}
 		nodeInfoFrac := framework.NewNodeInfo()
 		nodeInfoFrac.SetNode(fractional)
-		// Resource scoring now handled by NodeResourcesFit plugin
 		assert.Equal(t, "fractional", nodeInfoFrac.Node().Name, "Node should be set correctly")
 
 	})
@@ -1733,8 +1721,6 @@ func TestAdvancedScoreFunctionCoverage(t *testing.T) {
 		t.Run("ConstantsAndPackageLevel", func(t *testing.T) {
 			assert.Equal(t, "Chronos", PluginName, "Plugin name constant")
 			assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation, "Annotation constant")
-			// maxPossibleScore constant removed - no longer used in scoring logic
-			// Removed utilizationBonus constant - now using hierarchical scoring with priority levels
 
 		})
 
@@ -1749,7 +1735,6 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 
 	t.Run("ConstantsAndPackageLevelAccess", func(t *testing.T) {
 		// Test direct access to package-level constants (ensures they're covered)
-		// maxPossibleScore constant removed - no longer used in scoring logic
 		assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation, "JobDurationAnnotation constant verification")
 		assert.Equal(t, "Chronos", PluginName, "PluginName constant verification")
 
@@ -1864,7 +1849,6 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 	})
 
 	t.Run("EstimateNodeCapacityComprehensive", func(t *testing.T) {
-		// Resource capacity estimation now handled by NodeResourcesFit plugin
 
 		capacityTests := []struct {
 			name        string
@@ -1896,10 +1880,9 @@ func TestScoreFunctionStrategicCoverage(t *testing.T) {
 				}
 				nodeInfo.SetNode(node)
 
-				// Resource scoring now handled by NodeResourcesFit plugin
 				assert.Equal(t, tc.name, nodeInfo.Node().Name, "Node should be set correctly: %s", tc.description)
 
-				t.Logf("%s (%dm CPU): Resource scoring handled by NodeResourcesFit", tc.description, tc.cpuMillis)
+				t.Logf("%s (%dm CPU)", tc.description, tc.cpuMillis)
 			})
 		}
 	})

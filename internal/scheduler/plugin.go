@@ -202,7 +202,6 @@ func (s *Chronos) CalculateOptimizedScore(p *v1.Pod, nodeInfo *framework.NodeInf
 
 	} else {
 		// PRIORITY 3: Empty node - HEAVILY PENALIZED for cost optimization
-		// Avoid empty nodes to enable Karpenter termination and reduce costs
 		finalScore = int64(emptyNodePriority)
 		nodeStrategy = "EMPTY-NODE"
 		completionTime = fmt.Sprintf("%ds", newPodDuration)
