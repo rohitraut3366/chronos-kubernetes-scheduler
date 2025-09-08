@@ -15,7 +15,7 @@ image:
   # -- Image repository
   repository: rohitraut3366/chronos-kubernetes-scheduler
   # -- Image tag (defaults to chart appVersion if not set)
-  tag: latest
+  tag: 08480221adc03c32f82b7cf0eaebf5ef87732312
   # -- Image pull policy
   pullPolicy: IfNotPresent
 
@@ -37,6 +37,9 @@ scheduler:
   name: chronos-kubernetes-scheduler
   # -- Profile name to use from profiles section
   profileName: "chronos-optimized"
+  # -- Leader election
+  leaderElection:
+    enabled: true
 
 # -- Scheduler profiles - define multiple configurations and switch between them
 profiles:

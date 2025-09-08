@@ -78,9 +78,6 @@ spec:
         {{- end }}
         {{- if .Values.scheduler.leaderElection.enabled }}
         - --leader-elect=true
-        - --leader-elect-lease-duration={{ .Values.scheduler.leaderElection.leaseDuration }}
-        - --leader-elect-renew-deadline={{ .Values.scheduler.leaderElection.renewDeadline }}
-        - --leader-elect-retry-period={{ .Values.scheduler.leaderElection.retryPeriod }}
         {{- else }}
         - --leader-elect=false
         {{- end }}
