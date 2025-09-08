@@ -37,6 +37,9 @@ scheduler:
   name: chronos-kubernetes-scheduler
   # -- Profile name to use from profiles section
   profileName: "chronos-optimized"
+  # -- Leader election
+  leaderElection:
+    enabled: true
 
 # -- Scheduler profiles - define multiple configurations and switch between them
 profiles:

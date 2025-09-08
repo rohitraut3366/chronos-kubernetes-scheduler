@@ -30,3 +30,8 @@ data:
         {{- $profile.pluginConfig | toYaml | nindent 6 }}
     leaderElection:
       leaderElect: {{ .Values.scheduler.leaderElection.enabled | default true }}
+      leaseDuration: {{ .Values.scheduler.leaderElection.leaseDuration | default "15s" }}
+      renewDeadline: {{ .Values.scheduler.leaderElection.renewDeadline | default "10s" }}
+      retryPeriod: {{ .Values.scheduler.leaderElection.retryPeriod | default "2s" }}
+      resourceName: {{ include "chronos-kubernetes-scheduler.fullname" . }}
+      resourceNamespace: {{ .Release.Namespace | quote }}
