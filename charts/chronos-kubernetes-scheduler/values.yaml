@@ -15,7 +15,7 @@ image:
   # -- Image repository
   repository: rohitraut3366/chronos-kubernetes-scheduler
   # -- Image tag (defaults to chart appVersion if not set)
-  tag: 08480221adc03c32f82b7cf0eaebf5ef87732312
+  tag: latest
   # -- Image pull policy
   pullPolicy: IfNotPresent
 
