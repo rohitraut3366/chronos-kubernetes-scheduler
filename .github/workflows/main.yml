@@ -521,7 +521,7 @@ jobs:
         echo "📊 The absence of queue sort logs doesn't indicate failure - it depends on workload patterns"
 
     - name: Cache Python dependencies
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ~/.cache/pip
         key: ${{ runner.os }}-pip-scheduler-sim
