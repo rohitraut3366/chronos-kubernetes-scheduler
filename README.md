@@ -156,10 +156,6 @@ Real-time scheduling analysis directly in K9s. See [k9s/README.md](k9s/README.md
 5. Push to branch: `git push origin feature/amazing-feature`
 6. Open a Pull Request
 
-## 📄 License
-
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
-
 ## 🙏 Acknowledgments
 
 - Built using the [Kubernetes Scheduler Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/)
