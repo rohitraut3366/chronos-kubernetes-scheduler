@@ -136,26 +136,6 @@ profiles:
 
 Real-time scheduling analysis directly in K9s. See [k9s/README.md](k9s/README.md) for setup.
 
-## 🛠️ Development
-
-### Project Structure Benefits
-
-- **📦 Clean Separation**: `cmd/` for binaries, `internal/` for logic
-- **🧪 Comprehensive Testing**: Separate unit and integration test files  
-- **🚀 Easy Builds**: Makefile automation for all tasks
-- **📋 Production Ready**: Complete Kubernetes manifests included
-- **🔒 Secure Defaults**: Non-root container, minimal image, proper RBAC
-
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Run tests: `make test`
-4. Commit changes: `git commit -m 'Add amazing feature'`
-5. Push to branch: `git push origin feature/amazing-feature`
-6. Open a Pull Request
-
 ## 🙏 Acknowledgments
 
 - Built using the [Kubernetes Scheduler Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/)
