@@ -22,6 +22,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
+	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework/parallelize"
 	"k8s.io/kubernetes/pkg/scheduler/util/assumecache"
@@ -981,7 +982,7 @@ func TestMainEntryPoints(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
 		}
 
-		score1, status1 := plugin.Score(context.TODO(), nil, podNoAnnotation, "any-node")
+		score1, status1 := plugin.Score(context.TODO(), nil, podNoAnnotation, createEmptyNode("any-node"))
 		assert.True(t, status1.IsSuccess(), "Missing annotation should be handled gracefully")
 		assert.Equal(t, int64(0), score1, "Missing annotation should return score 0")
 
@@ -995,15 +996,13 @@ func TestMainEntryPoints(t *testing.T) {
 			},
 		}
 
-		score2, status2 := plugin.Score(context.TODO(), nil, podInvalidAnnotation, "any-node")
+		score2, status2 := plugin.Score(context.TODO(), nil, podInvalidAnnotation, createEmptyNode("any-node"))
 		assert.True(t, status2.IsSuccess(), "Invalid annotation should be handled gracefully")
 		assert.Equal(t, int64(0), score2, "Invalid annotation should return score 0")
 
 	})
 
-	// Test Score function error handling paths
-	t.Run("ScoreFunctionErrorHandling", func(t *testing.T) {
-		// Test with nil handle (will cause error when accessing node info)
+	t.Run("ScoreFunctionWithNodeInfo", func(t *testing.T) {
 		pluginNilHandle := &Chronos{handle: nil}
 
 		podWithAnnotation := &v1.Pod{
@@ -1015,22 +1014,11 @@ func TestMainEntryPoints(t *testing.T) {
 			},
 		}
 
-		// This should panic/error when trying to access s.handle.SnapshotSharedLister()
-		// We'll catch this with a deferred recover to test the error path
-		defer func() {
-			if r := recover(); r != nil {
+		nodeInfo := createEmptyNode("test-node")
+		score, status := pluginNilHandle.Score(context.TODO(), nil, podWithAnnotation, nodeInfo)
 
-			}
-		}()
-
-		score, status := pluginNilHandle.Score(context.TODO(), nil, podWithAnnotation, "test-node")
-
-		// If we get here without panic, check for error status
-		if !status.IsSuccess() {
-			assert.Equal(t, framework.Error, status.Code(), "Should return error status for node info failure")
-			assert.Equal(t, int64(0), score, "Should return 0 score on error")
-
-		}
+		assert.True(t, status.IsSuccess(), "Score with NodeInfo should succeed")
+		assert.Greater(t, score, int64(0), "Should return positive score for valid pod on empty node")
 	})
 
 	// Test NormalizeScore function
@@ -1995,7 +1983,9 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 
 		for _, scenario := range testScenarios {
 			t.Run(scenario.name, func(t *testing.T) {
-				score, status := plugin.Score(context.Background(), nil, scenario.pod, scenario.nodeName)
+				nodeInfo, err := mockHandle.SnapshotSharedLister().NodeInfos().Get(scenario.nodeName)
+				require.NoError(t, err)
+				score, status := plugin.Score(context.Background(), nil, scenario.pod, nodeInfo)
 
 				assert.True(t, status.IsSuccess(), "Score should succeed: %s", scenario.description)
 				assert.GreaterOrEqual(t, score, scenario.expectedRange[0],
@@ -2009,8 +1999,7 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("ScoreErrorHandling", func(t *testing.T) {
-		// Test error conditions in Score function
+	t.Run("ScoreWithNodeInfo", func(t *testing.T) {
 		errorHandle := createErrorMockHandle()
 		plugin := &Chronos{handle: errorHandle}
 
@@ -2021,14 +2010,12 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 			},
 		}
 
-		score, status := plugin.Score(context.Background(), nil, testPod, "error-node")
+		nodeInfo := createEmptyNode("error-node")
+		score, status := plugin.Score(context.Background(), nil, testPod, nodeInfo)
 
-		assert.False(t, status.IsSuccess(), "Should return error status")
-		assert.Equal(t, framework.Error, status.Code(), "Should return Error status code")
-		assert.Equal(t, int64(0), score, "Should return 0 score on error")
-		assert.Contains(t, status.Message(), "getting node", "Error message should mention node retrieval")
-
-		t.Logf("Error handling verified: %s", status.Message())
+		assert.True(t, status.IsSuccess(), "Score with NodeInfo should succeed (no handle lookup)")
+		assert.Greater(t, score, int64(0), "Should return positive score")
+		t.Logf("Score with NodeInfo: %d", score)
 	})
 
 	t.Run("ScoreWithComplexNodeStates", func(t *testing.T) {
@@ -2060,7 +2047,9 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 					pod.Annotations = map[string]string{JobDurationAnnotation: tc.annotation}
 				}
 
-				score, status := plugin.Score(context.Background(), nil, pod, "complex-node")
+				nodeInfo, err := complexHandle.SnapshotSharedLister().NodeInfos().Get("complex-node")
+				require.NoError(t, err)
+				score, status := plugin.Score(context.Background(), nil, pod, nodeInfo)
 
 				assert.True(t, status.IsSuccess(), "Score should always succeed")
 				switch tc.expectScore {
@@ -2089,7 +2078,9 @@ func TestScoreFunctionFrameworkIntegration(t *testing.T) {
 			},
 		}
 
-		score, status := plugin.Score(context.Background(), nil, testPod, "overdue-node")
+		nodeInfo, err := overdueHandle.SnapshotSharedLister().NodeInfos().Get("overdue-node")
+		require.NoError(t, err)
+		score, status := plugin.Score(context.Background(), nil, testPod, nodeInfo)
 
 		assert.True(t, status.IsSuccess(), "Score should succeed with overdue pods")
 		assert.Greater(t, score, int64(0), "Should still calculate positive score")
@@ -2230,6 +2221,10 @@ func (h *comprehensiveMockHandle) RunScorePlugins(ctx context.Context, state *fr
 	return nil, framework.NewStatus(framework.Success)
 }
 func (h *comprehensiveMockHandle) Extenders() []framework.Extender { return nil }
+
+func (h *comprehensiveMockHandle) Activate(logger klog.Logger, pods map[string]*v1.Pod) {}
+
+func (h *comprehensiveMockHandle) SharedDRAManager() framework.SharedDRAManager { return nil }
 
 // comprehensiveMockSharedLister implements framework.SharedLister
 type comprehensiveMockSharedLister struct {
