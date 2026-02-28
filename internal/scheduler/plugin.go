@@ -65,22 +65,14 @@ func getPodDuration(pod *v1.Pod) (int64, bool) {
 
 // Score is the core scheduling logic. It calculates a score for each node based on
 // when the node is expected to become idle.
-func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.Pod, nodeName string) (int64, *framework.Status) {
-	klog.V(4).Infof("Scoring pod %s/%s for node %s", p.Namespace, p.Name, nodeName)
+func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.Pod, nodeInfo *framework.NodeInfo) (int64, *framework.Status) {
+	klog.V(4).Infof("Scoring pod %s/%s for node %s", p.Namespace, p.Name, nodeInfo.Node().Name)
 
 	newPodDuration, ok := getPodDuration(p)
 	if !ok {
 		return 0, framework.NewStatus(framework.Success)
 	}
 
-	// 2. Get node information.
-	nodeInfo, err := s.handle.SnapshotSharedLister().NodeInfos().Get(nodeName)
-	if err != nil {
-		klog.Errorf("Error getting node info for %s: %v", nodeName, err)
-		return 0, framework.NewStatus(framework.Error, fmt.Sprintf("getting node %q info: %s", nodeName, err))
-	}
-
-	// 3. calculates max remaining time by looking at annotations on all the pods on the node
 	maxRemainingTime := s.calculateMaxRemainingTimeOptimized(nodeInfo.Pods)
 
 	// 4. Apply pure time-based optimization strategy (NodeResourcesFit handles resource tie-breaking)
