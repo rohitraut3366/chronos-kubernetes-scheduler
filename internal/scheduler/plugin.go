@@ -278,14 +278,14 @@ func (s *Chronos) NormalizeScore(ctx context.Context, state framework.CycleState
 	// If all scores are the same, set them all to maximum score.
 	if maxScore == minScore {
 		for i := range scores {
-			scores[i].Score = framework.MaxNodeScore // Give all nodes a perfect score
+			scores[i].Score = framework.MaxScore // Give all nodes a perfect score
 		}
 		return nil
 	}
 
 	for i, nodeScore := range scores {
 		// Formula to scale a value from one range [min, max] to another [0, 100].
-		normalized := (nodeScore.Score - minScore) * framework.MaxNodeScore / (maxScore - minScore)
+		normalized := (nodeScore.Score - minScore) * framework.MaxScore / (maxScore - minScore)
 		scores[i].Score = normalized
 	}
 

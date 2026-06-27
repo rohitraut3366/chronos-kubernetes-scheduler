@@ -146,7 +146,7 @@ func TestPluginBasics(t *testing.T) {
 		assert.Equal(t, "Chronos", PluginName)
 		assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation)
 
-		t.Logf("Constants validated - fwk.MaxNodeScore = %d", fwk.MaxNodeScore)
+		t.Logf("Constants validated - fwk.MaxScore = %d", fwk.MaxScore)
 	})
 }
 
