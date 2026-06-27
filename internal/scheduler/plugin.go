@@ -10,7 +10,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
-	"k8s.io/kubernetes/pkg/scheduler/framework"
+	"k8s.io/kube-scheduler/framework"
 )
 
 const (
@@ -65,7 +65,7 @@ func getPodDuration(pod *v1.Pod) (int64, bool) {
 
 // Score is the core scheduling logic. It calculates a score for each node based on
 // when the node is expected to become idle.
-func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.Pod, nodeInfo *framework.NodeInfo) (int64, *framework.Status) {
+func (s *Chronos) Score(ctx context.Context, state framework.CycleState, p *v1.Pod, nodeInfo framework.NodeInfo) (int64, *framework.Status) {
 	klog.V(4).Infof("Scoring pod %s/%s for node %s", p.Namespace, p.Name, nodeInfo.Node().Name)
 
 	newPodDuration, ok := getPodDuration(p)
@@ -73,7 +73,7 @@ func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.
 		return 0, framework.NewStatus(framework.Success)
 	}
 
-	maxRemainingTime := s.calculateMaxRemainingTimeOptimized(nodeInfo.Pods)
+	maxRemainingTime := s.calculateMaxRemainingTimeOptimized(nodeInfo.GetPods())
 
 	// 4. Apply pure time-based optimization strategy (NodeResourcesFit handles resource tie-breaking)
 	score := s.CalculateOptimizedScore(p, nodeInfo, maxRemainingTime, newPodDuration)
@@ -82,7 +82,7 @@ func (s *Chronos) Score(ctx context.Context, state *framework.CycleState, p *v1.
 
 // calculateMaxRemainingTimeOptimized - Performance-optimized remaining time calculation
 // Single pass through pods with early termination and minimal allocations
-func (s *Chronos) calculateMaxRemainingTimeOptimized(pods []*framework.PodInfo) int64 {
+func (s *Chronos) calculateMaxRemainingTimeOptimized(pods []framework.PodInfo) int64 {
 	if len(pods) == 0 {
 		return 0
 	}
@@ -92,7 +92,7 @@ func (s *Chronos) calculateMaxRemainingTimeOptimized(pods []*framework.PodInfo) 
 
 	// Single optimized loop - no redundant operations
 	for _, podInfo := range pods {
-		pod := podInfo.Pod
+		pod := podInfo.GetPod()
 
 		// Fast early termination for completed pods
 		switch pod.Status.Phase {
@@ -149,7 +149,7 @@ func (s *Chronos) CalculateBinPackingCompletionTime(maxRemainingTime, newPodDura
 // PRIORITY 1: Jobs that FIT within existing work windows (perfect bin-packing)
 // PRIORITY 2: Jobs that EXTEND existing commitments (extension minimization)
 // PRIORITY 3: Empty nodes (heavily penalized for cost optimization)
-func (s *Chronos) CalculateOptimizedScore(p *v1.Pod, nodeInfo *framework.NodeInfo, maxRemainingTime int64, newPodDuration int64) int64 {
+func (s *Chronos) CalculateOptimizedScore(p *v1.Pod, nodeInfo framework.NodeInfo, maxRemainingTime int64, newPodDuration int64) int64 {
 	// Pure time-based scoring - NodeResourcesFit plugin handles all resource tie-breaking
 	// This keeps our plugin focused on its core competency: time-based bin-packing
 
@@ -214,53 +214,56 @@ func (s *Chronos) ScoreExtensions() framework.ScoreExtensions {
 // Less is a function used by the QueueSort extension point to sort pods in the scheduling queue.
 // It returns true if podInfo1 should be scheduled before podInfo2.
 // We sort by duration (longest first) to implement Longest Processing Time (LPT) heuristic.
-func (s *Chronos) Less(podInfo1, podInfo2 *framework.QueuedPodInfo) bool {
-	klog.V(4).Infof("QueueSort: Comparing pods %s vs %s", podInfo1.Pod.Name, podInfo2.Pod.Name)
+func (s *Chronos) Less(podInfo1, podInfo2 framework.QueuedPodInfo) bool {
+	pod1 := podInfo1.GetPodInfo().GetPod()
+	pod2 := podInfo2.GetPodInfo().GetPod()
+
+	klog.V(4).Infof("QueueSort: Comparing pods %s vs %s", pod1.Name, pod2.Name)
 
 	// Priority 1: Respect existing pod priorities (higher priority first)
 	var priority1, priority2 int32
-	if podInfo1.Pod.Spec.Priority != nil {
-		priority1 = *podInfo1.Pod.Spec.Priority
+	if pod1.Spec.Priority != nil {
+		priority1 = *pod1.Spec.Priority
 	}
-	if podInfo2.Pod.Spec.Priority != nil {
-		priority2 = *podInfo2.Pod.Spec.Priority
+	if pod2.Spec.Priority != nil {
+		priority2 = *pod2.Spec.Priority
 	}
 
 	if priority1 != priority2 {
 		result := priority1 > priority2
 		klog.V(4).Infof("QueueSort: Priority decision - %s(p=%d) vs %s(p=%d) = %t",
-			podInfo1.Pod.Name, priority1, podInfo2.Pod.Name, priority2, result)
+			pod1.Name, priority1, pod2.Name, priority2, result)
 		return result
 	}
 
 	// Priority 2: Within same priority class, sort by duration (longest first)
-	duration1, ok1 := getPodDuration(podInfo1.Pod)
-	duration2, ok2 := getPodDuration(podInfo2.Pod)
+	duration1, ok1 := getPodDuration(pod1)
+	duration2, ok2 := getPodDuration(pod2)
 
 	if ok1 && ok2 {
 		if duration1 != duration2 {
 			result := duration1 > duration2
 			klog.V(4).Infof("QueueSort: Duration decision - %s(%ds) vs %s(%ds) = %t (longest first)",
-				podInfo1.Pod.Name, duration1, podInfo2.Pod.Name, duration2, result)
+				pod1.Name, duration1, pod2.Name, duration2, result)
 			return result
 		}
 	} else if ok1 != ok2 {
 		result := ok1
 		klog.V(4).Infof("QueueSort: Duration annotation - %s(valid=%t) vs %s(valid=%t) = %t",
-			podInfo1.Pod.Name, ok1, podInfo2.Pod.Name, ok2, result)
+			pod1.Name, ok1, pod2.Name, ok2, result)
 		return result
 	}
 
 	// Priority 3: If durations are equal, fall back to creation time (FIFO)
-	result := podInfo1.Pod.CreationTimestamp.Before(&podInfo2.Pod.CreationTimestamp)
+	result := pod1.CreationTimestamp.Before(&pod2.CreationTimestamp)
 	klog.V(4).Infof("QueueSort: FIFO decision - %s vs %s = %t (earlier first)",
-		podInfo1.Pod.Name, podInfo2.Pod.Name, result)
+		pod1.Name, pod2.Name, result)
 	return result
 }
 
 // NormalizeScore is the key to making this work for jobs of any duration.
 // It takes the raw scores from the Score function and scales them to a 0-100 range.
-func (s *Chronos) NormalizeScore(ctx context.Context, state *framework.CycleState, pod *v1.Pod, scores framework.NodeScoreList) *framework.Status {
+func (s *Chronos) NormalizeScore(ctx context.Context, state framework.CycleState, pod *v1.Pod, scores framework.NodeScoreList) *framework.Status {
 	var minScore, maxScore int64 = math.MaxInt64, math.MinInt64
 
 	for _, nodeScore := range scores {
@@ -275,14 +278,14 @@ func (s *Chronos) NormalizeScore(ctx context.Context, state *framework.CycleStat
 	// If all scores are the same, set them all to maximum score.
 	if maxScore == minScore {
 		for i := range scores {
-			scores[i].Score = framework.MaxNodeScore // Give all nodes a perfect score
+			scores[i].Score = framework.MaxScore // Give all nodes a perfect score
 		}
 		return nil
 	}
 
 	for i, nodeScore := range scores {
 		// Formula to scale a value from one range [min, max] to another [0, 100].
-		normalized := (nodeScore.Score - minScore) * framework.MaxNodeScore / (maxScore - minScore)
+		normalized := (nodeScore.Score - minScore) * framework.MaxScore / (maxScore - minScore)
 		scores[i].Score = normalized
 	}
 
@@ -292,13 +295,13 @@ func (s *Chronos) NormalizeScore(ctx context.Context, state *framework.CycleStat
 // ⚠️  TESTING ONLY - DO NOT USE IN PRODUCTION ⚠️
 // Reserve implements the Reserve plugin interface to force add delay to scheduling.
 // This ensures that QueueSort order is noticeable in scheduling order.
-func (s *Chronos) Reserve(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) *framework.Status {
+func (s *Chronos) Reserve(ctx context.Context, state framework.CycleState, pod *v1.Pod, nodeName string) *framework.Status {
 	delay := time.Duration(2) * time.Second
 	klog.V(4).Infof("Chronos Reserve: Adding %v delay for pod %s", delay, pod.Name)
 	time.Sleep(delay)
 	return nil
 }
 
-func (s *Chronos) Unreserve(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) {
+func (s *Chronos) Unreserve(ctx context.Context, state framework.CycleState, pod *v1.Pod, nodeName string) {
 	klog.V(4).Infof("Chronos Unreserve: Called for pod %s", pod.Name)
 }

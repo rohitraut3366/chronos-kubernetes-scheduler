@@ -48,7 +48,7 @@ chronos-kubernetes-scheduler/
 
 ### Development Prerequisites (Optional)
 Only needed for building from source:
-- Go 1.25+
+- Go 1.26+
 - Docker (for building images)
 
 ```bash
