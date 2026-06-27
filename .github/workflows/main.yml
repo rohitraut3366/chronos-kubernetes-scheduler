@@ -81,24 +81,21 @@ jobs:
         # Dynamically determine Kubernetes version from go.mod
         K8S_VERSION=$(go list -m k8s.io/kubernetes | awk '{print $2}' | sed 's/^v//' | cut -d'.' -f1,2)
         KIND_IMAGE="kindest/node:v${K8S_VERSION}.0"
+        FALLBACK_KIND_IMAGE="kindest/node:v1.35.0"
         
         echo "Detected Kubernetes version from go.mod: v${K8S_VERSION}"
-        echo "Using KIND image: ${KIND_IMAGE}"
+        echo "Preferred KIND image: ${KIND_IMAGE}"
         
-        # Verify the KIND image exists - FAIL if not available for consistency
+        # Use the matching KIND image when available. New Kubernetes library releases
+        # can appear before KIND publishes a matching node image, so fall back to the
+        # latest known-good image for integration smoke tests.
         echo "🔍 Verifying KIND image availability..."
         if docker pull ${KIND_IMAGE} >/dev/null 2>&1; then
           echo "✅ KIND image ${KIND_IMAGE} is available"
         else
-          echo "❌ KIND image ${KIND_IMAGE} not found!"
-          echo "💡 This usually means:"
-          echo "   1. Network/registry issue (temporary)"  
-          echo "   2. KIND doesn't have image for v${K8S_VERSION}.0 yet"
-          echo "   3. Version detection logic needs update"
-          echo ""
-          echo "🔧 To fix: Check https://github.com/kubernetes-sigs/kind/releases"
-          echo "   and verify v${K8S_VERSION}.0 image exists, or update go.mod"
-          exit 1
+          echo "⚠️ KIND image ${KIND_IMAGE} not found; falling back to ${FALLBACK_KIND_IMAGE}"
+          docker pull ${FALLBACK_KIND_IMAGE} >/dev/null
+          KIND_IMAGE="${FALLBACK_KIND_IMAGE}"
         fi
         
         echo "Creating KIND multi-node cluster with ${KIND_IMAGE}..."
