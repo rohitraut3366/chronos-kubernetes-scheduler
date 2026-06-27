@@ -81,7 +81,7 @@ jobs:
         # Dynamically determine Kubernetes version from go.mod
         K8S_VERSION=$(go list -m k8s.io/kubernetes | awk '{print $2}' | sed 's/^v//' | cut -d'.' -f1,2)
         KIND_IMAGE="kindest/node:v${K8S_VERSION}.0"
-        FALLBACK_KIND_IMAGE="kindest/node:v1.35.5"
+        FALLBACK_KIND_IMAGE="kindest/node:v1.35.0"
         
         echo "Detected Kubernetes version from go.mod: v${K8S_VERSION}"
         echo "Preferred KIND image: ${KIND_IMAGE}"
