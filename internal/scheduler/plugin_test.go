@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/api/core/v1"
@@ -23,6 +22,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
 	"k8s.io/klog/v2"
+	fwk "k8s.io/kube-scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework/parallelize"
 	"k8s.io/kubernetes/pkg/scheduler/util/assumecache"
@@ -146,7 +146,7 @@ func TestPluginBasics(t *testing.T) {
 		assert.Equal(t, "Chronos", PluginName)
 		assert.Equal(t, "scheduling.workload.io/expected-duration-seconds", JobDurationAnnotation)
 
-		t.Logf("Constants validated - framework.MaxNodeScore = %d", framework.MaxNodeScore)
+		t.Logf("Constants validated - fwk.MaxNodeScore = %d", fwk.MaxNodeScore)
 	})
 }
 
@@ -1030,7 +1030,7 @@ func TestMainEntryPoints(t *testing.T) {
 		}
 
 		// Create sample scores
-		scores := framework.NodeScoreList{
+		scores := fwk.NodeScoreList{
 			{Name: "node1", Score: 1000},
 			{Name: "node2", Score: 5000},
 			{Name: "node3", Score: 10000},
@@ -1059,7 +1059,7 @@ func TestMainEntryPoints(t *testing.T) {
 		}
 
 		// Create equal scores
-		scores := framework.NodeScoreList{
+		scores := fwk.NodeScoreList{
 			{Name: "node1", Score: 5000},
 			{Name: "node2", Score: 5000},
 			{Name: "node3", Score: 5000},
@@ -1401,7 +1401,7 @@ func TestMaximumCoveragePush(t *testing.T) {
 		// Test all edge cases and paths in NormalizeScore
 
 		// Test with negative scores (should still work)
-		negativeScores := framework.NodeScoreList{
+		negativeScores := fwk.NodeScoreList{
 			{Name: "node1", Score: -1000},
 			{Name: "node2", Score: 5000},
 			{Name: "node3", Score: 10000},
@@ -1419,7 +1419,7 @@ func TestMaximumCoveragePush(t *testing.T) {
 		assert.Equal(t, int64(100), negativeScores[2].Score, "Highest should normalize to 100")
 
 		// Test with very large score differences
-		largeScores := framework.NodeScoreList{
+		largeScores := fwk.NodeScoreList{
 			{Name: "tiny", Score: 1},
 			{Name: "huge", Score: 999999999},
 		}
@@ -2158,7 +2158,7 @@ func createOverduePodMockHandle() *comprehensiveMockHandle {
 }
 
 // Framework.Handle interface implementation - This is the complex part!
-func (h *comprehensiveMockHandle) SnapshotSharedLister() framework.SharedLister {
+func (h *comprehensiveMockHandle) SnapshotSharedLister() fwk.SharedLister {
 	return &comprehensiveMockSharedLister{
 		nodes:                 h.nodes,
 		simulateNodeInfoError: h.simulateNodeInfoError,
@@ -2173,8 +2173,8 @@ func (h *comprehensiveMockHandle) KubeConfig() *rest.Config {
 	return &rest.Config{}
 }
 
-func (h *comprehensiveMockHandle) EventRecorder() events.EventRecorder {
-	return h.eventRecorder
+func (h *comprehensiveMockHandle) EventRecorder() events.EventRecorderLogger {
+	return nil
 }
 
 func (h *comprehensiveMockHandle) SharedInformerFactory() informers.SharedInformerFactory {
@@ -2182,7 +2182,7 @@ func (h *comprehensiveMockHandle) SharedInformerFactory() informers.SharedInform
 }
 
 // Corrected method to match the required interface.
-func (h *comprehensiveMockHandle) Parallelizer() parallelize.Parallelizer {
+func (h *comprehensiveMockHandle) Parallelizer() fwk.Parallelizer {
 	return parallelize.NewParallelizer(1) // Use the actual Parallelizer with 1 worker
 }
 
@@ -2191,40 +2191,52 @@ func (h *comprehensiveMockHandle) ResourceClaimCache() *assumecache.AssumeCache 
 }
 
 // Additional required methods with correct signatures
-func (h *comprehensiveMockHandle) IterateOverWaitingPods(callback func(framework.WaitingPod)) {}
-func (h *comprehensiveMockHandle) GetWaitingPod(uid types.UID) framework.WaitingPod           { return nil }
-func (h *comprehensiveMockHandle) RejectWaitingPod(uid types.UID) bool                        { return false }
-func (h *comprehensiveMockHandle) AddNominatedPod(logger logr.Logger, podInfo *framework.PodInfo, nominatingInfo *framework.NominatingInfo) {
+func (h *comprehensiveMockHandle) IterateOverWaitingPods(callback func(fwk.WaitingPod)) {}
+func (h *comprehensiveMockHandle) GetWaitingPod(uid types.UID) fwk.WaitingPod           { return nil }
+func (h *comprehensiveMockHandle) RejectWaitingPod(uid types.UID) bool                  { return false }
+func (h *comprehensiveMockHandle) AddPodInPreBind(uid types.UID, cancel context.CancelCauseFunc) {
+}
+func (h *comprehensiveMockHandle) GetPodInPreBind(uid types.UID) fwk.PodInPreBind { return nil }
+func (h *comprehensiveMockHandle) RemovePodInPreBind(uid types.UID)               {}
+func (h *comprehensiveMockHandle) AddNominatedPod(logger klog.Logger, podInfo fwk.PodInfo, nominatingInfo *fwk.NominatingInfo) {
 }
 func (h *comprehensiveMockHandle) DeleteNominatedPodIfExists(pod *v1.Pod) {}
-func (h *comprehensiveMockHandle) UpdateNominatedPod(logger logr.Logger, oldPod *v1.Pod, newPodInfo *framework.PodInfo) {
+func (h *comprehensiveMockHandle) UpdateNominatedPod(logger klog.Logger, oldPod *v1.Pod, newPodInfo fwk.PodInfo) {
 }
-func (h *comprehensiveMockHandle) NominatedPodsForNode(nodeName string) []*framework.PodInfo {
+func (h *comprehensiveMockHandle) NominatedPodsForNode(nodeName string) []fwk.PodInfo {
 	return nil
 }
-func (h *comprehensiveMockHandle) RunFilterPluginsWithNominatedPods(ctx context.Context, state *framework.CycleState, pod *v1.Pod, info *framework.NodeInfo) *framework.Status {
-	return framework.NewStatus(framework.Success)
+func (h *comprehensiveMockHandle) RunFilterPluginsWithNominatedPods(ctx context.Context, state fwk.CycleState, pod *v1.Pod, info fwk.NodeInfo) *fwk.Status {
+	return fwk.NewStatus(fwk.Success)
 }
-func (h *comprehensiveMockHandle) RunFilterPlugins(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeInfo *framework.NodeInfo) *framework.Status {
-	return framework.NewStatus(framework.Success)
+func (h *comprehensiveMockHandle) RunFilterPlugins(ctx context.Context, state fwk.CycleState, pod *v1.Pod, nodeInfo fwk.NodeInfo) *fwk.Status {
+	return fwk.NewStatus(fwk.Success)
 }
-func (h *comprehensiveMockHandle) RunPreFilterExtensionAddPod(ctx context.Context, state *framework.CycleState, podToSchedule *v1.Pod, podInfoToAdd *framework.PodInfo, nodeInfo *framework.NodeInfo) *framework.Status {
-	return framework.NewStatus(framework.Success)
+func (h *comprehensiveMockHandle) RunPreFilterExtensionAddPod(ctx context.Context, state fwk.CycleState, podToSchedule *v1.Pod, podInfoToAdd fwk.PodInfo, nodeInfo fwk.NodeInfo) *fwk.Status {
+	return fwk.NewStatus(fwk.Success)
 }
-func (h *comprehensiveMockHandle) RunPreFilterExtensionRemovePod(ctx context.Context, state *framework.CycleState, podToSchedule *v1.Pod, podInfoToRemove *framework.PodInfo, nodeInfo *framework.NodeInfo) *framework.Status {
-	return framework.NewStatus(framework.Success)
+func (h *comprehensiveMockHandle) RunPreFilterExtensionRemovePod(ctx context.Context, state fwk.CycleState, podToSchedule *v1.Pod, podInfoToRemove fwk.PodInfo, nodeInfo fwk.NodeInfo) *fwk.Status {
+	return fwk.NewStatus(fwk.Success)
 }
-func (h *comprehensiveMockHandle) RunPreScorePlugins(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodes []*framework.NodeInfo) *framework.Status {
-	return framework.NewStatus(framework.Success)
+func (h *comprehensiveMockHandle) RunPreScorePlugins(ctx context.Context, state fwk.CycleState, pod *v1.Pod, nodes []fwk.NodeInfo) *fwk.Status {
+	return fwk.NewStatus(fwk.Success)
 }
-func (h *comprehensiveMockHandle) RunScorePlugins(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodes []*framework.NodeInfo) ([]framework.NodePluginScores, *framework.Status) {
-	return nil, framework.NewStatus(framework.Success)
+func (h *comprehensiveMockHandle) RunScorePlugins(ctx context.Context, state fwk.CycleState, pod *v1.Pod, nodes []fwk.NodeInfo) ([]fwk.NodePluginScores, *fwk.Status) {
+	return nil, fwk.NewStatus(fwk.Success)
 }
-func (h *comprehensiveMockHandle) Extenders() []framework.Extender { return nil }
+func (h *comprehensiveMockHandle) Extenders() []fwk.Extender { return nil }
 
 func (h *comprehensiveMockHandle) Activate(logger klog.Logger, pods map[string]*v1.Pod) {}
 
-func (h *comprehensiveMockHandle) SharedDRAManager() framework.SharedDRAManager { return nil }
+func (h *comprehensiveMockHandle) SharedDRAManager() fwk.SharedDRAManager { return nil }
+func (h *comprehensiveMockHandle) SharedCSIManager() fwk.CSIManager       { return nil }
+func (h *comprehensiveMockHandle) APIDispatcher() fwk.APIDispatcher       { return nil }
+func (h *comprehensiveMockHandle) APICacher() fwk.APICacher               { return nil }
+func (h *comprehensiveMockHandle) ProfileName() string                    { return "" }
+func (h *comprehensiveMockHandle) PodGroupManager() fwk.PodGroupManager   { return nil }
+func (h *comprehensiveMockHandle) SignPod(ctx context.Context, pod *v1.Pod) fwk.PodSignature {
+	return fwk.PodSignature{}
+}
 
 // comprehensiveMockSharedLister implements framework.SharedLister
 type comprehensiveMockSharedLister struct {
@@ -2232,16 +2244,18 @@ type comprehensiveMockSharedLister struct {
 	simulateNodeInfoError bool
 }
 
-func (l *comprehensiveMockSharedLister) NodeInfos() framework.NodeInfoLister {
+func (l *comprehensiveMockSharedLister) NodeInfos() fwk.NodeInfoLister {
 	return &comprehensiveMockNodeInfoLister{
 		nodes:                 l.nodes,
 		simulateNodeInfoError: l.simulateNodeInfoError,
 	}
 }
 
-func (l *comprehensiveMockSharedLister) StorageInfos() framework.StorageInfoLister {
+func (l *comprehensiveMockSharedLister) StorageInfos() fwk.StorageInfoLister {
 	return &mockStorageInfoLister{}
 }
+
+func (l *comprehensiveMockSharedLister) PodGroupStates() fwk.PodGroupStateLister { return nil }
 
 // comprehensiveMockNodeInfoLister implements framework.NodeInfoLister
 type comprehensiveMockNodeInfoLister struct {
@@ -2249,7 +2263,7 @@ type comprehensiveMockNodeInfoLister struct {
 	simulateNodeInfoError bool
 }
 
-func (l *comprehensiveMockNodeInfoLister) Get(nodeName string) (*framework.NodeInfo, error) {
+func (l *comprehensiveMockNodeInfoLister) Get(nodeName string) (fwk.NodeInfo, error) {
 	if l.simulateNodeInfoError {
 		return nil, fmt.Errorf("simulated node info error for node %s", nodeName)
 	}
@@ -2265,12 +2279,12 @@ func (l *comprehensiveMockNodeInfoLister) Get(nodeName string) (*framework.NodeI
 	return createEmptyNode(nodeName), nil
 }
 
-func (l *comprehensiveMockNodeInfoLister) List() ([]*framework.NodeInfo, error) {
+func (l *comprehensiveMockNodeInfoLister) List() ([]fwk.NodeInfo, error) {
 	if l.simulateNodeInfoError {
 		return nil, fmt.Errorf("simulated node list error")
 	}
 
-	result := make([]*framework.NodeInfo, 0, len(l.nodes))
+	result := make([]fwk.NodeInfo, 0, len(l.nodes))
 	for _, nodeData := range l.nodes {
 		if nodeData.error == nil {
 			result = append(result, nodeData.nodeInfo)
@@ -2279,11 +2293,11 @@ func (l *comprehensiveMockNodeInfoLister) List() ([]*framework.NodeInfo, error) 
 	return result, nil
 }
 
-func (l *comprehensiveMockNodeInfoLister) HavePodsWithAffinityList() ([]*framework.NodeInfo, error) {
+func (l *comprehensiveMockNodeInfoLister) HavePodsWithAffinityList() ([]fwk.NodeInfo, error) {
 	return nil, nil
 }
 
-func (l *comprehensiveMockNodeInfoLister) HavePodsWithRequiredAntiAffinityList() ([]*framework.NodeInfo, error) {
+func (l *comprehensiveMockNodeInfoLister) HavePodsWithRequiredAntiAffinityList() ([]fwk.NodeInfo, error) {
 	return nil, nil
 }
 
@@ -2956,7 +2970,7 @@ func TestReservePluginFunctionality(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		expectedStatus *framework.Status
+		expectedStatus *fwk.Status
 		description    string
 	}{
 		{
@@ -3140,7 +3154,7 @@ func TestReserveUnreserveIntegration(t *testing.T) {
 
 func TestReservePluginInterfaceConformance(t *testing.T) {
 
-	var _ framework.ReservePlugin = &Chronos{}
+	var _ fwk.ReservePlugin = &Chronos{}
 
 	// Create plugin instance using New() to properly initialize cached config
 	pluginInterface, err := New(context.Background(), nil, nil)

@@ -11,6 +11,11 @@ updates:
       day: "monday"
       time: "09:00"
     open-pull-requests-limit: 10
+    groups:
+      kubernetes:
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
     commit-message:
       prefix: "deps"
       prefix-development: "deps(dev)"

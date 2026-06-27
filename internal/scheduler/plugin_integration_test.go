@@ -311,11 +311,12 @@ func calculateProductionScore(pod *v1.Pod, nodeInfo *framework.NodeInfo) int64 {
 	now := time.Now()
 
 	for _, podInfo := range nodeInfo.Pods {
-		if podInfo.Pod.Status.Phase != v1.PodRunning {
+		pod := podInfo.GetPod()
+		if pod.Status.Phase != v1.PodRunning {
 			continue
 		}
 
-		existingDurationStr, exists := podInfo.Pod.Annotations[JobDurationAnnotation]
+		existingDurationStr, exists := pod.Annotations[JobDurationAnnotation]
 		if !exists {
 			continue
 		}
@@ -325,11 +326,11 @@ func calculateProductionScore(pod *v1.Pod, nodeInfo *framework.NodeInfo) int64 {
 			continue
 		}
 
-		if podInfo.Pod.Status.StartTime == nil {
+		if pod.Status.StartTime == nil {
 			continue
 		}
 
-		elapsedSeconds := now.Sub(podInfo.Pod.Status.StartTime.Time).Seconds()
+		elapsedSeconds := now.Sub(pod.Status.StartTime.Time).Seconds()
 		remainingSeconds := existingDuration - int64(elapsedSeconds)
 		if remainingSeconds < 0 {
 			remainingSeconds = 0
