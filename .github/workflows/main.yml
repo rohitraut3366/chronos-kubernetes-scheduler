@@ -586,7 +586,6 @@ jobs:
     needs: integration-test
     runs-on: ubuntu-latest
     # Only build Docker images on master pushes (not PRs or main branch)
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
       contents: read
       packages: write  # Required for GHCR push
