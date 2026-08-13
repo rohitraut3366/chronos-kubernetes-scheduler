@@ -208,8 +208,7 @@ func (s *Chronos) CalculateOptimizedScore(p *v1.Pod, nodeInfo *framework.NodeInf
 		extensionDuration = newPodDuration
 	}
 
-	// Single consistent log format with essential scheduling details for easy parsing
-	klog.Infof("CHRONOS_SCORE: Pod=%s/%s, Node=%s, Strategy=%s, NewPodDuration=%ds, maxRemainingTime=%ds, ExtensionDuration=%ds, CompletionTime=%s, FinalScore=%d",
+	klog.V(4).Infof("CHRONOS_SCORE: Pod=%s/%s, Node=%s, Strategy=%s, NewPodDuration=%ds, maxRemainingTime=%ds, ExtensionDuration=%ds, CompletionTime=%s, FinalScore=%d",
 		p.Namespace, p.Name, nodeInfo.Node().Name, nodeStrategy, newPodDuration, maxRemainingTime, extensionDuration, completionTime, finalScore)
 	return finalScore
 }
