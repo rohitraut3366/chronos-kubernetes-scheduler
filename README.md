@@ -8,6 +8,7 @@ Kubernetes custom scheduler plugin that intelligently bin-packs workloads based 
 
 ## 🎯 Overview
 
+
 The **Chronos** scheduler plugin uses job duration annotations to intelligently bin-pack workloads, prioritizing consolidation over spreading. This approach:
 
 - **Bin-Packing First**: Fits new jobs into existing time windows when possible
