@@ -1,0 +1,18 @@
+# Short threshold used only by the max-queue-age Kind simulation.
+profiles:
+  chronos-optimized-queue-sort-reserve:
+    pluginConfig:
+    - name: Chronos
+      args:
+        maxQueueAge: 1m
+    - name: NodeResourcesFit
+      args:
+        apiVersion: kubescheduler.config.k8s.io/v1
+        kind: NodeResourcesFitArgs
+        scoringStrategy:
+          type: MostAllocated
+          resources:
+          - name: cpu
+            weight: 1
+          - name: memory
+            weight: 1

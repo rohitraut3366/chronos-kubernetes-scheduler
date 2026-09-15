@@ -129,6 +129,10 @@ profiles:
       enabled:
       - name: Chronos
       - name: NodeResourcesFit  # Default resource-based tie-breaker
+  pluginConfig:
+  - name: Chronos
+    args:
+      maxQueueAge: 10m  # Aged pods use FIFO instead of duration ordering
 ```
 
 

@@ -145,7 +145,7 @@ jobs:
           profileName: "chronos-optimized-queue-sort-reserve"
           leaderElection:
             enabled: false  # Single replica in CI
-        
+
         logging:
           level: 6
 
@@ -177,13 +177,13 @@ jobs:
         cat values-ci.yaml
         
         echo "=== GENERATED SCHEDULER CONFIGURATION ==="
-        helm template chronos-scheduler ./charts/chronos-kubernetes-scheduler --values values-ci.yaml --namespace chronos-system --show-only templates/configmap.yaml || {
+        helm template chronos-scheduler ./charts/chronos-kubernetes-scheduler --values values-ci.yaml --values test-workloads/max-queue-age-values.yaml --namespace chronos-system --show-only templates/configmap.yaml || {
           echo "❌ Helm template generation failed!"
           exit 1
         }
         
         echo "=== FULL CHART TEMPLATES DRY-RUN ==="
-        helm template chronos-scheduler ./charts/chronos-kubernetes-scheduler --values values-ci.yaml --namespace chronos-system || {
+        helm template chronos-scheduler ./charts/chronos-kubernetes-scheduler --values values-ci.yaml --values test-workloads/max-queue-age-values.yaml --namespace chronos-system || {
           echo "❌ Helm template validation failed!"
           exit 1
         }
@@ -194,6 +194,7 @@ jobs:
           ./charts/chronos-kubernetes-scheduler \
           --namespace chronos-system \
           --values values-ci.yaml \
+          --values test-workloads/max-queue-age-values.yaml \
           --wait \
           --timeout 5m \
           --debug || {
