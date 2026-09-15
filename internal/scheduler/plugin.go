@@ -48,16 +48,9 @@ func New(ctx context.Context, configuration runtime.Object, h framework.Handle) 
 		return nil, fmt.Errorf("decode Chronos configuration: %w", err)
 	}
 
-	maxQueueAge := DefaultMaxQueueAge
-	if args.MaxQueueAge != "" {
-		configuredMaxQueueAge, err := time.ParseDuration(args.MaxQueueAge)
-		if err != nil {
-			return nil, fmt.Errorf("parse maxQueueAge %q: %w", args.MaxQueueAge, err)
-		}
-		if configuredMaxQueueAge <= 0 {
-			return nil, fmt.Errorf("maxQueueAge must be greater than zero, got %q", args.MaxQueueAge)
-		}
-		maxQueueAge = configuredMaxQueueAge
+	maxQueueAge, err := parseMaxQueueAge(args.MaxQueueAge)
+	if err != nil {
+		return nil, err
 	}
 
 	chronos := &Chronos{
@@ -67,6 +60,18 @@ func New(ctx context.Context, configuration runtime.Object, h framework.Handle) 
 	}
 	klog.Infof("Chronos Scheduler initialized with max queue age %s", maxQueueAge)
 	return chronos, nil
+}
+
+func parseMaxQueueAge(value string) (time.Duration, error) {
+	if value == "" {
+		return DefaultMaxQueueAge, nil
+	}
+
+	maxQueueAge, err := time.ParseDuration(value)
+	if err != nil || maxQueueAge <= 0 {
+		return 0, fmt.Errorf("maxQueueAge must be a positive duration, got %q", value)
+	}
+	return maxQueueAge, nil
 }
 
 func (s *Chronos) Name() string {
