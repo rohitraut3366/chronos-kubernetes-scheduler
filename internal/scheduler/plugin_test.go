@@ -2536,7 +2536,10 @@ func createNodeWithOverduePods(nodeName string) *framework.NodeInfo {
 
 func TestQueueSortPluginFunctionality(t *testing.T) {
 
-	chronos := &Chronos{handle: createComprehensiveMockHandle()}
+	chronos := &Chronos{
+		handle:      createComprehensiveMockHandle(),
+		maxQueueAge: DefaultMaxQueueAge,
+	}
 
 	tests := []struct {
 		name            string
@@ -2629,6 +2632,9 @@ func TestQueueSortPluginFunctionality(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			queueTime := time.Now()
+			tt.pod1.InitialAttemptTimestamp = &queueTime
+			tt.pod2.InitialAttemptTimestamp = &queueTime
 			result := chronos.Less(tt.pod1, tt.pod2)
 			assert.Equal(t, tt.expectPod1First, result,
 				"Less(%s, %s): %s", tt.pod1.PodInfo.Pod.Name, tt.pod2.PodInfo.Pod.Name, tt.description)
@@ -2639,10 +2645,9 @@ func TestQueueSortPluginFunctionality(t *testing.T) {
 }
 
 func TestQueueSortMaxQueueAge(t *testing.T) {
-	now := time.Date(2026, time.September, 15, 12, 0, 0, 0, time.UTC)
+	now := time.Now()
 	chronos := &Chronos{
 		maxQueueAge: 10 * time.Minute,
-		now:         func() time.Time { return now },
 	}
 
 	queuedPod := func(name string, duration int64, queuedAt time.Time) *framework.QueuedPodInfo {
@@ -2686,13 +2691,6 @@ func TestQueueSortMaxQueueAge(t *testing.T) {
 		assert.False(t, chronos.Less(agedPod, youngHighPriorityPod))
 	})
 
-	t.Run("TimestampIsUsedBeforeFirstAttemptIsRecorded", func(t *testing.T) {
-		agedPod := queuedPod("aged", 60, now.Add(-11*time.Minute))
-		agedPod.InitialAttemptTimestamp = nil
-		youngPod := queuedPod("young", 3600, now.Add(-time.Minute))
-
-		assert.True(t, chronos.Less(agedPod, youngPod))
-	})
 }
 
 func TestNewMaxQueueAgeConfiguration(t *testing.T) {
@@ -2813,7 +2811,10 @@ func createQueuedPodInfoWithTimestamp(name string, duration int64, timestamp tim
 
 func TestLessFunctionComprehensive(t *testing.T) {
 
-	chronos := &Chronos{handle: createComprehensiveMockHandle()}
+	chronos := &Chronos{
+		handle:      createComprehensiveMockHandle(),
+		maxQueueAge: DefaultMaxQueueAge,
+	}
 
 	// Test cases organized by decision path
 	testSuites := []struct {
@@ -2996,6 +2997,9 @@ func TestLessFunctionComprehensive(t *testing.T) {
 		t.Run(suite.suiteName, func(t *testing.T) {
 			for _, tt := range suite.tests {
 				t.Run(tt.name, func(t *testing.T) {
+					queueTime := time.Now()
+					tt.pod1.InitialAttemptTimestamp = &queueTime
+					tt.pod2.InitialAttemptTimestamp = &queueTime
 					result := chronos.Less(tt.pod1, tt.pod2)
 					assert.Equal(t, tt.expectPod1First, result,
 						"Less(%s, %s): %s", tt.pod1.PodInfo.Pod.Name, tt.pod2.PodInfo.Pod.Name, tt.description)

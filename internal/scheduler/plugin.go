@@ -33,7 +33,6 @@ type chronosArgs struct {
 type Chronos struct {
 	handle      framework.Handle
 	maxQueueAge time.Duration
-	now         func() time.Time
 }
 
 var _ framework.Plugin = &Chronos{}
@@ -56,7 +55,6 @@ func New(ctx context.Context, configuration runtime.Object, h framework.Handle) 
 	chronos := &Chronos{
 		handle:      h,
 		maxQueueAge: maxQueueAge,
-		now:         time.Now,
 	}
 	klog.Infof("Chronos Scheduler initialized with max queue age %s", maxQueueAge)
 	return chronos, nil
@@ -272,9 +270,6 @@ func (s *Chronos) Less(podInfo1, podInfo2 framework.QueuedPodInfo) bool {
 	// remained in the scheduling queue for too long. InitialAttemptTimestamp is
 	// retained across retries, unlike Timestamp, which can be updated on requeue.
 	now := time.Now()
-	if s.now != nil {
-		now = s.now()
-	}
 	aged1 := s.exceededMaxQueueAge(podInfo1, now)
 	aged2 := s.exceededMaxQueueAge(podInfo2, now)
 	if aged1 != aged2 {
@@ -283,8 +278,8 @@ func (s *Chronos) Less(podInfo1, podInfo2 framework.QueuedPodInfo) bool {
 		return aged1
 	}
 	if aged1 {
-		queuedAt1 := queueStartTime(podInfo1)
-		queuedAt2 := queueStartTime(podInfo2)
+		queuedAt1 := *podInfo1.GetInitialAttemptTimestamp()
+		queuedAt2 := *podInfo2.GetInitialAttemptTimestamp()
 		if !queuedAt1.Equal(queuedAt2) {
 			return queuedAt1.Before(queuedAt2)
 		}
@@ -316,23 +311,8 @@ func (s *Chronos) Less(podInfo1, podInfo2 framework.QueuedPodInfo) bool {
 }
 
 func (s *Chronos) exceededMaxQueueAge(podInfo framework.QueuedPodInfo, now time.Time) bool {
-	if s.maxQueueAge <= 0 {
-		return false
-	}
-
-	queuedAt := queueStartTime(podInfo)
-	if queuedAt.IsZero() {
-		return false
-	}
-
+	queuedAt := *podInfo.GetInitialAttemptTimestamp()
 	return now.Sub(queuedAt) >= s.maxQueueAge
-}
-
-func queueStartTime(podInfo framework.QueuedPodInfo) time.Time {
-	if initialAttemptTimestamp := podInfo.GetInitialAttemptTimestamp(); initialAttemptTimestamp != nil {
-		return *initialAttemptTimestamp
-	}
-	return podInfo.GetTimestamp()
 }
 
 // NormalizeScore is the key to making this work for jobs of any duration.

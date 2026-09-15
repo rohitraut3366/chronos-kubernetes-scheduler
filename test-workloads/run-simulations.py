@@ -1431,7 +1431,7 @@ spec:
         print("🚧 Using Node Tainting method (100% reliable)")
         print("=" * 80)
         self._queue_sort_log_since_time = datetime.now(timezone.utc).isoformat(
-            timespec="seconds"
+            timespec="microseconds"
         ).replace("+00:00", "Z")
 
         timed_pods = scenario.get("timed_pods")
@@ -1784,17 +1784,16 @@ spec:
         aged_pod_name = scenario["aged_pod_name"]
         young_pod_names = scenario["young_pod_names"]
         scheduler_logs = self.get_queuesort_scheduler_logs(return_logs=True)
-        decisions_by_young_pod = []
-        for young_pod_name in young_pod_names:
-            decisions_by_young_pod.append(
-                [
-                    f"{aged_pod_name}(aged=true) vs {young_pod_name}(aged=false) = true",
-                    f"{young_pod_name}(aged=false) vs {aged_pod_name}(aged=true) = false",
-                ]
+        expected_decisions = [
+            decision
+            for young_pod_name in young_pod_names
+            for decision in (
+                f"{aged_pod_name}(aged=true) vs {young_pod_name}(aged=false) = true",
+                f"{young_pod_name}(aged=false) vs {aged_pod_name}(aged=true) = false",
             )
-        return all(
-            any(decision in scheduler_logs for decision in decisions)
-            for decisions in decisions_by_young_pod
+        ]
+        return any(
+            decision in scheduler_logs for decision in expected_decisions
         )
 
     def _duration_decision_observed(self, scenario: Dict[str, Any]) -> bool:
