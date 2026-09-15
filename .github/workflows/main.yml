@@ -163,6 +163,24 @@ jobs:
 
         tolerations:
         - operator: Exists
+
+        profiles:
+          chronos-optimized-queue-sort-reserve:
+            pluginConfig:
+            - name: Chronos
+              args:
+                maxQueueAge: 1m
+            - name: NodeResourcesFit
+              args:
+                apiVersion: kubescheduler.config.k8s.io/v1
+                kind: NodeResourcesFitArgs
+                scoringStrategy:
+                  type: MostAllocated
+                  resources:
+                  - name: cpu
+                    weight: 1
+                  - name: memory
+                    weight: 1
         HELM_VALUES
         
         # Debug before installation
@@ -177,13 +195,13 @@ jobs:
         cat values-ci.yaml
         
         echo "=== GENERATED SCHEDULER CONFIGURATION ==="
-        helm template chronos-scheduler ./charts/chronos-kubernetes-scheduler --values values-ci.yaml --values test-workloads/max-queue-age-values.yaml --namespace chronos-system --show-only templates/configmap.yaml || {
+        helm template chronos-scheduler ./charts/chronos-kubernetes-scheduler --values values-ci.yaml --namespace chronos-system --show-only templates/configmap.yaml || {
           echo "❌ Helm template generation failed!"
           exit 1
         }
         
         echo "=== FULL CHART TEMPLATES DRY-RUN ==="
-        helm template chronos-scheduler ./charts/chronos-kubernetes-scheduler --values values-ci.yaml --values test-workloads/max-queue-age-values.yaml --namespace chronos-system || {
+        helm template chronos-scheduler ./charts/chronos-kubernetes-scheduler --values values-ci.yaml --namespace chronos-system || {
           echo "❌ Helm template validation failed!"
           exit 1
         }
@@ -194,7 +212,6 @@ jobs:
           ./charts/chronos-kubernetes-scheduler \
           --namespace chronos-system \
           --values values-ci.yaml \
-          --values test-workloads/max-queue-age-values.yaml \
           --wait \
           --timeout 5m \
           --debug || {
