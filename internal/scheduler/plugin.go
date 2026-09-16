@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/klog/v2"
 	"k8s.io/kube-scheduler/framework"
+	frameworkruntime "k8s.io/kubernetes/pkg/scheduler/framework/runtime"
 )
 
 const (
@@ -18,13 +19,20 @@ const (
 	PluginName = "Chronos"
 	// JobDurationAnnotation is the annotation on a pod that specifies its expected runtime in seconds.
 	JobDurationAnnotation = "scheduling.workload.io/expected-duration-seconds"
+	// DefaultMaxQueueAge limits how long duration-based sorting can postpone a pod.
+	DefaultMaxQueueAge = 10 * time.Minute
 )
+
+type chronosArgs struct {
+	MaxQueueAge string `json:"maxQueueAge,omitempty"`
+}
 
 // Chronos is a scheduler plugin that uses bin-packing logic with extension minimization
 // to optimize resource utilization and minimize cluster commitment extensions.
 // Implements both QueueSort (for duration-based ordering) and Score (for node selection).
 type Chronos struct {
-	handle framework.Handle
+	handle      framework.Handle
+	maxQueueAge time.Duration
 }
 
 var _ framework.Plugin = &Chronos{}
@@ -33,12 +41,35 @@ var _ framework.ScorePlugin = &Chronos{}
 var _ framework.ScoreExtensions = &Chronos{}
 var _ framework.ReservePlugin = &Chronos{}
 
-func New(ctx context.Context, _ runtime.Object, h framework.Handle) (framework.Plugin, error) {
-	chronos := &Chronos{
-		handle: h,
+func New(ctx context.Context, configuration runtime.Object, h framework.Handle) (framework.Plugin, error) {
+	args := chronosArgs{}
+	if err := frameworkruntime.DecodeInto(configuration, &args); err != nil {
+		return nil, fmt.Errorf("decode Chronos configuration: %w", err)
 	}
-	klog.Infof("Chronos Scheduler initialized")
+
+	maxQueueAge, err := parseMaxQueueAge(args.MaxQueueAge)
+	if err != nil {
+		return nil, err
+	}
+
+	chronos := &Chronos{
+		handle:      h,
+		maxQueueAge: maxQueueAge,
+	}
+	klog.Infof("Chronos Scheduler initialized with max queue age %s", maxQueueAge)
 	return chronos, nil
+}
+
+func parseMaxQueueAge(value string) (time.Duration, error) {
+	if value == "" {
+		return DefaultMaxQueueAge, nil
+	}
+
+	maxQueueAge, err := time.ParseDuration(value)
+	if err != nil || maxQueueAge <= 0 {
+		return 0, fmt.Errorf("maxQueueAge must be a positive duration, got %q", value)
+	}
+	return maxQueueAge, nil
 }
 
 func (s *Chronos) Name() string {
@@ -235,7 +266,26 @@ func (s *Chronos) Less(podInfo1, podInfo2 framework.QueuedPodInfo) bool {
 		return result
 	}
 
-	// Priority 2: Within same priority class, sort by duration (longest first)
+	// Priority 2: Prevent duration-based sorting from starving pods that have
+	// remained in the scheduling queue for too long. InitialAttemptTimestamp is
+	// retained across retries, unlike Timestamp, which can be updated on requeue.
+	now := time.Now()
+	aged1 := s.exceededMaxQueueAge(podInfo1, now)
+	aged2 := s.exceededMaxQueueAge(podInfo2, now)
+	if aged1 != aged2 {
+		klog.V(4).Infof("QueueSort: Max queue age decision - %s(aged=%t) vs %s(aged=%t) = %t",
+			pod1.Name, aged1, pod2.Name, aged2, aged1)
+		return aged1
+	}
+	if aged1 {
+		queuedAt1 := *podInfo1.GetInitialAttemptTimestamp()
+		queuedAt2 := *podInfo2.GetInitialAttemptTimestamp()
+		if !queuedAt1.Equal(queuedAt2) {
+			return queuedAt1.Before(queuedAt2)
+		}
+	}
+
+	// Priority 3: Within same priority class, sort by duration (longest first)
 	duration1, ok1 := getPodDuration(pod1)
 	duration2, ok2 := getPodDuration(pod2)
 
@@ -253,11 +303,16 @@ func (s *Chronos) Less(podInfo1, podInfo2 framework.QueuedPodInfo) bool {
 		return result
 	}
 
-	// Priority 3: If durations are equal, fall back to creation time (FIFO)
+	// Priority 4: If durations are equal, fall back to creation time (FIFO)
 	result := pod1.CreationTimestamp.Before(&pod2.CreationTimestamp)
 	klog.V(4).Infof("QueueSort: FIFO decision - %s vs %s = %t (earlier first)",
 		pod1.Name, pod2.Name, result)
 	return result
+}
+
+func (s *Chronos) exceededMaxQueueAge(podInfo framework.QueuedPodInfo, now time.Time) bool {
+	queuedAt := *podInfo.GetInitialAttemptTimestamp()
+	return now.Sub(queuedAt) >= s.maxQueueAge
 }
 
 // NormalizeScore is the key to making this work for jobs of any duration.
