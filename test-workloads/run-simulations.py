@@ -11,6 +11,7 @@ import sys
 import os
 import tempfile
 import re
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 
 
@@ -1429,20 +1430,54 @@ spec:
         print(f"📝 Description: {scenario['description']}")
         print("🚧 Using Node Tainting method (100% reliable)")
         print("=" * 80)
+        self._queue_sort_log_since_time = datetime.now(timezone.utc).isoformat(
+            timespec="microseconds"
+        ).replace("+00:00", "Z")
 
-        # Extract pod names from setup_pods (nested by node)
-        pod_names = []
-        setup_pods = scenario["setup_pods"]
-        for node_name, pods_on_node in setup_pods.items():
-            for pod_config in pods_on_node:
-                pod_names.append(pod_config["name"])
+        timed_pods = scenario.get("timed_pods")
+        if timed_pods:
+            pod_names = [pod_config["name"] for pod_config in timed_pods]
+        else:
+            pod_names = []
+            setup_pods = scenario["setup_pods"]
+            for pods_on_node in setup_pods.values():
+                for pod_config in pods_on_node:
+                    pod_names.append(pod_config["name"])
 
         return self._run_queuesort_with_taint(scenario_name, scenario, pod_names)
+
+    def _scheduler_uses_max_queue_age(self, expected_max_queue_age: str) -> bool:
+        """Verify that the running scheduler loaded the max-age required by a scenario."""
+        output, code = self.kubectl(
+            [
+                "logs",
+                "-n",
+                "chronos-system",
+                "-l",
+                "app.kubernetes.io/name=chronos-kubernetes-scheduler",
+                "--tail=-1",
+            ]
+        )
+        loaded_message = f"max queue age {expected_max_queue_age}"
+        if code == 0 and loaded_message in output:
+            print(f"✅ Scheduler loaded maxQueueAge={expected_max_queue_age}")
+            return True
+
+        print(
+            f"❌ Scheduler logs do not show maxQueueAge={expected_max_queue_age}. "
+            "Deploy the Kind test scheduler with the simulation values."
+        )
+        return False
 
     def _run_queuesort_with_taint(
         self, scenario_name: str, scenario: Dict[str, Any], pod_names: List[str]
     ) -> bool:
         """Run QueueSort scenario using the reliable Node Tainting method."""
+        required_max_queue_age = scenario.get("required_max_queue_age")
+        if required_max_queue_age and not self._scheduler_uses_max_queue_age(
+            required_max_queue_age
+        ):
+            return False
 
         # 1. Taint target node to make it unschedulable
         if not self.taint_target_node("chronos-test-worker"):
@@ -1453,37 +1488,47 @@ spec:
             return False
 
         try:
-            # 2. Create all test pods (they'll all be Pending due to tainted node)
-            print(
-                f"\n📋 Creating {len(pod_names)} test pods (will be queued due to tainted node)..."
-            )
-
-            # Always use sequential creation for realistic QueueSort testing
-            print("🔄 Using sequential pod creation for realistic QueueSort testing...")
-            if not self._create_pods_sequential(scenario["setup_pods"]):
-                return False
-
-            # 3. Wait for all test pods to reach Pending state (they should NOT be Running due to taint)
-            print("🔍 Verifying all pods are Pending (blocked by taint)...")
-            if not self._wait_for_all_pods_pending_or_running(
-                pod_names, require_pending=True
-            ):
+            timed_pods = scenario.get("timed_pods")
+            if timed_pods:
+                if not self._create_timed_queuesort_pods(
+                    timed_pods, scenario["untaint_at_seconds"]
+                ):
+                    return False
+            else:
+                # 2. Create the initial test pods (they'll be Pending due to the tainted node)
                 print(
-                    "❌ Pods are not properly blocked by taint - cannot test QueueSort reliably"
+                    f"\n📋 Creating {len(pod_names)} test pods (will be queued due to tainted node)..."
                 )
-                return False
 
-            # 4. Wait for QueueSort plugin to sort the queue
-            queue_sort_wait = self.exec_config.get("queue_sort_wait_time", 15)
-            print(
-                f"⏳ Waiting {queue_sort_wait}s for QueueSort plugin to sort the queue..."
-            )
-            time.sleep(queue_sort_wait)
+                print("🔄 Using sequential pod creation for realistic QueueSort testing...")
+                if not self._create_pods_sequential(scenario["setup_pods"]):
+                    return False
+
+                initial_pod_names = [
+                    pod_config["name"]
+                    for pods_on_node in scenario["setup_pods"].values()
+                    for pod_config in pods_on_node
+                ]
+
+                print("🔍 Verifying all pods are Pending (blocked by taint)...")
+                if not self._wait_for_all_pods_pending_or_running(
+                    initial_pod_names, require_pending=True
+                ):
+                    print(
+                        "❌ Pods are not properly blocked by taint - cannot test QueueSort reliably"
+                    )
+                    return False
+
+                queue_sort_wait = self.exec_config.get("queue_sort_wait_time", 15)
+                print(
+                    f"⏳ Waiting {queue_sort_wait}s for QueueSort plugin to sort the queue..."
+                )
+                time.sleep(queue_sort_wait)
 
             # 5. Use NATURAL scheduling to test QueueSort priority
             print("🎯 Starting natural scheduling to test QueueSort priority...")
             actual_order = self._schedule_pods_naturally_with_taint(
-                pod_names, scenario["setup_pods"]
+                pod_names, scenario.get("setup_pods", timed_pods)
             )
 
             # Wait longer for sequential scheduling to complete
@@ -1516,6 +1561,37 @@ spec:
         else:
             return False
 
+    def _create_timed_queuesort_pods(
+        self, timed_pods: List[dict], untaint_at_seconds: int
+    ) -> bool:
+        """Create pods at deterministic offsets while the target node is tainted."""
+        timeline_started_at = time.monotonic()
+        print("⏱️ Starting deterministic QueueSort creation timeline")
+
+        for pod_config in timed_pods:
+            create_at_seconds = pod_config["create_at_seconds"]
+            remaining_wait = create_at_seconds - (
+                time.monotonic() - timeline_started_at
+            )
+            if remaining_wait > 0:
+                time.sleep(remaining_wait)
+
+            pod_name = pod_config["name"]
+            target_node = pod_config["node"]
+            print(f"🆕 t={create_at_seconds}s: creating {pod_name}")
+            if not self._create_pods_sequential({target_node: [pod_config]}):
+                return False
+            if not self._wait_for_all_pods_pending_or_running(
+                [pod_name], require_pending=True
+            ):
+                return False
+
+        remaining_wait = untaint_at_seconds - (time.monotonic() - timeline_started_at)
+        if remaining_wait > 0:
+            print(f"⏳ Waiting until t={untaint_at_seconds}s to remove the taint...")
+            time.sleep(remaining_wait)
+        return True
+
     def _analyze_queuesort_results(
         self,
         scenario: Dict[str, Any],
@@ -1534,6 +1610,10 @@ spec:
         # The key indicator is whether the scheduling order matches expectations
         all_pods_scheduled = len(actual_order) == len(pod_names)
         exact_match = actual_order == expected_order
+        max_queue_age_decision_observed = self._max_queue_age_decision_observed(
+            scenario
+        )
+        duration_decision_observed = self._duration_decision_observed(scenario)
 
         # QueueSort is working if we have comparisons OR if the order matches perfectly
         queuesort_working = queue_sort_comparisons > 0 or (
@@ -1545,7 +1625,20 @@ spec:
             and actual_order[0] == expected_order[0]
         )
 
-        if queuesort_working and all_pods_scheduled and exact_match:
+        if scenario.get("required_max_queue_age"):
+            success = (
+                queuesort_working
+                and max_queue_age_decision_observed
+                and duration_decision_observed
+                and all_pods_scheduled
+                and exact_match
+            )
+            status = (
+                "✅ PASSED (Max Queue Age Decision and Exact Order Verified)"
+                if success
+                else "❌ FAILED (Max Queue Age Decision Was Not Deterministically Verified)"
+            )
+        elif queuesort_working and all_pods_scheduled and exact_match:
             success = True
             status = "✅ PASSED (Perfect QueueSort Order - Exact Match)"
         elif queuesort_working and all_pods_scheduled and first_pod_correct:
@@ -1562,11 +1655,14 @@ spec:
 
         print(f"\n📊 QUEUESORT RESULTS ({method}):")
         # Extract creation order from nested setup_pods
-        creation_order = []
-        setup_pods = scenario["setup_pods"]
-        for node_name, pods_on_node in setup_pods.items():
-            for pod_config in pods_on_node:
-                creation_order.append(pod_config["name"])
+        if scenario.get("timed_pods"):
+            creation_order = [pod["name"] for pod in scenario["timed_pods"]]
+        else:
+            creation_order = []
+            setup_pods = scenario["setup_pods"]
+            for pods_on_node in setup_pods.values():
+                for pod_config in pods_on_node:
+                    creation_order.append(pod_config["name"])
         print(f"Creation Order:              {creation_order}")
         print(f"Expected Scheduling Order:   {expected_order}")
         print(f"Actual Scheduling Order:     {actual_order}")
@@ -1577,6 +1673,15 @@ spec:
         print(
             f"   All Pods Scheduled:       {all_pods_scheduled} ({len(actual_order)}/{len(pod_names)} pods)"
         )
+        if scenario.get("required_max_queue_age"):
+            print(
+                f"   Max-Age Decision:         {max_queue_age_decision_observed} "
+                "(old pod aged against both young pods)"
+            )
+            print(
+                f"   Duration Decision:        {duration_decision_observed} "
+                "(pod3=30s ahead of pod2=20s)"
+            )
 
         if success:
             print("   ✅ QueueSort plugin is working correctly!")
@@ -1599,8 +1704,12 @@ spec:
 
         # Show pod details for debugging
         print("\n🔍 POD DETAILS:")
-        setup_pods = scenario["setup_pods"]
-        for node_name, pods_on_node in setup_pods.items():
+        if scenario.get("timed_pods"):
+            all_pod_groups = [scenario["timed_pods"]]
+        else:
+            setup_pods = scenario["setup_pods"]
+            all_pod_groups = list(setup_pods.values())
+        for pods_on_node in all_pod_groups:
             for pod_config in pods_on_node:
                 name = pod_config["name"]
                 duration = pod_config.get("duration", "None")
@@ -1667,6 +1776,40 @@ spec:
 
         return success
 
+    def _max_queue_age_decision_observed(self, scenario: Dict[str, Any]) -> bool:
+        """Require an explicit comparator decision for max-age scenarios."""
+        if not scenario.get("required_max_queue_age"):
+            return True
+
+        aged_pod_name = scenario["aged_pod_name"]
+        young_pod_names = scenario["young_pod_names"]
+        scheduler_logs = self.get_queuesort_scheduler_logs(return_logs=True)
+        expected_decisions = [
+            decision
+            for young_pod_name in young_pod_names
+            for decision in (
+                f"{aged_pod_name}(aged=true) vs {young_pod_name}(aged=false) = true",
+                f"{young_pod_name}(aged=false) vs {aged_pod_name}(aged=true) = false",
+            )
+        ]
+        return any(
+            decision in scheduler_logs for decision in expected_decisions
+        )
+
+    def _duration_decision_observed(self, scenario: Dict[str, Any]) -> bool:
+        """Require the young pods to be compared by duration in max-age scenarios."""
+        if not scenario.get("required_max_queue_age"):
+            return True
+
+        longer_pod_name = scenario["longer_young_pod_name"]
+        shorter_pod_name = scenario["shorter_young_pod_name"]
+        scheduler_logs = self.get_queuesort_scheduler_logs(return_logs=True)
+        expected_decisions = [
+            f"Duration decision - {longer_pod_name}(30s) vs {shorter_pod_name}(20s) = true",
+            f"Duration decision - {shorter_pod_name}(20s) vs {longer_pod_name}(30s) = false",
+        ]
+        return any(decision in scheduler_logs for decision in expected_decisions)
+
     def get_queuesort_scheduler_logs(self, return_logs: bool = False):
         """Get and display scheduler logs relevant to QueueSort functionality
         Returns: Number of QueueSort comparisons found (int) or raw logs (str) if return_logs=True
@@ -1692,9 +1835,13 @@ spec:
             return 0 if not return_logs else ""
 
         # Get logs containing QueueSort activity
-        output, code = self.kubectl(
-            ["logs", "-n", "chronos-system", scheduler_pod, "--tail=200"]
-        )
+        log_args = ["logs", "-n", "chronos-system", scheduler_pod]
+        log_since_time = getattr(self, "_queue_sort_log_since_time", None)
+        if log_since_time:
+            log_args.append(f"--since-time={log_since_time}")
+        else:
+            log_args.append("--tail=200")
+        output, code = self.kubectl(log_args)
 
         if code != 0:
             print(f"❌ Failed to get scheduler logs: {output}")

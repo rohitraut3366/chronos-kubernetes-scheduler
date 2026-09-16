@@ -131,8 +131,38 @@ scenarios:
       - "test-pod-long"
       - "test-pod-medium"
       - "test-pod-short"
+
+  # Test 8: Queue Sort max-age starvation protection
+  # The Kind test scheduler is configured with maxQueueAge: 1m.
+  queuesort_max_queue_age:
+    description: "At t=70s, pod1 is aged; pod3 and pod2 retain longest-duration-first order"
+    required_max_queue_age: "1m0s"
+    untaint_at_seconds: 70
+    aged_pod_name: "pod1"
+    young_pod_names:
+      - "pod2"
+      - "pod3"
+    longer_young_pod_name: "pod3"
+    shorter_young_pod_name: "pod2"
+    timed_pods:
+      - name: "pod1"
+        duration: 10
+        create_at_seconds: 1
+        node: "chronos-test-worker"
+      - name: "pod2"
+        duration: 20
+        create_at_seconds: 30
+        node: "chronos-test-worker"
+      - name: "pod3"
+        duration: 30
+        create_at_seconds: 40
+        node: "chronos-test-worker"
+    expected_scheduling_order:
+      - "pod1"
+      - "pod3"
+      - "pod2"
     
-  # Test 8: Queue Sort with Priority Override
+  # Test 9: Queue Sort with Priority Override
   queuesort_priority_override:
     description: "Priority should override duration-based sorting in queue"
     setup_pods:
@@ -151,7 +181,7 @@ scenarios:
       - "low-priority-long"  
       - "no-priority-medium" 
     
-  # Test 9: Queue Sort with Missing Duration Annotations  
+  # Test 10: Queue Sort with Missing Duration Annotations
   queuesort_missing_duration:
     description: "Pods without duration annotation should be scheduled last"
     setup_pods:
@@ -170,7 +200,7 @@ scenarios:
       - "no-duration-1"       
       - "no-duration-2"       
         
-  # Test 10: Queue Sort FIFO Tie-breaking
+  # Test 11: Queue Sort FIFO Tie-breaking
   queuesort_fifo_tiebreaker:
     description: "Equal durations should use FIFO (creation time) ordering"
     setup_pods:
@@ -186,7 +216,7 @@ scenarios:
       - "equal-duration-second"
       - "equal-duration-third"
         
-  # Test 11: Queue Sort Comprehensive Test
+  # Test 12: Queue Sort Comprehensive Test
   queuesort_comprehensive:
     description: "Complex scenario with mixed priorities, durations, and missing annotations"
     setup_pods:
