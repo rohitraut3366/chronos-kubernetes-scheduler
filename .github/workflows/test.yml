@@ -44,6 +44,14 @@ jobs:
     - name: Download dependencies
       run: make deps
 
+    - name: Verify OpenPGP exclusion
+      run: |
+        go list -mod=readonly -deps ./cmd/scheduler >"$RUNNER_TEMP/scheduler-dependencies.txt"
+        if grep -Eq '^golang.org/x/crypto/openpgp(/|$)' "$RUNNER_TEMP/scheduler-dependencies.txt"; then
+          echo "The scheduler imports OpenPGP; remove the GO-2026-5932 exception from .trivyignore.yaml"
+          exit 1
+        fi
+
     - name: Format check
       run: |
         make fmt
@@ -140,10 +148,10 @@ jobs:
     - name: Run Trivy vulnerability scanner
       run: |
         # Scan for HIGH and CRITICAL vulnerabilities
-        trivy image --format sarif --output trivy-results.sarif chronos-kubernetes-scheduler:latest
+        trivy image --ignorefile .trivyignore.yaml --format sarif --output trivy-results.sarif chronos-kubernetes-scheduler:latest
         
         # Also create a table format for human reading
-        trivy image --severity HIGH,CRITICAL chronos-kubernetes-scheduler:latest
+        trivy image --ignorefile .trivyignore.yaml --severity HIGH,CRITICAL chronos-kubernetes-scheduler:latest
 
     - name: Upload Trivy SARIF results
       uses: github/codeql-action/upload-sarif@v4
