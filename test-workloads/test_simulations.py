@@ -266,6 +266,49 @@ class SimulationTests(unittest.TestCase):
                     )
                 )
 
+    def test_max_queue_age_timeline_preserves_all_required_waits(self):
+        scenario = self.simulator.config["scenarios"]["queuesort_max_queue_age"]
+        self.simulator._create_pods_sequential = Mock(return_value=True)
+        self.simulator._wait_for_all_pods_pending_or_running = Mock(return_value=True)
+        self.assertTrue(
+            self.simulator._create_timed_queuesort_pods(
+                scenario["timed_pods"], scenario["untaint_at_seconds"]
+            )
+        )
+        self.assertEqual(self.sleeps, [1, 29, 10, 30])
+        self.assertEqual(self.now, 70)
+        created_pods = [
+            call.args[0]["chronos-test-worker"][0]["name"]
+            for call in self.simulator._create_pods_sequential.call_args_list
+        ]
+        self.assertEqual(created_pods, ["pod1", "pod2", "pod3"])
+
+    def test_max_queue_age_rejects_scheduler_with_wrong_configuration(self):
+        scenario = self.simulator.config["scenarios"]["queuesort_max_queue_age"]
+        self.simulator._scheduler_uses_max_queue_age = Mock(return_value=False)
+        self.simulator.taint_target_node = Mock()
+        self.assertFalse(
+            self.simulator._run_queuesort_with_taint(
+                "queuesort_max_queue_age",
+                scenario,
+                scenario["expected_scheduling_order"],
+            )
+        )
+        self.simulator.taint_target_node.assert_not_called()
+
+    def test_max_queue_age_still_requires_comparator_evidence(self):
+        scenario = self.simulator.config["scenarios"]["queuesort_max_queue_age"]
+        self.simulator.get_queuesort_scheduler_logs = Mock(
+            side_effect=lambda return_logs=False: "" if return_logs else 1
+        )
+        self.simulator.kubectl.return_value = ("", 0)
+        expected = scenario["expected_scheduling_order"]
+        self.assertFalse(
+            self.simulator._analyze_queuesort_results(
+                scenario, expected, expected, "Natural Scheduling Method"
+            )
+        )
+
     def test_score_scenario_waits_for_running_setup_without_fixed_delays(self):
         scenario = self.simulator.config["scenarios"]["score_bin_packing_perfect_fit"]
         self.simulator.create_setup_pod = Mock(return_value=True)
