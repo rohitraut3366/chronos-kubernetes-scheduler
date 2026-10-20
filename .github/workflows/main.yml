@@ -548,6 +548,9 @@ jobs:
         # Pre-install dependencies for speed
         pip3 install --user PyYAML
         
+    - name: Test simulation runner
+      run: python3 -m unittest discover -s test-workloads -p 'test_*.py' -v
+
     - name: Run Scheduler Logic Simulations
       run: |
         export KUBECONFIG=/tmp/kubeconfig
