@@ -1,0 +1,8 @@
+vulnerabilities:
+  - id: GO-2026-5932
+    paths:
+      - scheduler
+    statement: >-
+      The scheduler imports other golang.org/x/crypto packages but does not import
+      golang.org/x/crypto/openpgp. CI verifies this dependency exclusion before
+      accepting the exception for the scheduler binary.
