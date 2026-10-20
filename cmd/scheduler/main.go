@@ -17,8 +17,6 @@ limitations under the License.
 package main
 
 import (
-	"os"
-
 	"chronos-kubernetes-scheduler/internal/scheduler"
 
 	"k8s.io/klog/v2"
@@ -33,6 +31,5 @@ func main() {
 
 	if err := command.Execute(); err != nil {
 		klog.Fatalf("Error executing scheduler command: %v", err)
-		os.Exit(1)
 	}
 }
