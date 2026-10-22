@@ -14,6 +14,7 @@ concurrency:
 
 env:
   GO_VERSION: '1.27.3'
+  REGISTRY_IMAGE: ghcr.io/${{ github.repository_owner }}/chronos-kubernetes-scheduler
 
 jobs:
   integration-test:
@@ -597,11 +598,17 @@ jobs:
         kubectl get pods -A || true
 
   docker-build:
-    name: Build & Push Docker Image
+    name: Build & Push Docker Image (${{ matrix.arch }})
     needs: integration-test
-    runs-on: ubuntu-latest
-    # Only build Docker images on master pushes (not PRs or main branch)
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write  # Required for GHCR push
@@ -624,19 +631,72 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository_owner }}/chronos-kubernetes-scheduler
-          tags: |
-            type=raw,value=${{ github.sha }}
-            type=raw,value=latest
+          images: ${{ env.REGISTRY_IMAGE }}
       
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: build/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=docker-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=docker-${{ matrix.arch }}
+
+      - name: Export image digest
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE_ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p /tmp/digests
+          printf '%s' "$IMAGE_DIGEST" >"/tmp/digests/$IMAGE_ARCH"
+
+      - name: Upload image digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-digest-${{ matrix.arch }}
+          path: /tmp/digests/${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 1
+
+  docker-manifest:
+    name: Publish Multiarch Docker Image
+    needs: docker-build
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      actions: read
+    steps:
+      - name: Download image digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: image-digest-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push multiarch manifest
+        env:
+          IMAGE_TAG: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'latest' }}
+        run: |
+          docker buildx imagetools create \
+            --tag "$REGISTRY_IMAGE:$GITHUB_SHA" \
+            --tag "$REGISTRY_IMAGE:$IMAGE_TAG" \
+            "$REGISTRY_IMAGE@$(cat /tmp/digests/amd64)" \
+            "$REGISTRY_IMAGE@$(cat /tmp/digests/arm64)"
+
+      - name: Verify multiarch manifest
+        run: |
+          docker buildx imagetools inspect "$REGISTRY_IMAGE:$GITHUB_SHA" --raw \
+            | jq -e '[.manifests[].platform | select(.os == "linux") | .architecture] | sort == ["amd64", "arm64"]'
