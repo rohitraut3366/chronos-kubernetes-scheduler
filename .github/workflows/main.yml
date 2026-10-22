@@ -17,7 +17,12 @@ env:
 
 jobs:
   integration-test:
-    name: Full Integration Test
+    name: Full Integration Test (shard ${{ matrix.shard-index }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard-index: [0, 1]
+    # Each matrix job gets its own runner and five-node KIND cluster.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -559,24 +564,26 @@ jobs:
       run: python3 -m unittest discover -s test-workloads -p 'test_*.py' -v
 
     - name: Run Scheduler Logic Simulations
+      env:
+        SIMULATION_SHARD_INDEX: ${{ matrix.shard-index }}
       run: |
         export KUBECONFIG=/tmp/kubeconfig
-        
+
         echo "🧪 Running Chronos Scheduler Logic Simulations..."
         echo "This validates our bin-packing and consolidation logic with real scenarios"
-        
+
         cd test-workloads
-        
+
         # Add debug info before running simulations
         echo "=== PRE-SIMULATION DEBUG INFO ==="
         kubectl get nodes -o wide
         kubectl get pods -A | grep -v "Completed\|Succeeded" | head -10
         kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=10 || echo "No scheduler logs yet"
         echo "=== STARTING SIMULATIONS ==="
-        
-        timeout 30m python3 run-simulations.py --config simulations.yaml --kubeconfig /tmp/kubeconfig || {
+
+        timeout 30m python3 -u run-simulations.py --config simulations.yaml --kubeconfig /tmp/kubeconfig --shard-index "${SIMULATION_SHARD_INDEX}" --shard-count 2 || {
           EXIT_CODE=$?
-          
+
           if [ $EXIT_CODE -eq 124 ]; then
             echo "⚠️ Simulations timed out"
             echo "This suggests scheduling decisions are taking too long or queue sort tests need optimization"
@@ -584,19 +591,19 @@ jobs:
             echo "❌ Simulations failed with exit code: $EXIT_CODE"
             echo "This indicates our scheduling logic doesn't match expected behavior"
           fi
-          
+
           echo "🔍 Recent scheduler logs for debugging:"
           kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=50
-          
+
           echo "🔍 Simulation namespace pods status:"
           kubectl get pods -n simulation-test -o wide || echo "No simulation pods found"
-          
+
           echo "🔍 Recent events in simulation namespace:"
           kubectl get events -n simulation-test --sort-by='.lastTimestamp' | tail -20 || echo "No simulation events found"
-          
+
           exit $EXIT_CODE
         }
-        
+
         echo "✅ Scheduler logic simulations completed successfully!"
 
     - name: Cleanup

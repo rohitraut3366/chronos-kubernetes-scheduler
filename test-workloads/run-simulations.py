@@ -2018,8 +2018,15 @@ spec:
 
         return success
 
-    def run_all_scenarios(self) -> bool:
-        """Run all configured scenarios"""
+    def run_all_scenarios(self, shard_index: int = 0, shard_count: int = 1) -> bool:
+        """Run one disjoint shard; scenarios within a cluster remain sequential."""
+        scenarios = self.config["scenarios"]
+        if not 1 <= shard_count <= len(scenarios):
+            raise ValueError("shard_count must be between 1 and the number of scenarios")
+        if not 0 <= shard_index < shard_count:
+            raise ValueError("shard_index must be between 0 and shard_count - 1")
+        scenarios = dict(list(scenarios.items())[shard_index::shard_count])
+        print(f"Simulation shard {shard_index + 1}/{shard_count}: {', '.join(scenarios)}")
         start_time = time.time()
         print("🚀 Starting Chronos Scheduler Simulation Tests")
 
@@ -2039,7 +2046,6 @@ spec:
             print("❌ Failed to setup priority classes - continuing with basic testing")
             # Don't fail the entire test run, but note this issue
 
-        scenarios = self.config["scenarios"]
         passed = 0
         total = len(scenarios)
 
@@ -2107,11 +2113,24 @@ if __name__ == "__main__":
         "--config", default="simulations.yaml", help="Simulation config file"
     )
     parser.add_argument("--kubeconfig", help="Path to kubeconfig file")
-    parser.add_argument("--scenario", help="Run specific scenario only")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--scenario", help="Run specific scenario only")
+    selection.add_argument("--shard-index", type=int, help="Zero-based simulation shard")
+    parser.add_argument(
+        "--shard-count", type=int, default=1, help="Number of isolated clusters"
+    )
 
     args = parser.parse_args()
 
+    if args.shard_count != 1 and args.shard_index is None:
+        parser.error("--shard-count requires --shard-index")
+
     simulator = ChronosSimulator(args.config, args.kubeconfig)
+    shard_index = args.shard_index if args.shard_index is not None else 0
+    if not 1 <= args.shard_count <= len(simulator.config["scenarios"]):
+        parser.error("--shard-count must be between 1 and the number of scenarios")
+    if not 0 <= shard_index < args.shard_count:
+        parser.error("--shard-index must be between 0 and --shard-count - 1")
 
     if args.scenario:
         # Run single scenario
@@ -2139,5 +2158,5 @@ if __name__ == "__main__":
         sys.exit(0 if success else 1)
     else:
         # Run all scenarios
-        success = simulator.run_all_scenarios()
+        success = simulator.run_all_scenarios(shard_index, args.shard_count)
         sys.exit(0 if success else 1)

@@ -381,5 +381,72 @@ class SimulationTests(unittest.TestCase):
         )
 
 
+class SimulationShardingTests(unittest.TestCase):
+    def setUp(self):
+        self.simulator = simulations.ChronosSimulator(
+            str(SIMULATION_DIR / "simulations.yaml")
+        )
+        self.executed = []
+        for method in [
+            "create_namespace",
+            "_ensure_all_nodes_uncordoned",
+            "setup_non_default_priority_classes",
+            "cleanup_priority_classes",
+            "cleanup_namespace",
+            "kubectl",
+        ]:
+            setattr(self.simulator, method, Mock(return_value=True))
+        self.simulator.run_scenario = Mock(side_effect=self.record_scenario)
+        self.simulator.run_queuesort_scenario = Mock(side_effect=self.record_scenario)
+        for context in [
+            patch("builtins.print"),
+            patch.object(simulations.time, "sleep"),
+        ]:
+            context.start()
+            self.addCleanup(context.stop)
+
+    def record_scenario(self, name, scenario):
+        self.executed.append((name, scenario))
+        return True
+
+    def test_two_shards_cover_every_scenario_once_without_changing_inputs(self):
+        original = list(self.simulator.config["scenarios"].items())
+        shards = []
+        for index in range(2):
+            self.executed.clear()
+            self.assertTrue(self.simulator.run_all_scenarios(index, 2))
+            self.assertEqual(self.executed, original[index::2])
+            shards.append(dict(self.executed))
+        self.assertFalse(shards[0].keys() & shards[1].keys())
+        self.assertEqual(shards[0] | shards[1], dict(original))
+        self.assertEqual(self.simulator.config["scenarios"], dict(original))
+        self.assertEqual(self.simulator.cleanup_namespace.call_count, 2)
+
+    def test_default_runs_complete_suite_in_original_order(self):
+        self.assertTrue(self.simulator.run_all_scenarios())
+        self.assertEqual(
+            self.executed, list(self.simulator.config["scenarios"].items())
+        )
+
+    def test_invalid_shards_fail_before_cluster_operations(self):
+        count = len(self.simulator.config["scenarios"])
+        for index, shards in [(-1, 2), (2, 2), (0, 0), (0, count + 1)]:
+            with (
+                self.subTest(index=index, shards=shards),
+                self.assertRaises(ValueError),
+            ):
+                self.simulator.run_all_scenarios(index, shards)
+        self.simulator.create_namespace.assert_not_called()
+        self.simulator.kubectl.assert_not_called()
+
+    def test_failure_in_each_shard_fails_run_and_still_cleans_up(self):
+        self.simulator.run_queuesort_scenario.side_effect = None
+        self.simulator.run_queuesort_scenario.return_value = False
+        for index in range(2):
+            with self.subTest(index=index):
+                self.assertFalse(self.simulator.run_all_scenarios(index, 2))
+        self.assertEqual(self.simulator.cleanup_namespace.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
