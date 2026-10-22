@@ -609,8 +609,6 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    # Only build Docker images on master pushes (not PRs or main branch)
-    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
       contents: read
       packages: write  # Required for GHCR push
@@ -689,10 +687,12 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create and push multiarch manifest
+        env:
+          IMAGE_TAG: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'latest' }}
         run: |
           docker buildx imagetools create \
             --tag "$REGISTRY_IMAGE:$GITHUB_SHA" \
-            --tag "$REGISTRY_IMAGE:latest" \
+            --tag "$REGISTRY_IMAGE:$IMAGE_TAG" \
             "$REGISTRY_IMAGE@$(cat /tmp/digests/amd64)" \
             "$REGISTRY_IMAGE@$(cat /tmp/digests/arm64)"
 
