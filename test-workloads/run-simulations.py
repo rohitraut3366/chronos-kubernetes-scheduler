@@ -4,15 +4,17 @@ Chronos Scheduler Simulation Runner
 Executes realistic scheduling scenarios to validate bin-packing logic
 """
 
-import yaml  # type: ignore
-import subprocess
-import time
-import sys
+import json
 import os
-import tempfile
 import re
+import subprocess
+import sys
+import tempfile
+import time
 from datetime import datetime, timezone
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional
+
+import yaml  # type: ignore
 
 
 class ChronosSimulator:
@@ -114,6 +116,7 @@ spec:
   containers:
   - name: worker
     image: busybox:latest
+    imagePullPolicy: IfNotPresent
     command: ["sh", "-c", "echo 'Setup pod {pod_name} running for {duration}s on {target_node}'; sleep {duration}"]
     resources:
       requests:
@@ -150,7 +153,8 @@ spec:
   containers:
   - name: worker
     image: alpine:latest
-    command: ["sh", "-c", f"echo 'Test pod {pod_name} running for {duration}s'; sleep {duration}"]
+    imagePullPolicy: IfNotPresent
+    command: ["sh", "-c", "echo 'Test pod {pod_name} running for {duration}s'; sleep {duration}"]
     resources:
       requests:
         cpu: "100m"
@@ -188,7 +192,7 @@ description: "Priority class for QueueSort testing"
 
         try:
             output, code = self.kubectl(
-                ["apply", "-f", yaml_file, "--kubeconfig", "/tmp/kubeconfig"]
+                ["apply", "-f", yaml_file]
             )
             if code == 0:
                 default_msg = " (GLOBAL DEFAULT)" if is_default else ""
@@ -286,7 +290,7 @@ description: "Priority class for QueueSort testing"
 
         try:
             output, code = self.kubectl(
-                ["apply", "-f", yaml_file, "--kubeconfig", "/tmp/kubeconfig"]
+                ["apply", "-f", yaml_file]
             )
             if code == 0:
                 print(
@@ -302,7 +306,7 @@ description: "Priority class for QueueSort testing"
     def cleanup_priority_classes(self) -> bool:
         """Clean up all test priority classes"""
         output, code = self.kubectl(
-            ["get", "priorityclasses", "-o", "name", "--kubeconfig", "/tmp/kubeconfig"]
+            ["get", "priorityclasses", "-o", "name"]
         )
 
         if code == 0:
@@ -325,8 +329,6 @@ description: "Priority class for QueueSort testing"
                     [
                         "delete",
                         pc,
-                        "--kubeconfig",
-                        "/tmp/kubeconfig",
                         "--force",
                         "--grace-period=0",
                     ]
@@ -540,6 +542,7 @@ spec:
   containers:
   - name: worker
     image: alpine:latest
+    imagePullPolicy: IfNotPresent
     command: ["sh", "-c", "echo 'QueueSort test pod {pod_name}'; sleep 3600"]
     resources:
       requests:
@@ -581,7 +584,8 @@ spec:
   containers:
   - name: worker
     image: alpine:latest
-    command: ["sh", "-c", f"echo 'QueueSort test pod {pod_name} running'; sleep {duration or 30}"]
+    imagePullPolicy: IfNotPresent
+    command: ["sh", "-c", "echo 'QueueSort test pod {pod_name} running'; sleep {duration or 30}"]
     resources:
       requests:
         cpu: "100m" 
@@ -962,6 +966,12 @@ spec:
             print("❌ Failed to remove taint")
             return []
 
+        # Binding logs already provide the preferred order when the full set is present.
+        logs_order = self._get_complete_scheduling_order_from_logs(pod_names)
+        if len(logs_order) == len(pod_names):
+            print(f"✅ Using LOGS-based order (most reliable): {logs_order}")
+            return logs_order
+
         # 2. Monitor BOTH events and logs for comprehensive scheduling order detection
         print(
             "⏳ Monitoring BOTH Kubernetes events AND scheduler logs for complete scheduling order..."
@@ -1150,22 +1160,19 @@ spec:
         """Monitor Kubernetes events to get the complete chronological order of all pod scheduling."""
         print("🔍 Monitoring Kubernetes events for pod scheduling order...")
 
-        start_time = time.time()
+        deadline = time.monotonic() + timeout
         scheduled_events = []
 
-        # Give a moment for scheduling to begin
-        time.sleep(3)
-
+        scheduled_pods = set()
         while (
-            len(scheduled_events) < len(pod_names)
-            and (time.time() - start_time) < timeout
+            len(scheduled_pods) < len(pod_names) and time.monotonic() < deadline
         ):
             # Get events in JSON format for better timestamp parsing
             output, code = self.kubectl(
                 [
                     "get",
                     "events",
-                    "--sort-by=.lastTimestamp",
+                    "--field-selector=reason=Scheduled",
                     "-n",
                     self.namespace,
                     "-o",
@@ -1174,11 +1181,9 @@ spec:
             )
 
             if code == 0:
+                current_scheduled = []
                 try:
-                    import json
-
                     events_data = json.loads(output)
-                    current_scheduled = []
 
                     for event in events_data.get("items", []):
                         reason = event.get("reason", "")
@@ -1243,15 +1248,18 @@ spec:
                         scheduled_events.append(event)
 
                 # Check if we have all pods
-                scheduled_pods = [event[1] for event in scheduled_events]
-                if len(set(scheduled_pods)) == len(pod_names):
+                scheduled_pods = {event[1] for event in scheduled_events}
+                if len(scheduled_pods) == len(pod_names):
                     break
 
-            time.sleep(2)
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(self.exec_config.get("polling_interval", 1), remaining))
 
-        if len(scheduled_events) >= len(pod_names):
-            # Sort by timestamp to get chronological order
-            scheduled_events.sort(key=lambda x: x[0])
+        self._last_events_data = scheduled_events
+        if len(scheduled_pods) == len(pod_names):
+            # Sort by timestamp to get chronological order; logs remain preferred.
+            scheduled_events.sort(key=lambda x: x[0] or "")
 
             # Get unique pods in order (in case of duplicates)
             seen_pods = set()
@@ -1293,133 +1301,61 @@ spec:
         print("🔓 All nodes are now schedulable")
         return True
 
+    def _wait_for_pod_phases(
+        self, pod_names: list[str], allowed_phases: set[str], timeout: int = 60
+    ) -> bool:
+        """Check all requested pods with one namespace list per poll."""
+        if not pod_names:
+            return True
+
+        deadline = time.monotonic() + timeout
+        while True:
+            output, code = self.kubectl(
+                ["get", "pods", "-n", self.namespace, "-o", "json"]
+            )
+            phases = {}
+            if code == 0:
+                try:
+                    phases = {
+                        pod["metadata"]["name"]: pod.get("status", {}).get(
+                            "phase", "Unknown"
+                        )
+                        for pod in json.loads(output).get("items", [])
+                    }
+                except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as error:
+                    print(f"⚠️ Failed to parse pod status: {error}")
+            else:
+                print(f"⚠️ Failed to list pods: {output}")
+
+            statuses = {name: phases.get(name, "NotFound") for name in pod_names}
+            ready_count = sum(phase in allowed_phases for phase in statuses.values())
+            print(
+                f"📊 Pods in {sorted(allowed_phases)}: {ready_count}/{len(pod_names)}"
+            )
+            if ready_count == len(pod_names):
+                return True
+
+            for name, phase in statuses.items():
+                if phase in {"Failed", "Succeeded"}:
+                    print(f"❌ Pod {name} reached {phase} before setup completed")
+                    return False
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                print(f"❌ Timeout waiting for pod phases: {statuses}")
+                return False
+            time.sleep(min(self.exec_config.get("polling_interval", 1), remaining))
+
     def _wait_for_all_pods_pending(
         self, pod_names: List[str], timeout: int = 60
     ) -> bool:
-        """Wait for all pods to be in Pending state with verification-based approach."""
-        print(f"⏳ Waiting for all {len(pod_names)} pods to reach Pending state...")
-
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            pending_count = 0
-
-            for pod_name in pod_names:
-                output, code = self.kubectl(
-                    [
-                        "get",
-                        "pod",
-                        pod_name,
-                        "-n",
-                        self.namespace,
-                        "-o",
-                        "jsonpath={.status.phase}",
-                    ]
-                )
-                if code == 0 and output == "Pending":
-                    pending_count += 1
-
-            print(f"📊 Pods in Pending state: {pending_count}/{len(pod_names)}")
-
-            if pending_count == len(pod_names):
-                print("✅ All pods are now in Pending state (queued) - perfect!")
-                return True
-
-            time.sleep(2)  # Check every 2 seconds
-
-        print(
-            f"❌ Timeout: Only {pending_count}/{len(pod_names)} pods reached Pending state"
-        )
-        return False
+        return self._wait_for_pod_phases(pod_names, {"Pending"}, timeout)
 
     def _wait_for_all_pods_pending_or_running(
         self, pod_names: List[str], timeout: int = 60, require_pending: bool = False
     ) -> bool:
-        """Wait for all pods to be in Pending or Running state (more flexible than just Pending)."""
-        if require_pending:
-            print(
-                f"⏳ Waiting for all {len(pod_names)} pods to reach Pending state (due to taint)..."
-            )
-        else:
-            print(
-                f"⏳ Waiting for all {len(pod_names)} pods to reach Pending or Running state..."
-            )
-
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            ready_count = 0
-            failed_count = 0
-            status_summary = {}
-
-            for pod_name in pod_names:
-                output, code = self.kubectl(
-                    [
-                        "get",
-                        "pod",
-                        pod_name,
-                        "-n",
-                        self.namespace,
-                        "-o",
-                        "jsonpath={.status.phase}",
-                    ]
-                )
-                if code == 0:
-                    phase = output.strip()
-                    status_summary[pod_name] = phase
-
-                    if require_pending:
-                        # When require_pending=True, only accept Pending state
-                        if phase == "Pending":
-                            ready_count += 1
-                        elif phase == "Running":
-                            print(
-                                f"⚠️ Pod {pod_name} is Running but should be Pending (taint not working?)"
-                            )
-                        elif phase in ["Failed", "Succeeded"]:
-                            failed_count += 1
-                    else:
-                        # Normal mode: accept both Pending and Running
-                        if phase in ["Pending", "Running"]:
-                            ready_count += 1
-                        elif phase in ["Failed", "Succeeded"]:
-                            failed_count += 1
-                else:
-                    status_summary[pod_name] = "NotFound"
-
-            if require_pending:
-                print(f"📊 Pods in Pending state: {ready_count}/{len(pod_names)}")
-            else:
-                print(
-                    f"📊 Pods ready (Pending/Running): {ready_count}/{len(pod_names)}"
-                )
-
-            if failed_count > 0:
-                print(f"⚠️ Failed pods: {failed_count}")
-
-            # Show detailed status for debugging
-            if ready_count < len(pod_names):
-                print("🔍 Detailed pod status:")
-                for pod_name, status in status_summary.items():
-                    print(f"   {pod_name}: {status}")
-
-            if ready_count == len(pod_names):
-                if require_pending:
-                    print(
-                        "✅ All pods are now Pending (tainted node working correctly)!"
-                    )
-                else:
-                    print("✅ All pods are now ready (Pending/Running) - perfect!")
-                return True
-
-            if failed_count > 0:
-                print(f"❌ {failed_count} pods failed - aborting")
-                return False
-
-            time.sleep(2)
-
-        print(
-            f"❌ Timeout: Only {ready_count}/{len(pod_names)} pods reached ready state"
-        )
-        return False
+        allowed_phases = {"Pending"} if require_pending else {"Pending", "Running"}
+        return self._wait_for_pod_phases(pod_names, allowed_phases, timeout)
 
     def run_queuesort_scenario(
         self, scenario_name: str, scenario: Dict[str, Any]
@@ -1530,10 +1466,6 @@ spec:
             actual_order = self._schedule_pods_naturally_with_taint(
                 pod_names, scenario.get("setup_pods", timed_pods)
             )
-
-            # Wait longer for sequential scheduling to complete
-            print("⏳ Waiting 10s for sequential scheduling to complete...")
-            time.sleep(10)
 
             # Store results for analysis after cleanup
             self._queuesort_results = {
@@ -2038,16 +1970,16 @@ spec:
                 ):
                     return False
 
-        # Wait for setup pods to be running
-        setup_wait = self.exec_config["setup_wait_time"]
-        print(f"⏳ Waiting {setup_wait}s for setup pods to be running...")
-        time.sleep(setup_wait)
+        # Scoring uses setup pods' remaining runtime, so wait for actual startup.
+        setup_pod_names = [
+            pod["name"] for pods in scenario["setup_pods"].values() for pod in pods
+        ]
+        if not self._wait_for_pod_phases(
+            setup_pod_names, {"Running"}, self.exec_config.get("setup_timeout", 60)
+        ):
+            return False
 
-        # Create test pod
         new_pod = scenario["new_pod"]
-        test_wait = self.exec_config["test_wait_time"]
-        print(f"⏳ Waiting {test_wait}s before scheduling test pod...")
-        time.sleep(test_wait)
 
         if not self.create_test_pod(new_pod["name"], new_pod["duration"]):
             return False
@@ -2086,8 +2018,15 @@ spec:
 
         return success
 
-    def run_all_scenarios(self) -> bool:
-        """Run all configured scenarios"""
+    def run_all_scenarios(self, shard_index: int = 0, shard_count: int = 1) -> bool:
+        """Run one disjoint shard; scenarios within a cluster remain sequential."""
+        scenarios = self.config["scenarios"]
+        if not 1 <= shard_count <= len(scenarios):
+            raise ValueError("shard_count must be between 1 and the number of scenarios")
+        if not 0 <= shard_index < shard_count:
+            raise ValueError("shard_index must be between 0 and shard_count - 1")
+        scenarios = dict(list(scenarios.items())[shard_index::shard_count])
+        print(f"Simulation shard {shard_index + 1}/{shard_count}: {', '.join(scenarios)}")
         start_time = time.time()
         print("🚀 Starting Chronos Scheduler Simulation Tests")
 
@@ -2107,7 +2046,6 @@ spec:
             print("❌ Failed to setup priority classes - continuing with basic testing")
             # Don't fail the entire test run, but note this issue
 
-        scenarios = self.config["scenarios"]
         passed = 0
         total = len(scenarios)
 
@@ -2175,11 +2113,24 @@ if __name__ == "__main__":
         "--config", default="simulations.yaml", help="Simulation config file"
     )
     parser.add_argument("--kubeconfig", help="Path to kubeconfig file")
-    parser.add_argument("--scenario", help="Run specific scenario only")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--scenario", help="Run specific scenario only")
+    selection.add_argument("--shard-index", type=int, help="Zero-based simulation shard")
+    parser.add_argument(
+        "--shard-count", type=int, default=1, help="Number of isolated clusters"
+    )
 
     args = parser.parse_args()
 
+    if args.shard_count != 1 and args.shard_index is None:
+        parser.error("--shard-count requires --shard-index")
+
     simulator = ChronosSimulator(args.config, args.kubeconfig)
+    shard_index = args.shard_index if args.shard_index is not None else 0
+    if not 1 <= args.shard_count <= len(simulator.config["scenarios"]):
+        parser.error("--shard-count must be between 1 and the number of scenarios")
+    if not 0 <= shard_index < args.shard_count:
+        parser.error("--shard-index must be between 0 and --shard-count - 1")
 
     if args.scenario:
         # Run single scenario
@@ -2207,5 +2158,5 @@ if __name__ == "__main__":
         sys.exit(0 if success else 1)
     else:
         # Run all scenarios
-        success = simulator.run_all_scenarios()
+        success = simulator.run_all_scenarios(shard_index, args.shard_count)
         sys.exit(0 if success else 1)

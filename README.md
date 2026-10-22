@@ -144,3 +144,28 @@ Real-time scheduling analysis directly in K9s. See [k9s/README.md](k9s/README.md
 
 - Built using the [Kubernetes Scheduler Framework](https://kubernetes.io/docs/concepts/scheduling-eviction/scheduling-framework/)
 - Inspired by production workload optimization needs
+
+## Scheduler simulations
+
+CI runs two integration jobs in parallel, each with an isolated five-node KIND
+cluster named `chronos-test`. Scenario definitions reference that cluster's node
+names. Each job runs alternating scenarios in configuration order, sequentially
+within its cluster. Both jobs must pass before publishing the scheduler image.
+The jobs have separate logs, and each prints its scenario list and elapsed time.
+
+Run the complete suite against a prepared cluster:
+
+```bash
+python3 test-workloads/run-simulations.py --config test-workloads/simulations.yaml --kubeconfig /path/to/kubeconfig
+```
+
+To reproduce CI, run one command on each of **two separate machines**, each
+with its own prepared `chronos-test` cluster:
+
+```bash
+python3 test-workloads/run-simulations.py --config test-workloads/simulations.yaml --kubeconfig /path/to/cluster-a --shard-index 0 --shard-count 2
+python3 test-workloads/run-simulations.py --config test-workloads/simulations.yaml --kubeconfig /path/to/cluster-b --shard-index 1 --shard-count 2
+```
+
+Do not run shards concurrently against the same cluster: scenarios change node
+taints, cordons, and cluster-wide priority classes.

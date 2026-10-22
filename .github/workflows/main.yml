@@ -17,8 +17,13 @@ env:
   REGISTRY_IMAGE: ghcr.io/${{ github.repository_owner }}/chronos-kubernetes-scheduler
 
 jobs:
-  integration-test:
-    name: Full Integration Test
+  integration-shards:
+    name: Full Integration Test (shard ${{ matrix.shard-index }})
+    strategy:
+      fail-fast: false
+      matrix:
+        shard-index: [0, 1]
+    # Each matrix job gets its own runner and five-node KIND cluster.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -536,6 +541,13 @@ jobs:
         echo "📊 Queue sort metrics above are informational and help validate plugin functionality"
         echo "📊 The absence of queue sort logs doesn't indicate failure - it depends on workload patterns"
 
+    - name: Clean up smoke-test workloads
+      run: |
+        export KUBECONFIG=/tmp/kubeconfig
+        # Scoring sees workloads in every namespace, so simulations need clean nodes.
+        kubectl delete pods --all -n integration-test --force --grace-period=0 --wait=true --timeout=60s
+        kubectl delete namespace integration-test --wait=true --timeout=60s
+
     - name: Cache Python dependencies
       uses: actions/cache@v6
       with:
@@ -549,25 +561,30 @@ jobs:
         # Pre-install dependencies for speed
         pip3 install --user PyYAML
         
+    - name: Test simulation runner
+      run: python3 -m unittest discover -s test-workloads -p 'test_*.py' -v
+
     - name: Run Scheduler Logic Simulations
+      env:
+        SIMULATION_SHARD_INDEX: ${{ matrix.shard-index }}
       run: |
         export KUBECONFIG=/tmp/kubeconfig
-        
+
         echo "🧪 Running Chronos Scheduler Logic Simulations..."
         echo "This validates our bin-packing and consolidation logic with real scenarios"
-        
+
         cd test-workloads
-        
+
         # Add debug info before running simulations
         echo "=== PRE-SIMULATION DEBUG INFO ==="
         kubectl get nodes -o wide
         kubectl get pods -A | grep -v "Completed\|Succeeded" | head -10
         kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=10 || echo "No scheduler logs yet"
         echo "=== STARTING SIMULATIONS ==="
-        
-        timeout 30m python3 run-simulations.py --config simulations.yaml --kubeconfig /tmp/kubeconfig || {
+
+        timeout 30m python3 -u run-simulations.py --config simulations.yaml --kubeconfig /tmp/kubeconfig --shard-index "${SIMULATION_SHARD_INDEX}" --shard-count 2 || {
           EXIT_CODE=$?
-          
+
           if [ $EXIT_CODE -eq 124 ]; then
             echo "⚠️ Simulations timed out"
             echo "This suggests scheduling decisions are taking too long or queue sort tests need optimization"
@@ -575,19 +592,19 @@ jobs:
             echo "❌ Simulations failed with exit code: $EXIT_CODE"
             echo "This indicates our scheduling logic doesn't match expected behavior"
           fi
-          
+
           echo "🔍 Recent scheduler logs for debugging:"
           kubectl logs -n chronos-system -l app.kubernetes.io/name=chronos-kubernetes-scheduler --tail=50
-          
+
           echo "🔍 Simulation namespace pods status:"
           kubectl get pods -n simulation-test -o wide || echo "No simulation pods found"
-          
+
           echo "🔍 Recent events in simulation namespace:"
           kubectl get events -n simulation-test --sort-by='.lastTimestamp' | tail -20 || echo "No simulation events found"
-          
+
           exit $EXIT_CODE
         }
-        
+
         echo "✅ Scheduler logic simulations completed successfully!"
 
     - name: Cleanup
@@ -596,6 +613,20 @@ jobs:
         # Show final status
         export KUBECONFIG=/tmp/kubeconfig
         kubectl get pods -A || true
+
+  integration-test:
+    # Keep the required branch-protection check name stable across shard changes.
+    name: Full Integration Test
+    needs: integration-shards
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+    - name: Verify all integration shards passed
+      env:
+        INTEGRATION_RESULT: ${{ needs.integration-shards.result }}
+      run: |
+        echo "Integration shards result: ${INTEGRATION_RESULT}"
+        test "${INTEGRATION_RESULT}" = success
 
   docker-build:
     name: Build & Push Docker Image (${{ matrix.arch }})
