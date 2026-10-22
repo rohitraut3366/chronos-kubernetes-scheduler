@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, mock_open, patch
@@ -446,6 +447,35 @@ class SimulationShardingTests(unittest.TestCase):
             with self.subTest(index=index):
                 self.assertFalse(self.simulator.run_all_scenarios(index, 2))
         self.assertEqual(self.simulator.cleanup_namespace.call_count, 2)
+
+
+class IntegrationWorkflowTests(unittest.TestCase):
+    def test_required_check_passes_only_when_all_shards_succeed(self):
+        workflow = yaml.safe_load(
+            (SIMULATION_DIR.parent / ".github/workflows/main.yml").read_text()
+        )
+        jobs = workflow["jobs"]
+        gate = jobs["integration-test"]
+        self.assertEqual(gate["name"], "Full Integration Test")
+        self.assertEqual(gate["needs"], "integration-shards")
+        self.assertEqual(gate["if"], "always()")
+        self.assertEqual(jobs["docker-build"]["needs"], "integration-test")
+        shards = jobs["integration-shards"]["strategy"]
+        self.assertEqual(shards["matrix"]["shard-index"], [0, 1])
+        self.assertFalse(shards["fail-fast"])
+        step = gate["steps"][0]
+        self.assertEqual(
+            step["env"]["INTEGRATION_RESULT"], "${{ needs.integration-shards.result }}"
+        )
+        for result in ["success", "failure", "cancelled", "skipped", ""]:
+            with self.subTest(result=result):
+                process = subprocess.run(
+                    ["bash", "-e", "-c", step["run"]],
+                    env={"INTEGRATION_RESULT": result},
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(process.returncode == 0, result == "success")
 
 
 if __name__ == "__main__":

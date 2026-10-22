@@ -16,7 +16,7 @@ env:
   GO_VERSION: '1.27.3'
 
 jobs:
-  integration-test:
+  integration-shards:
     name: Full Integration Test (shard ${{ matrix.shard-index }})
     strategy:
       fail-fast: false
@@ -612,6 +612,20 @@ jobs:
         # Show final status
         export KUBECONFIG=/tmp/kubeconfig
         kubectl get pods -A || true
+
+  integration-test:
+    # Keep the required branch-protection check name stable across shard changes.
+    name: Full Integration Test
+    needs: integration-shards
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+    - name: Verify all integration shards passed
+      env:
+        INTEGRATION_RESULT: ${{ needs.integration-shards.result }}
+      run: |
+        echo "Integration shards result: ${INTEGRATION_RESULT}"
+        test "${INTEGRATION_RESULT}" = success
 
   docker-build:
     name: Build & Push Docker Image
