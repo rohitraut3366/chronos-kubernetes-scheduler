@@ -535,6 +535,13 @@ jobs:
         echo "📊 Queue sort metrics above are informational and help validate plugin functionality"
         echo "📊 The absence of queue sort logs doesn't indicate failure - it depends on workload patterns"
 
+    - name: Clean up smoke-test workloads
+      run: |
+        export KUBECONFIG=/tmp/kubeconfig
+        # Scoring sees workloads in every namespace, so simulations need clean nodes.
+        kubectl delete pods --all -n integration-test --force --grace-period=0 --wait=true --timeout=60s
+        kubectl delete namespace integration-test --wait=true --timeout=60s
+
     - name: Cache Python dependencies
       uses: actions/cache@v6
       with:
