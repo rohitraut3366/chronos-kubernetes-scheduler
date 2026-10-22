@@ -1,0 +1,42 @@
+name: Cleanup Container Images
+
+on:
+  schedule:
+    # Sundays at 03:17 UTC (08:47 IST).
+    - cron: '17 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: List deletion candidates without deleting images
+        type: boolean
+        default: true
+
+concurrency:
+  group: cleanup-container-images
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      packages: write
+    steps:
+      # The package must grant this repository Admin access in Manage Actions access.
+      - name: Cleanup old images and their unused platform manifests
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f
+        with:
+          package: chronos-kubernetes-scheduler
+          # Begin with previews. Set repository variable GHCR_CLEANUP_ENABLED=true
+          # after reviewing a dry run to enable scheduled deletion.
+          dry-run: ${{ vars.GHCR_CLEANUP_ENABLED != 'true' || (github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+          use-regex: true
+          # Protect every non-commit tag (including latest and release tags).
+          # Digests must not match: the action also checks exclusions against them.
+          exclude-tags: '^(?![0-9a-f]{40}$|sha256:).+$'
+          # Keep all recent images plus 20 older tagged builds. The action applies
+          # the age filter before the count, so this is deliberately conservative.
+          older-than: 30 days
+          keep-n-tagged: 20
+          delete-untagged: true
+          validate: true
