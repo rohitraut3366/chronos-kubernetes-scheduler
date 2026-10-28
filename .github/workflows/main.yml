@@ -686,7 +686,7 @@ jobs:
           printf '%s' "$IMAGE_DIGEST" >"/tmp/digests/$IMAGE_ARCH"
 
       - name: Upload image digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: image-digest-${{ matrix.arch }}
           path: /tmp/digests/${{ matrix.arch }}
