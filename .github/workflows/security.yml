@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  GO_VERSION: '1.27.3'
+  GO_VERSION: '1.27.4'
 
 permissions:
   contents: read
@@ -52,7 +52,7 @@ jobs:
 
     - name: Run Gosec Security Scanner
       run: |
-        # Pin the upstream Go 1.27.3 compatibility update; v2.29.0 cannot read its export data.
+        # Pin the upstream Go 1.27 compatibility update; v2.29.0 cannot read its export data.
         go install github.com/securego/gosec/v2/cmd/gosec@v2.29.1-0.20261020094257-14ef84f6fecc
         # Run gosec scan with SARIF output
         gosec -fmt sarif -out gosec-results.sarif -exclude-dir=.git -exclude-generated ./...
